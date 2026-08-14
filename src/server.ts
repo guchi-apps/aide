@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
+import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
 
 /**
@@ -16,6 +17,7 @@ const HOST = process.env["HOST"] ?? "127.0.0.1";
 
 const registry = new ToolRegistry();
 registry.register(pingTool);
+registry.register(moneySummaryTool);
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
