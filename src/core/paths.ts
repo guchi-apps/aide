@@ -9,4 +9,11 @@ export const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
  * カレントディレクトリ相対にすると、workerとサーバーで参照先がずれる。
  */
 export const DATA_DIR = resolve(REPO_ROOT, "data");
-export const CACHE_DIR = resolve(DATA_DIR, "cache");
+
+/**
+ * キャッシュの置き場。
+ * テストが本番のキャッシュを汚さないよう、AIDE_CACHE_DIR で差し替えられるようにしている。
+ */
+export const CACHE_DIR = process.env["AIDE_CACHE_DIR"]
+  ? resolve(process.env["AIDE_CACHE_DIR"])
+  : resolve(DATA_DIR, "cache");

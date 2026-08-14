@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-// CACHE_DIR はモジュール定数なので、テストでは pathFor を通さず
-// 公開APIの振る舞い（往復・不在・キー検証）だけを確認する。
+// 本番のキャッシュを汚さないよう、読み込み前に置き場を一時ディレクトリへ差し替える。
+// CACHE_DIR はモジュール読み込み時に確定するため、import より前に設定する必要がある。
+process.env["AIDE_CACHE_DIR"] = await mkdtemp(join(tmpdir(), "aide-cache-test-"));
 const { readCache, writeCache } = await import("./store.ts");
 
 describe("キャッシュ", () => {
