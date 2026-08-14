@@ -1,4 +1,13 @@
 import { createServer } from "node:http";
+import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
+import {
+  authorizationServerMetadata,
+  handleAuthorize,
+  handleRegister,
+  handleToken,
+  protectedResourceMetadata,
+  requireBearer,
+} from "./auth/oauth.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
@@ -7,13 +16,17 @@ import { pingTool } from "./mcp/tools/ping.ts";
 /**
  * AIDE のエントリポイント。
  *
- * MCPサーバー（/mcp）とREST API（/api）を1プロセスで提供する。
+ * MCPサーバー・OAuth認可サーバー・REST APIを1プロセスで提供する。
  * VPSのメモリが2GBしかなく、常駐プロセスを増やしたくないため意図的に分けていない。
- * Playwright等の重い取得処理はここではなく worker 側で動かし、結果をキャッシュ経由で読む。
+ * Playwright等の重い取得処理はここではなく worker 側で動かし、キャッシュ経由で読む。
  */
 
 const PORT = Number(process.env["PORT"] ?? 4747);
 const HOST = process.env["HOST"] ?? "127.0.0.1";
+
+// 起動時に読んで、設定不備ならここで落とす。
+// リクエストが来て初めて「認証が無効だった」と気づく事態を避ける。
+const authConfig = loadAuthConfig();
 
 const registry = new ToolRegistry();
 registry.register(pingTool);
@@ -22,23 +35,64 @@ registry.register(moneySummaryTool);
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
 const server = createServer((req, res) => {
-  const path = new URL(req.url ?? "/", `http://${HOST}:${PORT}`).pathname;
+  void handle(req, res).catch((cause: unknown) => {
+    console.error("[server] 未処理の例外", cause);
+    if (!res.headersSent) res.writeHead(500).end();
+  });
+});
+
+async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameters<typeof handleAuthorize>[1]) {
+  const baseUrl = resolveBaseUrl(req.headers);
+  const url = new URL(req.url ?? "/", baseUrl);
+  const path = url.pathname;
 
   if (path === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok\n");
     return;
   }
+
+  // ---- OAuth ディスカバリ ----
+  // Claudeは接続時にこの3パスを順に叩く（2026-08-14 実測）。
+  // 404を返すと無認証のまま接続を続けてしまうため、必ず応答する。
+  if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") {
+    res
+      .writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" })
+      .end(JSON.stringify(protectedResourceMetadata(baseUrl)));
+    return;
+  }
+  if (path === "/.well-known/oauth-authorization-server") {
+    res
+      .writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" })
+      .end(JSON.stringify(authorizationServerMetadata(baseUrl)));
+    return;
+  }
+
+  // ---- OAuth エンドポイント ----
+  if (path === "/oauth/register" && req.method === "POST") {
+    await handleRegister(req, res);
+    return;
+  }
+  if (path === "/oauth/authorize" && (req.method === "GET" || req.method === "POST")) {
+    await handleAuthorize(req, res, url);
+    return;
+  }
+  if (path === "/oauth/token" && req.method === "POST") {
+    await handleToken(req, res);
+    return;
+  }
+
+  // ---- MCP ----
   if (path === "/mcp") {
-    void mcp.handle(req, res).catch((cause: unknown) => {
-      console.error("[mcp] 未処理の例外", cause);
-      if (!res.headersSent) res.writeHead(500).end();
-    });
+    // プリフライトは認証前に通す。ここで401を返すとブラウザ経由の接続が始まらない。
+    if (req.method !== "OPTIONS" && !(await requireBearer(req, res, baseUrl))) return;
+    await mcp.handle(req, res);
     return;
   }
 
   res.writeHead(404, { "Content-Type": "text/plain" }).end("not found\n");
-});
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`AIDE listening on http://${HOST}:${PORT} (mcp: /mcp)`);
+  console.log(`[auth] 認証: ${authConfig.enabled ? "有効" : "無効"}`);
 });
