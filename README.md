@@ -1,0 +1,162 @@
+# aide
+
+AIDE（エイド）— 生活情報まわりの共通バックエンド／ハブ。
+
+Claudeアプリ等のLLMクライアントに対しては **MCPサーバー** として、既存の個人アプリに対しては **REST API** として、同じデータを提供する。
+
+設計の背景・意思決定は Notion「[AIDE アーキテクチャ構想](https://app.notion.com/p/3ba506de73c381d58c03e0e7676d30b9)」を正本とする。ここにはコードを読むうえで必要な範囲だけ書く。
+
+## 責務
+
+AIDEがやること:
+
+- 外部サービスからの**データ取得**（Zaim、GitHub、Google系、Notion 等）
+- 必要な範囲への**フィルタリング**
+- サービスごとに異なる形式の**共通フォーマットへの整形**
+- 複数ソースを1回の呼び出しに畳んだ**横断ビュー**の提供
+
+AIDEがやらないこと:
+
+- **高コストなAI推論**。意味の解釈・優先順位付け・要約・文章生成は呼び出し側のLLMに渡す。AIDEは取得・選別・整形に徹する
+- **公式MCPと重複する単機能ツールをMCP層に出すこと**（後述）
+
+## Core と MCP層の境界
+
+ここが設計上いちばん間違えやすい。**2つのレイヤーを分けて考える。**
+
+| レイヤー | 対象 | 方針 |
+|---|---|---|
+| Core（`src/core/`） | Notion・Google系・Zaim・GitHub **すべて** | 公式APIを直接叩く。横断ビューとワーカーに必要なので**フルスコープ** |
+| MCP層（`src/mcp/`） | 横断ビュー ＋ 公式MCPが無いもの **のみ** | Claudeアプリには既に公式MCPがある。`aide_get_calendar_events` のような単機能ツールを出すと同じ機能のツールが2セット並び、ツール選択が曖昧になりコンテキストも食う |
+
+Core をフルスコープで作っておけば、MCP層で「出す／出さない」は後からいくらでも変えられる。判断を先送りできるので、**Core は広く、MCP層は狭く**始める。
+
+## 取得と提供の分離
+
+Playwright を使うZaim取得のような重い処理は **worker が定期実行してキャッシュに書き**、MCPサーバー／APIは**キャッシュを読むだけ**にする。
+
+同期リクエスト中にヘッドレスChromiumを起動すると、応答に数十秒かかりメモリも跳ねる。VPSは2GBしかないため、この分離は必須。
+
+- **VPS**: MCPサーバー / REST API / DB（軽量・常時・公開）
+- **サブPC**: Playwright等の重いワーカー（16GB・断続・非公開）→ 結果をHTTPSでVPSへ送る
+
+## 構成
+
+```
+src/
+  server.ts            エントリポイント。/mcp と /api を1プロセスで提供
+  mcp/
+    transport.ts       Streamable HTTP transport
+    registry.ts        ツール登録簿
+    tools/             MCPツール
+  core/
+    connectors/        外部サービスからの取得
+    models/            共通データモデル
+    views/             横断ビュー
+  worker/              定期実行ジョブ
+```
+
+プロセスを1本に絞っているのはメモリ制約のため。パッケージ分割（monorepo化）は規模が育ってから検討する。
+
+## 開発
+
+Node 24 以降が必要（`.ts` を型ストリッピングで直接実行するため、トランスパイル不要）。
+
+```bash
+npm run dev     # node --watch src/server.ts
+npm start
+npm run typecheck
+```
+
+デフォルトで `127.0.0.1:4747` を listen する。`PORT` / `HOST` で変更可。
+
+### Claudeアプリから使う
+
+ローカルの4747を、既存の `dev-tunnel`（Cloudflare Tunnel）経由で公開している。
+
+| | |
+|---|---|
+| 開発用URL | `https://aide-dev.minagu.work/mcp` |
+| tunnel設定 | `~/.cloudflared/config.yml` の ingress。**catch-all より前**に置くこと |
+| 起動 | `cloudflared tunnel run dev-tunnel` |
+
+ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾の `/mcp` が要る。**
+
+接続元はAnthropicのサーバーであり利用者の端末ではないため、**公開到達性が必要**。Tailscaleのみのホストには置けない。
+
+トラブル時:
+
+- **エッジが404を返す** — cloudflaredが `~/.cloudflared/config.yml` を自動で読むため、`--url` を渡してもingressが優先され catch-all に落ちている。一時的なトンネルなら `--config` に空のconfigを渡す
+- **登録は成功するのに配送されない** — QUIC（UDP 7844）が塞がれている。`--protocol http2` で回避
+
+## コネクタ: Zaim
+
+Zaimは残高取得の公式APIが無いため、Playwrightで画面を巡回して取得する。**AIDEが存在する理由そのもの**にあたるコネクタ（公式MCPも公式APIも無い領域）。
+
+```
+src/core/connectors/zaim/
+  parse.ts       生テキスト → 数値化（純粋関数。テストはここに集中する）
+  scrape.ts      子プロセスで巡回スクリプトを起動する
+  scripts/       Playwright本体（子プロセスとして実行）
+    login.mjs        初回の手動ログイン。storage state を保存する
+    scrape.mjs       残高＋証券詳細ページの巡回
+    keep-alive.mjs   セッション延長のみ（軽量）
+```
+
+### 前提
+
+Playwrightは**AIDEの依存に含めない**。実行環境へグローバル導入する。
+
+```bash
+npm install -g playwright && playwright install chromium
+```
+
+package-lock を肥大化させず、ブラウザ実行環境をアプリ本体から分離するため。
+
+### 初回セットアップ
+
+ID・パスワードは保存しない。GUIのある端末で一度だけ手動ログインし、storage state を保存する。
+
+```bash
+node src/core/connectors/zaim/scripts/login.mjs
+```
+
+保存先は既定で `data/zaim/storage-state.json`（**リポジトリ基準**。カレントディレクトリ相対にするとワーカーからの実行時にずれる）。中身はCookieそのものなので `data/` ごと gitignore している。
+
+### セッション
+
+Zaimの認証Cookieは数時間で失効するが、巡回のたびにその時点から延長される。**取得間隔を失効時間より短く保てば手動ログインは不要**。取得を行わない期間は `keep-alive.mjs` で延長だけする。
+
+失効した場合は自動回避せず `ZAIM_SESSION_EXPIRED` で失敗させ、手動ログインをやり直す。CAPTCHAや追加認証を突破しにいかないための方針。
+
+### 呼び出し方
+
+`scrapeZaimSnapshot()` はヘッドレスChromiumを起動するため**数十秒かかる**。MCPやAPIの同期リクエストから直接呼んではいけない。worker から定期実行してキャッシュに書き、参照側はキャッシュを読む。
+
+### asset-manager との境界
+
+| | 置き場所 | 理由 |
+|---|---|---|
+| 巡回・パース | **AIDE** | 「取得」そのもの。他アプリからも再利用する |
+| `Category.valuationAlias` との照合、評価額への反映 | **asset-manager** | 資産管理固有のドメインロジック |
+| 同期を実行できるユーザーの制限 | **asset-manager** | asset-manager の認証・ユーザーモデルに紐づく |
+
+
+## 認証
+
+**現時点では未実装。** Claudeアプリは接続時に次の3パスを叩くが、404を返しても無認証で接続を継続することを実測で確認している（2026-08-14）。
+
+```
+/.well-known/oauth-protected-resource/mcp
+/.well-known/oauth-protected-resource
+/.well-known/oauth-authorization-server
+```
+
+**これは「認証が要らない」という意味ではない。** URLは推測可能な固定ホスト名であり、実データを載せて公開する時点で認証は必須。先送りできるようになっただけで、スコープからは外れていない。
+
+## 本番
+
+| | |
+|---|---|
+| ポート | 3114（vps README の予約済みポートに登録済み） |
+| 想定ドメイン | `aide.gucchii.com` |

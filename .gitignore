@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.local
+*.log
+
+# Zaim のログイン状態。Cookieそのものなので絶対にコミットしない。
+data/
