@@ -2,6 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadAuthConfig, resolveBaseUrl, verifyPassword } from "./config.ts";
 import {
+  allowRegistration,
+  clientKey,
+  FAILURE_DELAY_MS,
+  lockedFor,
+  recordFailure,
+  recordSuccess,
+} from "./ratelimit.ts";
+import {
   addClient,
   addCode,
   addToken,
@@ -84,6 +92,11 @@ export function authorizationServerMetadata(baseUrl: string): unknown {
 // ---- 動的クライアント登録 (RFC 7591) ----
 
 export async function handleRegister(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  // 登録エンドポイントは仕様上未認証で公開される。無制限に受け付けると状態ファイルが膨らむ。
+  if (!allowRegistration(clientKey(req))) {
+    json(res, 429, { error: "too_many_requests", error_description: "登録の回数制限を超えました" });
+    return;
+  }
   const form = await readForm(req);
   const redirectUris = form.getAll("redirect_uris");
   // JSONで {"redirect_uris": [...]} と来る場合、URLSearchParams化でカンマ連結された1件になる。
@@ -171,14 +184,27 @@ export async function handleAuthorize(
     return;
   }
 
+  const key = clientKey(req);
+  const locked = lockedFor(key);
+  if (locked !== null) {
+    res
+      .writeHead(429, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": String(locked) })
+      .end(LOGIN_PAGE(url.searchParams.toString(), `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に再試行してください。`));
+    return;
+  }
+
   const form = await readForm(req);
   if (config.enabled && !verifyPassword(form.get("password") ?? "", config.password!)) {
-    console.warn(`[auth] 認可失敗: client=${client.clientName}`);
+    recordFailure(key);
+    console.warn(`[auth] 認可失敗: client=${client.clientName} from=${key}`);
+    // 機械的な連続試行の速度を落とす。
+    await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
     res
       .writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
       .end(LOGIN_PAGE(url.searchParams.toString(), "パスワードが違います"));
     return;
   }
+  recordSuccess(key);
 
   const code = token();
   await addCode({

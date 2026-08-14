@@ -3,6 +3,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { describe, it } from "node:test";
 import { loadAuthConfig, resolveBaseUrl, verifyPassword } from "./config.ts";
 import { verifyPkce } from "./oauth.ts";
+import {
+  allowRegistration,
+  clientKey,
+  lockedFor,
+  recordFailure,
+  recordSuccess,
+  resetRateLimits,
+} from "./ratelimit.ts";
 
 describe("パスワード照合", () => {
   it("一致する場合のみ true", () => {
@@ -49,5 +57,52 @@ describe("公開URLの解決", () => {
       "https://aide.example.com",
     );
     if (saved) process.env["AIDE_BASE_URL"] = saved;
+  });
+});
+
+describe("総当たり対策", () => {
+  it("既定では制限にかからない", () => {
+    resetRateLimits();
+    assert.equal(lockedFor("1.2.3.4"), null);
+  });
+
+  it("既定回数の失敗でロックされる", () => {
+    resetRateLimits();
+    for (let i = 0; i < 5; i += 1) recordFailure("1.2.3.4");
+    const locked = lockedFor("1.2.3.4");
+    assert.ok(locked !== null && locked > 0, "ロックされるべき");
+  });
+
+  it("ロックは送信元ごとに独立している", () => {
+    resetRateLimits();
+    for (let i = 0; i < 5; i += 1) recordFailure("1.2.3.4");
+    assert.equal(lockedFor("5.6.7.8"), null);
+  });
+
+  it("成功すると失敗回数がリセットされる", () => {
+    resetRateLimits();
+    for (let i = 0; i < 4; i += 1) recordFailure("1.2.3.4");
+    recordSuccess("1.2.3.4");
+    // リセット後は、あと1回の失敗ではロックされない
+    recordFailure("1.2.3.4");
+    assert.equal(lockedFor("1.2.3.4"), null);
+  });
+
+  it("クライアント登録は上限を超えると拒否される", () => {
+    resetRateLimits();
+    for (let i = 0; i < 20; i += 1) {
+      assert.equal(allowRegistration("1.2.3.4"), true, `${i + 1}回目は許可されるべき`);
+    }
+    assert.equal(allowRegistration("1.2.3.4"), false, "21回目は拒否されるべき");
+  });
+
+  it("転送ヘッダから送信元を取り出す", () => {
+    const req = {
+      headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" },
+      socket: { remoteAddress: "10.0.0.1" },
+    } as unknown as Parameters<typeof clientKey>[0];
+    // プロキシ配下では socket のアドレスが全リクエストで同一になり、
+    // 送信元ごとの制限が機能しなくなる。
+    assert.equal(clientKey(req), "203.0.113.9");
   });
 });
