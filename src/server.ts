@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { handleIngest } from "./api/ingest.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -78,6 +79,14 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
   if (path === "/oauth/token" && req.method === "POST") {
     await handleToken(req, res);
+    return;
+  }
+
+  // ---- worker からの取得結果の受け口 ----
+  // MCPのOAuthとは別系統。呼び出し元が自分のworkerに限られるため共有シークレットで足りる。
+  const ingestMatch = /^\/api\/cache\/([a-z0-9][a-z0-9-]*)$/.exec(path);
+  if (ingestMatch && req.method === "POST") {
+    await handleIngest(req, res, ingestMatch[1]!);
     return;
   }
 
