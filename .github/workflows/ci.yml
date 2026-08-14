@@ -39,6 +39,8 @@ jobs:
     needs: [typecheck-and-test]
     if: always()
     runs-on: ubuntu-latest
+    env:
+      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
@@ -70,17 +72,12 @@ jobs:
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Load secrets from 1Password
-        if: steps.status.outputs.should_notify == 'true'
-        uses: 1password/load-secrets-action@v4
-        with:
-          export-env: true
-        env:
-          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          OP_ENV_FILE: .github/ci.env.tpl
-
       - name: Signaly に通知
         if: steps.status.outputs.should_notify == 'true'
+        # 通知はCIの合否そのものではない。ここが失敗してもrun全体を落とさない
+        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。
+        # guchi-apps/issue-deck#1302）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: aide
