@@ -8,6 +8,10 @@ module.exports = {
       name: "aide",
       // Node 24 が .ts を型ストリッピングで直接実行するため、ビルド成果物は無い。
       script: "src/server.ts",
+      // PM2は拡張子から実行系を自動判定し、lib/API/interpreter.json で .ts を "bun" に
+      // 割り当てている。VPSにbunは入れていないため、明示しないと
+      // 「Interpreter bun is NOT AVAILABLE in PATH」で起動に失敗する（#8）。
+      interpreter: "node",
       cwd: path.resolve(__dirname, ".."),
       instances: 1,
       exec_mode: "fork",
