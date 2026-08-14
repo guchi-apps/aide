@@ -1,0 +1,235 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-aide-production
+  cancel-in-progress: true
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Git tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          HEAD_SHA=$(git rev-parse HEAD)
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-parse "$TAG")
+            if [ "$TAG_SHA" = "$HEAD_SHA" ]; then
+              echo "Tag ${TAG} already points to HEAD"
+              exit 0
+            fi
+            echo "::error::Tag ${TAG} already exists on ${TAG_SHA}, but HEAD is ${HEAD_SHA}. Bump package.json version before merging."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: tag
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy.env.tpl
+
+      # ビルド成果物が無いため、ソースをそのまま送る。
+      # Node 24 が .ts を型ストリッピングで直接実行し、実行時依存パッケージも無い。
+      - name: Create archive
+        run: tar -czf deploy.tar.gz src deploy package.json README.md
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ env.SSH_PRIVATE_KEY }}
+          known_hosts: placeholder
+          if_key_exists: replace
+
+      - name: Add known hosts
+        run: ssh-keyscan -p "${SSH_PORT}" -H "${HOST}" >> ~/.ssh/known_hosts
+        env:
+          HOST: ${{ env.HOST }}
+          SSH_PORT: ${{ env.SSH_PORT }}
+
+      - name: Upload archive
+        run: scp -P "${SSH_PORT}" deploy.tar.gz "${USERNAME}@${HOST}:${TARGET_DIR}/deploy.tar.gz"
+        env:
+          HOST: ${{ env.HOST }}
+          USERNAME: ${{ env.USERNAME }}
+          SSH_PORT: ${{ env.SSH_PORT }}
+          TARGET_DIR: ${{ env.TARGET_DIR }}
+
+      - name: Deploy and restart
+        uses: appleboy/ssh-action@v1
+        env:
+          TARGET_DIR: ${{ env.TARGET_DIR }}
+          APP_PORT: ${{ env.PORT }}
+          AIDE_AUTH_PASSWORD: ${{ env.AIDE_AUTH_PASSWORD }}
+          AIDE_BASE_URL: ${{ env.AIDE_BASE_URL }}
+          AIDE_INGEST_SECRET: ${{ env.AIDE_INGEST_SECRET }}
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USERNAME }}
+          key: ${{ env.SSH_PRIVATE_KEY }}
+          port: ${{ env.SSH_PORT }}
+          envs: TARGET_DIR,APP_PORT,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET
+          script: |
+            set -euo pipefail
+            cd "${TARGET_DIR}"
+
+            PORT="${APP_PORT:-3114}"
+
+            # .ts を直接実行するため型ストリッピングが要る（Node 23.6以降で既定有効）。
+            # 古いNodeだと起動時に構文エラーになるだけで原因が分かりにくいので、ここで止める。
+            NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
+            if [ "$NODE_MAJOR" -lt 24 ]; then
+              echo "::error::Node 24 以降が必要です（現在: $(node -v)）"
+              exit 1
+            fi
+
+            echo "Cleaning up old release files..."
+            rm -rf src deploy package.json README.md
+
+            echo "Extracting archive..."
+            tar -xzf deploy.tar.gz
+            rm deploy.tar.gz
+
+            # 認証情報は .env に置く。PM2は .env を自動で読まないため、
+            # ecosystem 側ではなくサーバー起動時に --env-file で読ませる。
+            echo "Writing .env..."
+            umask 077
+            cat > .env <<ENVFILE
+            NODE_ENV=production
+            PORT=${PORT}
+            HOST=127.0.0.1
+            AIDE_AUTH_PASSWORD=${AIDE_AUTH_PASSWORD}
+            AIDE_BASE_URL=${AIDE_BASE_URL}
+            AIDE_INGEST_SECRET=${AIDE_INGEST_SECRET}
+            ENVFILE
+            chmod 600 .env
+
+            echo "Restarting PM2..."
+            if ! command -v pm2 >/dev/null 2>&1; then
+              echo "::error::pm2 が必要です。npm install -g pm2"
+              exit 1
+            fi
+            pm2 delete aide 2>/dev/null || true
+            PORT="$PORT" pm2 start deploy/ecosystem.config.cjs --env production
+            pm2 save
+
+            echo "Health check..."
+            for i in $(seq 1 15); do
+              if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/health"; then
+                echo "Deployment successful."
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Health check failed after 30s."
+            pm2 describe aide || true
+            pm2 logs aide --lines 50 --nostream || true
+            exit 1
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [tag, deploy]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect prerelease
+        id: meta
+        run: |
+          TAG="${{ needs.tag.outputs.tag }}"
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          skip_if_release_exists: true
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [tag, deploy]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine workflow status
+        id: status
+        run: |
+          tag="${{ needs.tag.result }}"
+          deploy="${{ needs.deploy.result }}"
+          if [ "$tag" = "success" ] && [ "$deploy" = "success" ]; then
+            result=success
+          elif [ "$tag" = "cancelled" ] || [ "$deploy" = "cancelled" ]; then
+            result=cancelled
+          else
+            result=failure
+          fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/deploy.env.tpl
+
+      - name: Signaly に通知
+        env:
+          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          NOTIFY_APP: aide
+          NOTIFY_KIND: デプロイ
+          NOTIFY_STATUS: ${{ steps.status.outputs.result }}
+        run: bash .github/scripts/signaly-notify.sh

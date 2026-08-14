@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # AIDEはビルド不要（Node 24 が .ts を型ストリッピングで直接実行する）。
+  # 実行時依存もないため、型チェックとテストだけで足りる。
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+  notify:
+    needs: [typecheck-and-test]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine workflow status
+        id: status
+        run: |
+          job="${{ needs.typecheck-and-test.result }}"
+          if [ "$job" = "success" ]; then
+            result=success
+          elif [ "$job" = "cancelled" ]; then
+            result=cancelled
+          else
+            result=failure
+          fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          if [ "$job" = "success" ]; then
+            echo "jobs=typecheck-and-test" >> "$GITHUB_OUTPUT"
+          else
+            echo "jobs=typecheck-and-test: $job" >> "$GITHUB_OUTPUT"
+          fi
+          # develop への push は失敗時のみ。main 宛のPRは成否とも通知する。
+          if [ "$result" = "failure" ]; then
+            echo "should_notify=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" = "main" ]; then
+            echo "should_notify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_notify=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Load secrets from 1Password
+        if: steps.status.outputs.should_notify == 'true'
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/ci.env.tpl
+
+      - name: Signaly に通知
+        if: steps.status.outputs.should_notify == 'true'
+        env:
+          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          NOTIFY_APP: aide
+          NOTIFY_KIND: CI
+          NOTIFY_STATUS: ${{ steps.status.outputs.result }}
+          NOTIFY_JOB: ${{ steps.status.outputs.jobs }}
+        run: bash .github/scripts/signaly-notify.sh
