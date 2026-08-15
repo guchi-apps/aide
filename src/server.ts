@@ -13,6 +13,7 @@ import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
+import { handleFeaturesPage } from "./web/features.ts";
 
 /**
  * AIDE のエントリポイント。
@@ -47,8 +48,17 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   const url = new URL(req.url ?? "/", baseUrl);
   const path = url.pathname;
 
+  // ルートを増やしたら src/web/features.ts の ENDPOINTS も更新する。
+  // 機能一覧ページはそこだけ静的な宣言で、放置すると実態とずれる唯一の箇所。
+
   if (path === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok\n");
+    return;
+  }
+
+  // 機能一覧。何が使えるかを載せるだけで実データは返さないため、認証は通さない。
+  if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {
+    handleFeaturesPage(res, registry, baseUrl);
     return;
   }
 
