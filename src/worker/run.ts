@@ -1,3 +1,4 @@
+import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
 import { runZaimSync } from "./jobs/zaim-sync.ts";
 
@@ -8,21 +9,24 @@ import { runZaimSync } from "./jobs/zaim-sync.ts";
  *
  * 常駐させずワンショットで実行し、スケジューリングは外（cron / systemd timer / PM2）に任せる。
  * 常駐プロセスを増やさずに済み、失敗しても次回実行で自然に復旧するため。
+ *
+ * ジョブ名と説明は `jobs/catalog.ts` が持つ。ここは runner との対応付けだけを持ち、
+ * `Record<JobName, ...>` の型でカタログとの取りこぼしを防いでいる。
  */
-const JOBS: Record<string, () => Promise<string>> = {
+const RUNNERS: Record<JobName, () => Promise<string>> = {
   "zaim-sync": runZaimSync,
   "zaim-keep-alive": runZaimKeepAlive,
 };
 
 const name = process.argv[2];
-if (!name || !(name in JOBS)) {
-  console.error(`使い方: node src/worker/run.ts <${Object.keys(JOBS).join(" | ")}>`);
+if (!name || !(name in RUNNERS)) {
+  console.error(`使い方: node src/worker/run.ts <${JOB_CATALOG.map((job) => job.name).join(" | ")}>`);
   process.exit(2);
 }
 
 const startedAt = Date.now();
 try {
-  const message = await JOBS[name]!();
+  const message = await RUNNERS[name as JobName]();
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[${name}] ${message}（${seconds}秒）`);
 } catch (cause) {
