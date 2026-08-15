@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { ZAIM_SESSION_EXPIRED, isZaimSessionExpired } from "./errors.ts";
 import { buildZaimSnapshot } from "./parse.ts";
 import type { ZaimRawScrapeResult, ZaimSnapshot } from "./types.ts";
 
@@ -38,9 +39,12 @@ export async function scrapeZaimSnapshot(): Promise<ZaimSnapshot> {
     return buildZaimSnapshot(result);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
-    if (message.includes("ZAIM_SESSION_EXPIRED")) {
+    if (isZaimSessionExpired(message)) {
+      // マーカーを残したまま日本語へ言い換える。落とすと、この失敗が「手動ログインをやり直す
+      // まで直らない失敗」であることを通知側（src/worker/notify.ts）が判別できなくなる。
       throw new Error(
-        "Zaimのログインセッションが失効しています。scripts/login.mjs を実行し直してください。",
+        `Zaimのログインセッションが失効しています（${ZAIM_SESSION_EXPIRED}）。` +
+          "scripts/login.mjs を実行し直してください。",
       );
     }
     throw cause;
