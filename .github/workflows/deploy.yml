@@ -173,6 +173,11 @@ jobs:
             pm2 logs aide --lines 50 --nostream || true
             exit 1
 
+  # GitHub Releaseの作成はこのジョブが担う。**他リポジトリにある独立した release.yml
+  # （タグpushを起点にReleaseを作る）はaideには置かない**（aide#6で判断）。
+  # release.yml が要るのは手動でタグをpushする運用があるリポジトリで、GITHUB_TOKEN起点の
+  # タグpushは他のworkflowを起動しないという仕様の穴埋めが目的。aideのタグは常に上の
+  # tagジョブが作り、その延長でここがReleaseまで作るため、二重に持つ必要がない。
   release:
     runs-on: ubuntu-latest
     needs: [tag, deploy]
