@@ -588,3 +588,26 @@ Claudeは `Anthropic/Toolbox` と `Anthropic/ClaudeAI` の2クライアントで
 |---|---|
 | ポート | 3114（vps README の予約済みポートに登録済み） |
 | 想定ドメイン | `aide.gucchii.com` |
+
+### 環境変数の配線
+
+**本番の `.env` は `deploy.yml` が毎回まるごと上書きする。** VPS上で手で追記した値はデプロイのたびに
+消える。消えても例外にはならず、そのコネクタが「未設定」を返すだけなので、次に呼ぶまで誰も気づけない
+（実際に `AIDE_GITHUB_TOKEN` と `AIDE_OPS_DASHBOARD_TOKEN` がその状態だった。#55）。
+
+実行時に本番で要る値を足すときは、**5か所すべて**に通す。
+
+| # | 場所 | 役割 |
+|---|---|---|
+| 1 | `.github/secrets-manifest.tsv` | 1Password（正）と GitHub secret/variable の対応表 |
+| 2 | `deploy.yml` のジョブの `env:` | GitHub側の値を取り出す。`scripts/generate-workflow-env-block.sh` で生成する |
+| 3 | 「Deploy and restart」ステップの `env:` | SSHアクションへ渡す |
+| 4 | 同ステップの `envs:` | **appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない** |
+| 5 | 同ステップの `.env` heredoc | 実際にVPSへ書き出す |
+
+1Password 側へ値を入れたら `scripts/sync-github-secrets.sh --only <KEY>` で GitHub Secret へ同期する
+（実行時に1Passwordは呼ばない。#1）。トークン類は未発行でもデプロイを止めないよう `${VAR:-}` で書き、
+空ならAIDE側が「未設定」として振る舞う。
+
+この5か所の抜けは `src/deploy-env-wiring.test.ts` が検査する。`src/` が読む `AIDE_*` は、すべて
+配線されているか、テスト内の `NOT_REQUIRED_IN_PRODUCTION` に理由付きで登録されているかのどちらかになる。
