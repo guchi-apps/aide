@@ -79,6 +79,12 @@ const ENDPOINTS: FeatureItem[] = [
     meta: "POST",
     description: "worker が取得結果を送り込む受け口。OAuthとは別系統の共有シークレットで認証する。",
   },
+  {
+    name: "/api/money/summary",
+    meta: "GET",
+    description:
+      "個人アプリ向けの読み取りAPI。aide_money_summary と同じ内容（残高一覧・保有銘柄・取得時刻・経過分数）をJSONで返す。読み取り専用の共有シークレットで認証する。",
+  },
 ];
 
 export function buildSections(registry: ToolRegistry): FeatureSection[] {
@@ -90,7 +96,7 @@ export function buildSections(registry: ToolRegistry): FeatureSection[] {
     },
     {
       title: "HTTPエンドポイント",
-      note: "MCP・OAuth・worker からの取り込み口を1プロセスで提供している。",
+      note: "MCP・OAuth・worker からの取り込み口・個人アプリ向けの読み取りAPIを1プロセスで提供している。",
       items: ENDPOINTS,
     },
     {

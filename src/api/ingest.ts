@@ -1,6 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { writeCache } from "../core/cache/store.ts";
+import { bearerToken, secretMatches } from "./secret.ts";
 
 /**
  * worker からの取得結果の受け口。
@@ -16,16 +16,6 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /** キーは参照側と揃える必要があるため、受け入れるものを明示的に限定する。 */
 const ALLOWED_KEYS = new Set(["zaim-snapshot"]);
-
-function secretMatches(presented: string, expected: string): boolean {
-  const a = Buffer.from(presented, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  if (a.length !== b.length) {
-    timingSafeEqual(b, b);
-    return false;
-  }
-  return timingSafeEqual(a, b);
-}
 
 export function ingestSecret(): string | null {
   return process.env["AIDE_INGEST_SECRET"] || null;
@@ -43,8 +33,7 @@ export async function handleIngest(
     return;
   }
 
-  const header = String(req.headers["authorization"] ?? "");
-  const presented = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  const presented = bearerToken(req);
   if (!presented || !secretMatches(presented, expected)) {
     console.warn(`[ingest] 認証失敗: key=${key}`);
     res.writeHead(401, { "Content-Type": "application/json" })

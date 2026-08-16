@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { handleIngest } from "./api/ingest.ts";
+import { handleMoneySummary } from "./api/read.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -101,6 +102,14 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   const ingestMatch = /^\/api\/cache\/([a-z0-9][a-z0-9-]*)$/.exec(path);
   if (ingestMatch && req.method === "POST") {
     await handleIngest(req, res, ingestMatch[1]!);
+    return;
+  }
+
+  // ---- 個人アプリ向けの読み取りAPI ----
+  // MCPと同じデータをRESTでも出す。こちらもOAuthとは別系統だが、
+  // 読み取り側に書き込み権限を渡さないよう、受け口とはシークレットを分けている。
+  if (path === "/api/money/summary") {
+    await handleMoneySummary(req, res);
     return;
   }
 

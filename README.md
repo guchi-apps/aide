@@ -62,6 +62,10 @@ src/
     transport.ts       Streamable HTTP transport
     registry.ts        ツール登録簿
     tools/             MCPツール
+  api/
+    ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
+    read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary）
+    secret.ts          /api 配下の共有シークレット認証
   core/
     connectors/        外部サービスからの取得
     models/            共通データモデル
@@ -180,6 +184,8 @@ Zaimの認証Cookieは数時間で失効するが、巡回のたびにその時�
 | 巡回・パース | **AIDE** | 「取得」そのもの。他アプリからも再利用する |
 | `Category.valuationAlias` との照合、評価額への反映 | **asset-manager** | 資産管理固有のドメインロジック |
 | 同期を実行できるユーザーの制限 | **asset-manager** | asset-manager の認証・ユーザーモデルに紐づく |
+
+asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読み取りapi)（`GET /api/money/summary`）から受け取る。
 
 
 ## コネクタ: ops-dashboard
@@ -458,6 +464,57 @@ worker ──POST /api/cache/:key──▶ サーバー ──▶ data/cache/
 MCPのOAuthとは別系統で、共有シークレット1本。呼び出し元が自分のworkerに限られるためOAuthは過剰で、issue-deck の dispatch と同じ方式に揃えている。
 
 受け入れるキーはサーバー側で明示的に限定している（任意のキーで書き込めると、参照側が読まないゴミが溜まる）。
+
+
+## 個人アプリ向けの読み取りAPI
+
+Claudeアプリ等へMCPで出しているのと同じデータを、既存の個人アプリへはRESTで出す。実装は `src/api/read.ts`。
+
+| | |
+|---|---|
+| エンドポイント | `GET /api/money/summary` |
+| 返す内容 | `aide_money_summary` と同じ横断ビュー（`buildMoneySummary()`） |
+| 認証 | `Authorization: Bearer $AIDE_READ_SECRET` |
+
+```bash
+curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/money/summary
+```
+
+```jsonc
+{
+  "empty": false,
+  "fetchedAt": "2026-08-16T03:00:00.000Z",
+  "ageMinutes": 120,
+  "stale": false,
+  "totals": { "balances": 1234567, "holdings": 234567 },
+  "balances": [{ "name": "〇〇銀行", "amount": 1000000 }],
+  "holdings": [{ "account": "〇〇証券", "name": "〇〇インデックス", "amount": 234567,
+                 "occurrence": 1, "occurrenceCount": 1 }],
+  "note": "..."
+}
+```
+
+**取得時刻と経過分数を必ず併せて返し、鮮度の判断は呼び出し側に委ねる。** MCP層と同じ方針で、AIDEは
+「古いから返さない」という判断をしない。キャッシュが空でも200を返す（`empty: true`）。まだ一度も巡回して
+いないのは状態であってエラーではなく、呼び出し側が区別できる形で伝わればよい。
+
+### キャッシュを素で返さない理由
+
+`GET /api/cache/:key`（書き込みと対称な形）ではなく横断ビューを出している。外へ見せる契約が1本で済み、
+キャッシュの構造を後から変えられる余地が残る。素で返す口は、必要になった時点で足す。
+
+### 読み取りと書き込みでシークレットを分ける
+
+`AIDE_READ_SECRET` は `AIDE_INGEST_SECRET` とは**別の値**にする。同じ値を使うと、読みたいだけのアプリへ
+キャッシュの書き込み権限まで渡すことになる。未設定なら読み取り口は503を返し、そもそも開かない。
+
+### 公開範囲
+
+呼び出し元（asset-manager 等）は同じVPS上で動くため、**`http://127.0.0.1:3114` で叩く**。外向けのURLを
+経由する必要はない。
+
+ただし `/api` を丸ごと外部から遮断することはできない。worker はサブPCから `POST /api/cache/:key` を
+外向けURLへ送るためで、Apacheで絞るなら `/api/money` だけを対象にする。
 
 
 ## 認証
