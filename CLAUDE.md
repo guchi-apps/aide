@@ -26,6 +26,12 @@
 **Node 24 以上が要る**（`package.json` の `engines` が `>=24`）。それより下では型注釈付きの `.ts` を
 そのまま実行できず、`npm run dev`・`npm start` が起動しない。
 
+**型ストリッピングは「型注釈を消すだけ」で、実行時に別のコードを生む構文は使えない。**
+`tsc --noEmit` は通るのに実行時だけ `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` で落ちるため、
+型チェックだけでは気づけない。該当するのは constructor 引数への修飾子（parameter property。
+`constructor(readonly x: string)`）・`enum`・`namespace`・実装付き `declare` など。
+フィールドは明示的に宣言する。
+
 `dependencies` は空で、`devDependencies` は `typescript` と `@types/node` の2つだけ。**実行時依存を
 増やさない方針**なので、依存を足す判断は下記「依存関係の追加」に従う。
 
