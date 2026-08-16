@@ -67,6 +67,7 @@ jobs:
       TARGET_DIR: ${{ secrets.TARGET_DIR }}
       AIDE_AUTH_PASSWORD: ${{ secrets.AIDE_AUTH_PASSWORD }}
       AIDE_INGEST_SECRET: ${{ secrets.AIDE_INGEST_SECRET }}
+      AIDE_SUBSCRIPTIONS_TOKEN: ${{ secrets.AIDE_SUBSCRIPTIONS_TOKEN }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
       PORT: ${{ vars.PORT }}
       AIDE_BASE_URL: ${{ vars.AIDE_BASE_URL }}
@@ -109,12 +110,13 @@ jobs:
           AIDE_AUTH_PASSWORD: ${{ env.AIDE_AUTH_PASSWORD }}
           AIDE_BASE_URL: ${{ env.AIDE_BASE_URL }}
           AIDE_INGEST_SECRET: ${{ env.AIDE_INGEST_SECRET }}
+          AIDE_SUBSCRIPTIONS_TOKEN: ${{ env.AIDE_SUBSCRIPTIONS_TOKEN }}
         with:
           host: ${{ env.HOST }}
           username: ${{ env.USERNAME }}
           key: ${{ env.SSH_PRIVATE_KEY }}
           port: ${{ env.SSH_PORT }}
-          envs: TARGET_DIR,APP_PORT,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET
+          envs: TARGET_DIR,APP_PORT,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_SUBSCRIPTIONS_TOKEN
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
@@ -138,6 +140,10 @@ jobs:
 
             # 認証情報は .env に置く。PM2は .env を自動で読まないため、
             # ecosystem 側ではなくサーバー起動時に --env-file で読ませる。
+            #
+            # **このファイルは毎回まるごと上書きされる。** サーバー上で手で足した値は残らないため、
+            # 実行時に要る値はここへ書くこと。AIDE_SUBSCRIPTIONS_TOKEN は未発行でも
+            # デプロイを止めないよう空で書き、AIDE側は未設定として振る舞う（aide#27）。
             echo "Writing .env..."
             umask 077
             cat > .env <<ENVFILE
@@ -147,6 +153,7 @@ jobs:
             AIDE_AUTH_PASSWORD=${AIDE_AUTH_PASSWORD}
             AIDE_BASE_URL=${AIDE_BASE_URL}
             AIDE_INGEST_SECRET=${AIDE_INGEST_SECRET}
+            AIDE_SUBSCRIPTIONS_TOKEN=${AIDE_SUBSCRIPTIONS_TOKEN:-}
             ENVFILE
             chmod 600 .env
 

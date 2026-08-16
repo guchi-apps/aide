@@ -47,7 +47,7 @@ Playwright を使うZaim取得のような重い処理は **worker が定期実�
 
 | | 分離する | 都度叩く |
 |---|---|---|
-| 例 | Zaim巡回（Playwright・十数秒・メモリが跳ねる） | ops-dashboard（localhostへのHTTP GET・数ミリ秒） |
+| 例 | Zaim巡回（Playwright・十数秒・メモリが跳ねる） | ops-dashboard・subscription-lists（localhostへのHTTP GET・数ミリ秒） |
 | 判断 | 同期リクエストに載せるとVPSが持たない | 載せても問題なく、キャッシュのほうが害になる |
 
 都度叩く場合は**短いタイムアウトを必ず掛ける**（相手が落ちてもMCPツールが固まらないように）。
@@ -108,7 +108,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | ツール | 内容 |
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
-| `aide_money_summary` | 資産・残高の現況。キャッシュを読むだけで取得はしない。取得時刻と経過分数を併せて返す |
+| `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細 |
 
@@ -230,6 +230,56 @@ CPU 100% を「いま高負荷」として報告してしまう。
 
 `ok`（判定できた範囲で異常なし）と `complete`（全ソースを取得できた）は別に返す。1本だけ落ちるケース
 （1Password CLIが無い等）は普通に起きるため、全体を失敗にすると「他は正常だった」という情報まで失う。
+
+
+## コネクタ: subscription-lists
+
+月額固定費（サブスクリプション）と次の支払予定。**AIDEは契約情報を持たない。**
+[subscription-lists](https://github.com/guchi-apps/subscription-lists) が既に管理しているため、
+サーバー間参照用の読み取りAPI（`GET /api/internal/subscriptions`）を叩いて `aide_money_summary` の
+`fixedCosts` に畳むだけにしている。ops-dashboard と同じ「既にある集約を横断ビューへ畳む」ケース。
+
+```
+src/core/connectors/subscriptions/
+  types.ts   subscription-lists のレスポンスのうち、AIDEが使うフィールドだけを再宣言
+  index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
+src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summarizeFixedCosts は純粋関数。テストはここ）
+```
+
+### 経路
+
+両方とも同じVPS上で動くため **localhost で届き、subscription-lists を外部公開する必要がない**。
+`fetch` しか使わないので実行時依存も増えない。
+
+| 環境変数 | 未設定のとき | 設定したとき |
+|---|---|---|
+| `AIDE_SUBSCRIPTIONS_URL` | `http://127.0.0.1:3107` | そのURLへ問い合わせる |
+| `AIDE_SUBSCRIPTIONS_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+
+トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
+止まる）。取得に失敗しても Zaim 由来の残高・保有銘柄は従来どおり返す。失敗の理由はHTTPステータスと
+例外の種別まで丸める（例外の `message` にはURLが載るため）。
+
+### 計算はしない
+
+月額換算・次回支払日・契約状況は**相手が計算済みで返す**。月末クランプ（`billingDay=31` の2月）・
+料金改定履歴の期間切り替え・請求サイクルの判定は向こうの `src/lib/billing.ts` にあり、こちらで
+再実装すれば必ずズレる。仕様は subscription-lists の
+[`docs/internal-api.md`](https://github.com/guchi-apps/subscription-lists/blob/develop/docs/internal-api.md)。
+
+**基準日（`referenceDate`）は日本時間で渡す。** VPSのタイムゾーンはUTCで、渡さないと日本時間の
+00:00〜09:00 が前日基準で計算される。
+
+### 返す粒度と、totals へ足さない理由
+
+通貨別の月額合計・契約ごとの明細・**31日以内の支払予定**まで。契約IDや支払方法・ラベルは返さない
+（詳細は subscription-lists の画面がある）。
+
+`MoneySummary.totals`（残高・保有銘柄）へは**足さない**。あちらは「いま持っている額」（ストック）で
+固定費は「毎月出ていく額」（フロー）にあたり、同じ合計に混ぜると意味が壊れる。
+
+通貨は `JPY` / `USD` の混在を許すため、**合計は通貨別**で返す。円換算値（`monthlyJpy`）は相手が
+Frankfurter のレートで計算した参考値で、取得できていなければ `null` になる。
 
 
 ## コネクタ: GitHub
