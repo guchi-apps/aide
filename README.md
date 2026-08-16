@@ -47,7 +47,7 @@ Playwright を使うZaim取得のような重い処理は **worker が定期実�
 
 | | 分離する | 都度叩く |
 |---|---|---|
-| 例 | Zaim巡回（Playwright・十数秒・メモリが跳ねる） | ops-dashboard（localhostへのHTTP GET・数ミリ秒） |
+| 例 | Zaim巡回（Playwright・十数秒・メモリが跳ねる） | ops-dashboard・subscription-lists（localhostへのHTTP GET・数ミリ秒） |
 | 判断 | 同期リクエストに載せるとVPSが持たない | 載せても問題なく、キャッシュのほうが害になる |
 
 都度叩く場合は**短いタイムアウトを必ず掛ける**（相手が落ちてもMCPツールが固まらないように）。
@@ -62,6 +62,10 @@ src/
     transport.ts       Streamable HTTP transport
     registry.ts        ツール登録簿
     tools/             MCPツール
+  api/
+    ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
+    read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary）
+    secret.ts          /api 配下の共有シークレット認証
   core/
     connectors/        外部サービスからの取得
     models/            共通データモデル
@@ -108,7 +112,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | ツール | 内容 |
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
-| `aide_money_summary` | 資産・残高の現況。キャッシュを読むだけで取得はしない。取得時刻と経過分数を併せて返す |
+| `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細 |
 
@@ -181,6 +185,8 @@ Zaimの認証Cookieは数時間で失効するが、巡回のたびにその時�
 | `Category.valuationAlias` との照合、評価額への反映 | **asset-manager** | 資産管理固有のドメインロジック |
 | 同期を実行できるユーザーの制限 | **asset-manager** | asset-manager の認証・ユーザーモデルに紐づく |
 
+asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読み取りapi)（`GET /api/money/summary`）から受け取る。
+
 
 ## コネクタ: ops-dashboard
 
@@ -230,6 +236,56 @@ CPU 100% を「いま高負荷」として報告してしまう。
 
 `ok`（判定できた範囲で異常なし）と `complete`（全ソースを取得できた）は別に返す。1本だけ落ちるケース
 （1Password CLIが無い等）は普通に起きるため、全体を失敗にすると「他は正常だった」という情報まで失う。
+
+
+## コネクタ: subscription-lists
+
+月額固定費（サブスクリプション）と次の支払予定。**AIDEは契約情報を持たない。**
+[subscription-lists](https://github.com/guchi-apps/subscription-lists) が既に管理しているため、
+サーバー間参照用の読み取りAPI（`GET /api/internal/subscriptions`）を叩いて `aide_money_summary` の
+`fixedCosts` に畳むだけにしている。ops-dashboard と同じ「既にある集約を横断ビューへ畳む」ケース。
+
+```
+src/core/connectors/subscriptions/
+  types.ts   subscription-lists のレスポンスのうち、AIDEが使うフィールドだけを再宣言
+  index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
+src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summarizeFixedCosts は純粋関数。テストはここ）
+```
+
+### 経路
+
+両方とも同じVPS上で動くため **localhost で届き、subscription-lists を外部公開する必要がない**。
+`fetch` しか使わないので実行時依存も増えない。
+
+| 環境変数 | 未設定のとき | 設定したとき |
+|---|---|---|
+| `AIDE_SUBSCRIPTIONS_URL` | `http://127.0.0.1:3107` | そのURLへ問い合わせる |
+| `AIDE_SUBSCRIPTIONS_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+
+トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
+止まる）。取得に失敗しても Zaim 由来の残高・保有銘柄は従来どおり返す。失敗の理由はHTTPステータスと
+例外の種別まで丸める（例外の `message` にはURLが載るため）。
+
+### 計算はしない
+
+月額換算・次回支払日・契約状況は**相手が計算済みで返す**。月末クランプ（`billingDay=31` の2月）・
+料金改定履歴の期間切り替え・請求サイクルの判定は向こうの `src/lib/billing.ts` にあり、こちらで
+再実装すれば必ずズレる。仕様は subscription-lists の
+[`docs/internal-api.md`](https://github.com/guchi-apps/subscription-lists/blob/develop/docs/internal-api.md)。
+
+**基準日（`referenceDate`）は日本時間で渡す。** VPSのタイムゾーンはUTCで、渡さないと日本時間の
+00:00〜09:00 が前日基準で計算される。
+
+### 返す粒度と、totals へ足さない理由
+
+通貨別の月額合計・契約ごとの明細・**31日以内の支払予定**まで。契約IDや支払方法・ラベルは返さない
+（詳細は subscription-lists の画面がある）。
+
+`MoneySummary.totals`（残高・保有銘柄）へは**足さない**。あちらは「いま持っている額」（ストック）で
+固定費は「毎月出ていく額」（フロー）にあたり、同じ合計に混ぜると意味が壊れる。
+
+通貨は `JPY` / `USD` の混在を許すため、**合計は通貨別**で返す。円換算値（`monthlyJpy`）は相手が
+Frankfurter のレートで計算した参考値で、取得できていなければ `null` になる。
 
 
 ## コネクタ: GitHub
@@ -410,6 +466,57 @@ MCPのOAuthとは別系統で、共有シークレット1本。呼び出し元�
 受け入れるキーはサーバー側で明示的に限定している（任意のキーで書き込めると、参照側が読まないゴミが溜まる）。
 
 
+## 個人アプリ向けの読み取りAPI
+
+Claudeアプリ等へMCPで出しているのと同じデータを、既存の個人アプリへはRESTで出す。実装は `src/api/read.ts`。
+
+| | |
+|---|---|
+| エンドポイント | `GET /api/money/summary` |
+| 返す内容 | `aide_money_summary` と同じ横断ビュー（`buildMoneySummary()`） |
+| 認証 | `Authorization: Bearer $AIDE_READ_SECRET` |
+
+```bash
+curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/money/summary
+```
+
+```jsonc
+{
+  "empty": false,
+  "fetchedAt": "2026-08-16T03:00:00.000Z",
+  "ageMinutes": 120,
+  "stale": false,
+  "totals": { "balances": 1234567, "holdings": 234567 },
+  "balances": [{ "name": "〇〇銀行", "amount": 1000000 }],
+  "holdings": [{ "account": "〇〇証券", "name": "〇〇インデックス", "amount": 234567,
+                 "occurrence": 1, "occurrenceCount": 1 }],
+  "note": "..."
+}
+```
+
+**取得時刻と経過分数を必ず併せて返し、鮮度の判断は呼び出し側に委ねる。** MCP層と同じ方針で、AIDEは
+「古いから返さない」という判断をしない。キャッシュが空でも200を返す（`empty: true`）。まだ一度も巡回して
+いないのは状態であってエラーではなく、呼び出し側が区別できる形で伝わればよい。
+
+### キャッシュを素で返さない理由
+
+`GET /api/cache/:key`（書き込みと対称な形）ではなく横断ビューを出している。外へ見せる契約が1本で済み、
+キャッシュの構造を後から変えられる余地が残る。素で返す口は、必要になった時点で足す。
+
+### 読み取りと書き込みでシークレットを分ける
+
+`AIDE_READ_SECRET` は `AIDE_INGEST_SECRET` とは**別の値**にする。同じ値を使うと、読みたいだけのアプリへ
+キャッシュの書き込み権限まで渡すことになる。未設定なら読み取り口は503を返し、そもそも開かない。
+
+### 公開範囲
+
+呼び出し元（asset-manager 等）は同じVPS上で動くため、**`http://127.0.0.1:3114` で叩く**。外向けのURLを
+経由する必要はない。
+
+ただし `/api` を丸ごと外部から遮断することはできない。worker はサブPCから `POST /api/cache/:key` を
+外向けURLへ送るためで、Apacheで絞るなら `/api/money` だけを対象にする。
+
+
 ## 認証
 
 ClaudeアプリからリモートMCPサーバーへ接続するための OAuth 2.1 を実装している。認可サーバーとリソースサーバーを同一プロセスに置いている（利用者が1人で、分ける利点がないため）。
@@ -481,3 +588,26 @@ Claudeは `Anthropic/Toolbox` と `Anthropic/ClaudeAI` の2クライアントで
 |---|---|
 | ポート | 3114（vps README の予約済みポートに登録済み） |
 | 想定ドメイン | `aide.gucchii.com` |
+
+### 環境変数の配線
+
+**本番の `.env` は `deploy.yml` が毎回まるごと上書きする。** VPS上で手で追記した値はデプロイのたびに
+消える。消えても例外にはならず、そのコネクタが「未設定」を返すだけなので、次に呼ぶまで誰も気づけない
+（実際に `AIDE_GITHUB_TOKEN` と `AIDE_OPS_DASHBOARD_TOKEN` がその状態だった。#55）。
+
+実行時に本番で要る値を足すときは、**5か所すべて**に通す。
+
+| # | 場所 | 役割 |
+|---|---|---|
+| 1 | `.github/secrets-manifest.tsv` | 1Password（正）と GitHub secret/variable の対応表 |
+| 2 | `deploy.yml` のジョブの `env:` | GitHub側の値を取り出す。`scripts/generate-workflow-env-block.sh` で生成する |
+| 3 | 「Deploy and restart」ステップの `env:` | SSHアクションへ渡す |
+| 4 | 同ステップの `envs:` | **appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない** |
+| 5 | 同ステップの `.env` heredoc | 実際にVPSへ書き出す |
+
+1Password 側へ値を入れたら `scripts/sync-github-secrets.sh --only <KEY>` で GitHub Secret へ同期する
+（実行時に1Passwordは呼ばない。#1）。トークン類は未発行でもデプロイを止めないよう `${VAR:-}` で書き、
+空ならAIDE側が「未設定」として振る舞う。
+
+この5か所の抜けは `src/deploy-env-wiring.test.ts` が検査する。`src/` が読む `AIDE_*` は、すべて
+配線されているか、テスト内の `NOT_REQUIRED_IN_PRODUCTION` に理由付きで登録されているかのどちらかになる。

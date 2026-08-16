@@ -48,7 +48,14 @@ describe("機能一覧ページ", () => {
 
   it("HTTPエンドポイントが載る", () => {
     const html = render(registryWith(pingTool));
-    for (const path of ["/mcp", "/features", "/health", "/oauth/token", "/api/cache/:key"]) {
+    for (const path of [
+      "/mcp",
+      "/features",
+      "/health",
+      "/oauth/token",
+      "/api/cache/:key",
+      "/api/money/summary",
+    ]) {
       assert.ok(html.includes(path), `${path} が出力に含まれていない`);
     }
   });
