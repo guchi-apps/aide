@@ -12,10 +12,13 @@ process.env["AIDE_WORKER_STATE_DIR"] = STATE_DIR;
 const {
   buildFailurePayload,
   buildRecoveryPayload,
+  buildStaleAccountsPayload,
   decideNotification,
   notifyJobFailure,
   notifyJobRecovered,
+  notifyStaleAccounts,
   readState,
+  staleAccountsSignature,
   summarizeFailure,
 } = await import("./notify.ts");
 
@@ -272,5 +275,93 @@ describe("送信と記録", () => {
     } finally {
       process.env["AIDE_SIGNALY_WEBHOOK_URL"] = url;
     }
+  });
+
+  it("ジョブの失敗とは別の記録に残し、互いに消し合わない", async () => {
+    await notifyJobFailure("zaim-refresh", new Error("壊れました"));
+    await notifyStaleAccounts("zaim-refresh", [{ name: "ゆうちょ銀行", lastUpdatedAt: null }]);
+    assert.equal(received.length, 2);
+
+    const state = await readState();
+    assert.ok(state["zaim-refresh"]);
+    assert.ok(state["zaim-refresh:stale-accounts"]);
+
+    // ジョブ自体が成功しても、口座の更新漏れは解消していない。
+    await notifyJobRecovered("zaim-refresh");
+    assert.equal((await readState())["zaim-refresh"], undefined);
+    assert.ok((await readState())["zaim-refresh:stale-accounts"]);
+  });
+
+  it("同じ口座が落ち続けている間は抑制し、直ったら1回だけ知らせる", async () => {
+    const accounts = [{ name: "ゆうちょ銀行", lastUpdatedAt: null }];
+    await notifyStaleAccounts("zaim-refresh", accounts);
+    await notifyStaleAccounts("zaim-refresh", accounts);
+    assert.equal(received.length, 1);
+    assert.equal((await readState())["zaim-refresh:stale-accounts"]?.count, 2);
+
+    await notifyStaleAccounts("zaim-refresh", []);
+    assert.equal(received.length, 2);
+    assert.equal((await readState())["zaim-refresh:stale-accounts"], undefined);
+
+    // 全部更新できている日常では何も送らない。
+    await notifyStaleAccounts("zaim-refresh", []);
+    assert.equal(received.length, 2);
+  });
+
+  it("落ちている口座の顔ぶれが変われば抑制しない", async () => {
+    await notifyStaleAccounts("zaim-refresh", [{ name: "ゆうちょ銀行", lastUpdatedAt: null }]);
+    await notifyStaleAccounts("zaim-refresh", [
+      { name: "ゆうちょ銀行", lastUpdatedAt: null },
+      { name: "Coincheck", lastUpdatedAt: null },
+    ]);
+    assert.equal(received.length, 2);
+  });
+
+  it("送信できなければ通知済みにしない", async () => {
+    respondWith = 500;
+    await notifyStaleAccounts("zaim-refresh", [{ name: "ゆうちょ銀行", lastUpdatedAt: null }]);
+    assert.equal((await readState())["zaim-refresh:stale-accounts"]?.notifiedAt, null);
+
+    respondWith = 200;
+    await notifyStaleAccounts("zaim-refresh", [{ name: "ゆうちょ銀行", lastUpdatedAt: null }]);
+    assert.equal(received.length, 2);
+  });
+});
+
+describe("更新できなかった口座の通知", () => {
+  const occurredAt = new Date("2026-08-16T14:20:00.000Z");
+
+  it("顔ぶれが同じなら並び順が違っても同じ署名になる", () => {
+    const a = staleAccountsSignature([
+      { name: "ゆうちょ銀行", lastUpdatedAt: null },
+      { name: "Coincheck", lastUpdatedAt: null },
+    ]);
+    const b = staleAccountsSignature([
+      { name: "Coincheck", lastUpdatedAt: null },
+      { name: "ゆうちょ銀行", lastUpdatedAt: null },
+    ]);
+    assert.equal(a, b);
+    // 顔ぶれが変われば署名も変わる（抑制せずに知らせたいため）。
+    assert.notEqual(a, staleAccountsSignature([{ name: "Coincheck", lastUpdatedAt: null }]));
+  });
+
+  it("口座名と最終更新、AIDE側では直せないことが分かる形にする", () => {
+    const payload = buildStaleAccountsPayload({
+      job: "zaim-refresh",
+      accounts: [
+        { name: "ゆうちょ銀行", lastUpdatedAt: "2024-12-18T10:00:00+09:00" },
+        { name: "Coincheck", lastUpdatedAt: null },
+      ],
+      occurredAt,
+      record: recordAt({ count: 1 }),
+    });
+    const [embed] = payload.embeds;
+
+    assert.match(embed.title, /更新できなかった口座/);
+    const listed = embed.fields.find((f) => f.name === "更新できなかった口座")?.value ?? "";
+    assert.match(listed, /ゆうちょ銀行: 2024-12-18 10:00:00 JST/);
+    // 最終更新を読めなかった口座も落とさない。
+    assert.match(listed, /Coincheck: 不明/);
+    assert.match(embed.fields.find((f) => f.name === "対応")?.value ?? "", /Zaim/);
   });
 });
