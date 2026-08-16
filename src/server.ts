@@ -11,6 +11,7 @@ import {
 } from "./auth/oauth.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
+import { devStatusTool } from "./mcp/tools/dev.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
@@ -35,6 +36,7 @@ const registry = new ToolRegistry();
 registry.register(pingTool);
 registry.register(moneySummaryTool);
 registry.register(opsStatusTool);
+registry.register(devStatusTool);
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
