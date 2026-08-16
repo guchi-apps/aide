@@ -19,8 +19,12 @@ import type {
  * `fetch` しか使わないので実行時依存も増えない。方式は aide#27 と同じ。
  *
  * ops-dashboard 側の読み取りAPIは元々ログインセッション必須で、サーバー間用の
- * トークン認証は guchi-apps/ops-dashboard#85 で追加する。それが入るまで、ここは
- * 401 を受けて「取得できなかった」を返す。
+ * トークン認証は guchi-apps/ops-dashboard#85 で追加済み（`requireSessionOrApiToken`）。
+ *
+ * **6ソースすべてが 401 になるときは、AIDE側の設定漏れではなく値のずれを疑う。**
+ * トークンは ops-dashboard の `OPS_API_TOKEN` と同じ値である必要があるが、1Passwordでは
+ * 別項目（`op://apps/aide/ops-dashboard-token` と `op://apps/ops-dashboard/ops-api-token`）
+ * として管理しているため、片方だけ更新すると静かに全滅する（#63）。
  */
 
 /** ops-dashboard は同じVPS上のPM2プロセス（ポート3110）。 */

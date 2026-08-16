@@ -1,0 +1,12 @@
+[Unit]
+Description=AIDE: Zaimの巡回（日次）
+
+[Timer]
+# subpc のシステムTZは UTC のため、JSTを明示する。
+# 早朝に置く理由は、issue-deck の並行ビルドと競合せず、朝の時点で当日のデータが揃うこと。
+OnCalendar=*-*-* 05:00:00 Asia/Tokyo
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

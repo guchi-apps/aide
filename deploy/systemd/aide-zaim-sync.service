@@ -1,0 +1,15 @@
+[Unit]
+# Zaimを巡回してキャッシュを更新する。ヘッドレスChromiumを起動するため十数秒かかる。
+Description=AIDE: Zaimの巡回とキャッシュ更新
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# 巡回本体のタイムアウトは300秒。最悪の経路は (300秒 × 3) + 40秒の待ち +
+# 自動再ログイン180秒 + 再実行300秒 ≒ 24分。日次なので30分を上限にしておけば足りる。
+TimeoutStartSec=30min
+
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts zaim-sync'

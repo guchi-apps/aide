@@ -1,0 +1,21 @@
+[Unit]
+# Zaimの認証Cookieは約2時間で失効し、アクセスのたびにその時点から延長される。
+# 巡回を行わない時間帯もこれを回して、手動ログインなしで維持する。
+Description=AIDE: Zaimセッションの延長
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# ジョブ側は一時的な失敗を最大3回・合計40秒の待ちで再試行し、セッション失効時は
+# 自動再ログイン（資格情報がある場合）を挟む。Type=oneshot の既定は無制限なので、
+# 万一ぶら下がっても次の実行までに必ず終わるよう明示する。
+# 最悪の経路は (120秒 × 3) + 40秒の待ち + 自動再ログイン180秒 + 再実行120秒 ≒ 12分。
+# タイマーは30分ごとなので、次の実行に重ならない15分を上限にする。
+TimeoutStartSec=15min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+# 素の ExecStart=node ... で書くと手元では動くのに再起動後に動かない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts zaim-keep-alive'

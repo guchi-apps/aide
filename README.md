@@ -141,8 +141,11 @@ Zaimは残高取得の公式APIが無いため、Playwrightで画面を巡回し
 src/core/connectors/zaim/
   parse.ts       生テキスト → 数値化（純粋関数。テストはここに集中する）
   scrape.ts      子プロセスで巡回スクリプトを起動する
+  retry.ts       再試行と自動再ログインの「判断」（純粋関数。テストはここ）
+  session.ts     子プロセスの起動と、失敗時の回復（再試行・自動再ログイン）
   scripts/       Playwright本体（子プロセスとして実行）
     login.mjs        初回の手動ログイン。storage state を保存する
+    auto-login.mjs   ID・パスワードによる自動ログイン（任意機能）
     scrape.mjs       残高＋証券詳細ページの巡回
     keep-alive.mjs   セッション延長のみ（軽量）
 ```
@@ -159,7 +162,7 @@ package-lock を肥大化させず、ブラウザ実行環境をアプリ本体�
 
 ### 初回セットアップ
 
-ID・パスワードは保存しない。GUIのある端末で一度だけ手動ログインし、storage state を保存する。
+GUIのある端末で一度だけ手動ログインし、storage state を保存する。
 
 ```bash
 node src/core/connectors/zaim/scripts/login.mjs
@@ -169,9 +172,30 @@ node src/core/connectors/zaim/scripts/login.mjs
 
 ### セッション
 
-Zaimの認証Cookieは数時間で失効するが、巡回のたびにその時点から延長される。**取得間隔を失効時間より短く保てば手動ログインは不要**。取得を行わない期間は `keep-alive.mjs` で延長だけする。
+Zaimの認証Cookieは**約2時間**で失効するが、アクセスのたびにその時点から延長される。つまり**維持できるかどうかは「2時間以内に1回でも成功したか」だけで決まる**。取得を行わない期間は `keep-alive.mjs` で延長だけする。
 
-失効した場合は自動回避せず `ZAIM_SESSION_EXPIRED` で失敗させ、手動ログインをやり直す。CAPTCHAや追加認証を突破しにいかないための方針。
+**この「1回でも成功したか」が曲者で、単発の失敗がそのままセッション喪失になっていた**（#63）。以前は `zaim-keep-alive` が毎時1回きり・再試行なしで、最悪間隔が1時間5分あった。2026-08-16 に瞬間的なネットワーク断（`net::ERR_ADDRESS_UNREACHABLE`）で1回落ち、次の実行が2時間1分後になった時点で失効している。いまは次の3段で守っている。
+
+| 段 | 何をするか | どこ |
+|---|---|---|
+| 再試行 | 一時的な失敗（ネットワーク断・タイムアウト等）を最大3回・合計40秒の待ちでやり直す | `retry.ts` / `session.ts` |
+| 間隔の余裕 | 30分ごと（揺らぎ2分）に回し、最悪間隔を32分にする。3回続けて失敗しても2時間に間に合う | `deploy/systemd/` |
+| 自動再ログイン | 失効を検知したら、資格情報がある場合だけ**1度だけ**ログインし直してやり直す | `auto-login.mjs` |
+
+**セッション失効は再試行しない。** やり直しても同じ結果になるため、`isRetriableZaimFailure()` で切り分けて即座に次の手（自動再ログイン）へ移る。
+
+### 自動再ログイン（任意機能）
+
+`ZAIM_EMAIL` と `ZAIM_PASSWORD` の**両方**が設定されている環境でだけ有効になる。片方だけの設定は設定漏れとみなし、未設定として扱う。
+
+- 未設定なら従来どおり `ZAIM_SESSION_EXPIRED` で失敗させ、手動ログインをやり直す。**開発機・CIではこちらが既定**
+- **CAPTCHAや追加認証を突破しにいかない方針は変えていない。** `auto-login.mjs` は追加認証を検知したら素直に失敗し、呼び出し側は元の `ZAIM_SESSION_EXPIRED` を投げ直す。通知は従来どおり「手動ログインが必要」として届く
+- 自動再ログインは**1回きり**。ログインし直しても失効するなら（資格情報が古い等）諦める。ログインと失効を往復させないため
+- 資格情報の値は `session.ts` では読まない（設定の有無だけを見る）。子プロセスへ環境変数として渡し、ログ・通知・例外メッセージには出さない
+
+値の正は1Passwordに置くが、**実行時に1Password CLIは呼ばない**（#1）。worker が動くサブPCの `.env` へ人が転記する。VPS側には要らない（VPSはキャッシュを読むだけ）。
+
+ログイン画面は `id.kufu.jp` のSSOで構成が変わりうるため、セレクタは `ZAIM_LOGIN_EMAIL_SELECTOR` / `ZAIM_LOGIN_PASSWORD_SELECTOR` / `ZAIM_LOGIN_SUBMIT_SELECTOR` で上書きできる。未設定なら `type` / `name` 属性から総当たりで探す。
 
 ### 呼び出し方
 
@@ -218,8 +242,21 @@ src/core/views/ops.ts        しきい値判定と圧縮（summarizeOps は純�
 HTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
 
 **ops-dashboard 側の読み取りAPIは元々ログインセッション必須**で、サーバー間用のトークン認証は
-[ops-dashboard#85](https://github.com/guchi-apps/ops-dashboard/issues/85) で追加する。それが入るまで
-401 を受けるため、このツールは「取得できなかった」を返す（AIDE側は先行してマージしてよい）。
+[ops-dashboard#85](https://github.com/guchi-apps/ops-dashboard/issues/85) で追加済み
+（`requireSessionOrApiToken`）。
+
+#### 全ソースが 401 になるとき
+
+**トークンは同じ値を2か所で別々に管理している。** ここがずれると6ソースすべてが 401 になる（#63）。
+
+| どちら側 | 環境変数 | 1Password |
+|---|---|---|
+| ops-dashboard（受け） | `OPS_API_TOKEN` | `op://apps/ops-dashboard/ops-api-token` |
+| AIDE（送り） | `AIDE_OPS_DASHBOARD_TOKEN` | `op://apps/aide/ops-dashboard-token` |
+
+`unavailable` が **1本だけ** 401 なら ops-dashboard 側のルート追加漏れ、**6本すべて** 401 なら
+値の不一致か、ops-dashboard 側で `OPS_API_TOKEN` が未設定（未設定だとトークン経路は常に不可）。
+`configured: true` なのに全滅している場合は、AIDE側の設定漏れではなく**値のずれ**を疑う。
 
 ### 返す粒度
 
@@ -404,12 +441,27 @@ npm run worker zaim-keep-alive  # セッション延長のみ（軽い、毎時�
 
 Zaimの認証Cookieは**約2時間**で失効し、アクセスのたびにその時点から延長される。したがって **2時間以内に必ず1回はZaimへアクセスする必要がある**。
 
-| ジョブ | 間隔 | 理由 |
-|---|---|---|
-| `zaim-keep-alive` | 毎時 | 有効期間2時間に対して2倍の余裕を取る |
-| `zaim-sync` | 日次 | 資産評価額は日次で足りる。Zaimへのアクセスを無駄に増やさない |
+| ジョブ | 間隔 | 最悪間隔 | 理由 |
+|---|---|---|---|
+| `zaim-keep-alive` | 30分ごと | 32分 | 有効期間2時間に対し、**3回続けて失敗しても間に合う**余裕を取る |
+| `zaim-sync` | 日次 | — | 資産評価額は日次で足りる。Zaimへのアクセスを無駄に増やさない |
+
+「最悪間隔」は `RandomizedDelaySec` を含めた実際の空き時間。**ここを2時間より十分短く保つことが要件**で、毎時（最悪1時間5分）では1回失敗しただけで超えていた（#63）。
 
 **このスケジューリングは常時起動のホストに置く必要がある。** 開発機（メインPC）は常時起動しない前提のため、セッションを維持できない。本番では subpc が担う。
+
+### systemdユニット
+
+ユニットは `deploy/systemd/` にある。**実行場所はサブPCの `~/.config/systemd/user/`** で、リポジトリからは自動反映されない（VPSへの `deploy.yml` が触るのはサーバー側だけ）。間隔を変えたら手で反映する。
+
+```bash
+cp deploy/systemd/*.timer deploy/systemd/*.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-sync.timer
+systemctl --user list-timers 'aide-*'
+```
+
+以前はユニットがリポジトリの外にしか無く、間隔がなぜその値なのかを追えなかったため、実体をこちらへ移している。
 
 ### ジョブ失敗の通知
 
