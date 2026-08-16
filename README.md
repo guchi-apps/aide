@@ -110,6 +110,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
 | `aide_money_summary` | 資産・残高の現況。キャッシュを読むだけで取得はしない。取得時刻と経過分数を併せて返す |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
+| `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細 |
 
 
 ## 機能一覧ページ
@@ -229,6 +230,86 @@ CPU 100% を「いま高負荷」として報告してしまう。
 
 `ok`（判定できた範囲で異常なし）と `complete`（全ソースを取得できた）は別に返す。1本だけ落ちるケース
 （1Password CLIが無い等）は普通に起きるため、全体を失敗にすると「他は正常だった」という情報まで失う。
+
+
+## コネクタ: GitHub
+
+各リポジトリの開発状況。ClaudeアプリにはGitHubのコネクタが無い（接続済みは Notion・Gmail・
+Googleカレンダー・Googleドライブ・AIDE）ため、GitHubは「Core と MCP層の境界」でいう
+**公式MCPが無いもの**にあたる。Zaimと同じ位置づけ。
+
+```
+src/core/connectors/github/
+  types.ts   GraphQLレスポンスのうちAIDEが使うフィールドだけ再宣言
+  query.ts   クエリ。取得内容は RepoStatus フラグメント1つに集約している
+  index.ts   POST /graphql と、失敗理由の丸め
+src/core/views/dev.ts        対象の選別と圧縮（summarizeDev は純粋関数。テストはここ）
+```
+
+### AIDEを唯一の取得口にはしない
+
+GitHub取得は既に3実装ある。**AIDEはこれらを置き換えない。**
+
+| リポジトリ | 用途 |
+|---|---|
+| `issue-deck` | GitHub Appでの認証、Issue/PR操作、Actions、webhook。**書き込みを伴う** |
+| `ops-dashboard` | Actions残枠 |
+| `portfolio` | 公開用のリポジトリ情報取り込み |
+
+issue-deck はGitHub Appの認証・webhook受信・書き込みが本体で、AIDE経由にすると往復が増えるだけ。
+AIDEが持つのは**読み取り専用の横断ビュー**に限る。
+
+### 返す粒度
+
+**状態の俯瞰まで。ソースコードやREADMEの本文は返さない**（aide#32 で確定）。ファイル取得の
+ツールは追加しない。返す量が大きくなるうえ「MCP層は狭く」の方針とぶつかる。コードの詳細は
+Claude Code（CLI）とissue-deckが担当する。
+
+ツールは**1本だけ**（`aide_dev_status`）。「全体の俯瞰」と「1リポジトリの詳細」を別ツールに割ると
+ツール選択が曖昧になるため、引数 `repo` の有無で深さを切り替えている。
+
+`attention` に注意点が1行ずつ入り、これだけ読めば答えられるようにしている。しきい値は
+`src/core/views/dev.ts` の `DEFAULTS` にまとめてある。
+
+### RESTではなくGraphQLを使う理由
+
+対象が26リポジトリあり、RESTだと**同じ内容に約80リクエスト**かかる（リポジトリごとに
+compare・releases・commits・issues）。GraphQLなら**1リクエスト・実測2ポイント**で済む
+（上限は1時間5000ポイント）。`fetch` で `POST /graphql` するだけなので実行時依存も増えない。
+
+### 落とし穴
+
+- **`compare` の向きが直感に反する。** `defaultBranchRef.compare(headRef:"main")` は
+  base=デフォルトブランチ / head=main なので、**`behindBy` が「未リリースのコミット数」**に
+  あたる（`aheadBy` は main 側だけにあるコミット数）。RESTの `compare/main...develop` の
+  `ahead_by` と一致することを確認済み。テストで固定してある
+- **`main` が無いリポジトリでは `compare` が NOT_FOUND を返す。** `master` 運用のリポジトリで
+  普通に起きる安定した状態なので、取得失敗として数えない（数えると `complete` が恒久的に
+  false になり、本物の失敗が埋もれる）
+- **詳細モードで組織全体を引かない。** 全リポジトリを深く掘るクエリはGitHub側の処理が重く、
+  実測で5秒のタイムアウトに掛かった。コストではなく応答時間の問題。1リポジトリだけを引く
+  クエリに分けてある（約1秒）
+- 俯瞰は実測3〜4秒かかる（うち `compare` だけで約1.4秒）。タイムアウトは10秒に取っている
+
+### 設定
+
+| 環境変数 | 未設定のとき |
+|---|---|
+| `AIDE_GITHUB_TOKEN` | 取得を試みず「未設定」を返す |
+| `AIDE_GITHUB_ORG` | `guchi-apps` |
+| `AIDE_GITHUB_REPOS` | archived を除き、直近 `AIDE_GITHUB_ACTIVE_DAYS` 日にpushがあったものを自動で拾う |
+| `AIDE_GITHUB_ACTIVE_DAYS` | `90` |
+
+トークンは**認証情報として扱う**。ログにもMCPのレスポンスにも出さない。取得失敗の理由は
+HTTPステータスと例外の種別まで丸める。GraphQLの `errors` も `message` は載せず、
+どのリポジトリのどのフィールドかと種別だけを返す（`message` に内部の構成が載ることがあるため）。
+
+fine-grained PAT を使う。必要な権限は Metadata / Contents / Issues / Pull requests / Actions の
+**read のみ**。GitHub App は採らなかった（読み取り専用の用途に対して、秘密鍵の保管と
+JWT署名→インストールトークン交換の実装が重い）。
+
+キャッシュは挟まず**都度叩く**。1リクエストで済み、レート制限にも余裕があり、
+「いまどうなっているか」という問いに対してキャッシュの古さは害にしかならない。
 
 
 ## キャッシュと worker
