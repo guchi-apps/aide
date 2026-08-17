@@ -1,5 +1,6 @@
 import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
+import { runZaimRefresh } from "./jobs/zaim-refresh.ts";
 import { runZaimSync } from "./jobs/zaim-sync.ts";
 import { notifyJobFailure, notifyJobRecovered } from "./notify.ts";
 
@@ -15,6 +16,7 @@ import { notifyJobFailure, notifyJobRecovered } from "./notify.ts";
  * `Record<JobName, ...>` の型でカタログとの取りこぼしを防いでいる。
  */
 const RUNNERS: Record<JobName, () => Promise<string>> = {
+  "zaim-refresh": runZaimRefresh,
   "zaim-sync": runZaimSync,
   "zaim-keep-alive": runZaimKeepAlive,
 };

@@ -1,0 +1,13 @@
+[Unit]
+Description=AIDE: Zaimの連携口座を一括更新（日次 23:15 JST）
+
+[Timer]
+# subpc のシステムTZは UTC のため、JSTを明示する。
+# 押してから各金融機関への再取得が反映されるまで5〜15分かかる。24時までにその日の最終
+# データを確定させるための逆算で23:15に置き、20分後の aide-zaim-sync が巡回する（#62）。
+OnCalendar=*-*-* 23:15:00 Asia/Tokyo
+Persistent=true
+# RandomizedDelaySec は置かない（理由は aide-zaim-sync.timer と同じ）。
+
+[Install]
+WantedBy=timers.target

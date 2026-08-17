@@ -1,12 +1,16 @@
 [Unit]
-Description=AIDE: Zaimの巡回（日次）
+Description=AIDE: Zaimの巡回（日次 23:35 JST）
 
 [Timer]
 # subpc のシステムTZは UTC のため、JSTを明示する。
-# 早朝に置く理由は、issue-deck の並行ビルドと競合せず、朝の時点で当日のデータが揃うこと。
-OnCalendar=*-*-* 05:00:00 Asia/Tokyo
+# 23:35 に置く理由は、23:15 の aide-zaim-refresh が押した更新の反映（5〜15分）を待って
+# から巡回し、**その日のうちに**当日の残高を確定させること（#62）。以前は05:00 JSTだったが、
+# その時刻では更新ボタンを押した当日ぶんが翌日のキャッシュにしか載らなかった。
+OnCalendar=*-*-* 23:35:00 Asia/Tokyo
 Persistent=true
-RandomizedDelaySec=10min
+# RandomizedDelaySec は置かない。aide-zaim-refresh との20分の間隔が「更新の反映を待つ」
+# 根拠そのもので、両方に揺らぎを入れると順序が入れ替わりうる。日次1回なのでZaim側への
+# アクセスが集中する心配もない。
 
 [Install]
 WantedBy=timers.target

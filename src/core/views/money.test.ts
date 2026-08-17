@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { summarizeFixedCosts } from "./money.ts";
+import { summarizeAccountFreshness, summarizeFixedCosts } from "./money.ts";
 import { tokyoDate } from "../connectors/subscriptions/index.ts";
 import type { Subscription, SubscriptionsSnapshot } from "../connectors/subscriptions/types.ts";
 
@@ -138,6 +138,62 @@ describe("summarizeFixedCosts", () => {
     assert.equal(view.count, 0);
     assert.deepEqual(view.monthlyByCurrency, []);
     assert.deepEqual(view.upcoming, []);
+  });
+});
+
+describe("summarizeAccountFreshness", () => {
+  // UTC 2026-08-16 14:40 は JST 2026-08-16 23:40（巡回が終わる時刻）。
+  const now = new Date("2026-08-16T14:40:00.000Z");
+
+  it("全口座が当日に更新されていれば何も断らない", () => {
+    const view = summarizeAccountFreshness(
+      [
+        { name: "三菱UFJ銀行", lastUpdatedAt: "2026-08-16T23:20:00+09:00" },
+        { name: "SBI証券", lastUpdatedAt: "2026-08-16T23:25:00+09:00" },
+      ],
+      now,
+    );
+
+    assert.deepEqual(view.staleAccounts, []);
+    assert.equal(view.note, null);
+  });
+
+  it("当日でない口座を並べ、記録の判断は呼び出し側に委ねると書く", () => {
+    const view = summarizeAccountFreshness(
+      [
+        { name: "三菱UFJ銀行", lastUpdatedAt: "2026-08-16T23:20:00+09:00" },
+        { name: "ゆうちょ銀行", lastUpdatedAt: "2024-12-18T10:00:00+09:00" },
+      ],
+      now,
+    );
+
+    assert.deepEqual(
+      view.staleAccounts.map((account) => account.name),
+      ["ゆうちょ銀行"],
+    );
+    assert.match(view.note ?? "", /ゆうちょ銀行/);
+    assert.match(view.note ?? "", /呼び出し側で判断/);
+  });
+
+  it("口座が多い場合は先頭だけ並べて残りは件数で示す", () => {
+    const accounts = Array.from({ length: 8 }, (_, index) => ({
+      name: `口座${index + 1}`,
+      lastUpdatedAt: "2026-08-15T23:20:00+09:00",
+    }));
+
+    const view = summarizeAccountFreshness(accounts, now);
+
+    assert.equal(view.staleAccounts.length, 8);
+    assert.match(view.note ?? "", /ほか3件/);
+    assert.equal(view.note?.includes("口座6"), false);
+  });
+
+  it("最終更新を持たない古いキャッシュでは、その旨だけを断る", () => {
+    // この項目を持たない時期の巡回結果がキャッシュに残っていることがある。
+    const view = summarizeAccountFreshness([], now);
+
+    assert.deepEqual(view.staleAccounts, []);
+    assert.match(view.note ?? "", /取得できていない/);
   });
 });
 
