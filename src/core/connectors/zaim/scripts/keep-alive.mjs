@@ -1,5 +1,6 @@
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
+import { assertLoggedIn } from "./session-check.mjs"
 
 /**
  * Zaimのセッション維持だけを行う。
@@ -27,10 +28,7 @@ const page = await context.newPage()
 try {
     await page.goto(balanceUrl, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT })
 
-    const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim()
-    if (/ログイン|メールアドレス|パスワード/.test(bodyText) && !/残高|総残高|評価額/.test(bodyText)) {
-        throw new Error(`ZAIM_SESSION_EXPIRED:${page.url()}`)
-    }
+    await assertLoggedIn(page)
 
     await context.storageState({ path: statePath })
     console.log("✅ Zaimのセッションを延長しました")

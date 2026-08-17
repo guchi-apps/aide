@@ -1,5 +1,7 @@
+import { readOnlineAccounts, resolveOnlineAccountsUrl } from "./online-accounts.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
+import { assertLoggedIn } from "./session-check.mjs"
 
 const PAGE_TIMEOUT = 60_000
 const DEFAULT_SECURITIES_LINK_SELECTOR = 'a[href*="/securities/"]'
@@ -129,13 +131,6 @@ async function resolveAccountName(page, linkName, accountNameSelector) {
     return page.url()
 }
 
-async function assertLoggedIn(page) {
-    const bodyText = collapseWhitespace(await page.locator("body").innerText())
-    if (/ログイン|メールアドレス|パスワード/.test(bodyText) && !/残高|総残高|評価額/.test(bodyText)) {
-        throw new Error(`ZAIM_SESSION_EXPIRED:${page.url()}`)
-    }
-}
-
 const { chromium } = await loadPlaywright()
 const statePath = resolveStatePath()
 const balanceUrl = process.env.ZAIM_BALANCE_URL
@@ -205,11 +200,27 @@ try {
         securities.push({ url: securitiesUrl, account, holdings })
     }
 
+    // 連携口座の最終更新（#62）。Zaimは更新ボタンを押すまで再取得しないため、巡回できた
+    // ことと中身が当日のものであることは別。当日の値として扱ってよいかを参照側が判断できる
+    // ように持ち帰る。**ここが読めなくても残高・保有銘柄は返せるので巡回自体は失敗させない。**
+    let onlineAccounts = []
+    try {
+        await page.goto(resolveOnlineAccountsUrl(), {
+            waitUntil: "networkidle",
+            timeout: PAGE_TIMEOUT,
+        })
+        await assertLoggedIn(page)
+        onlineAccounts = await readOnlineAccounts(page)
+    } catch (error) {
+        // stdout はJSON専用なので stderr へ出す。
+        console.error("連携口座の最終更新を取得できませんでした", error)
+    }
+
     // Zaimの認証Cookieは数時間で失効する。巡回のたびに更新後のCookieを保存し直すことで、
     // 同期間隔が失効までの時間より短い限り、手動ログインなしでセッションを維持できる。
     await context.storageState({ path: statePath })
 
-    process.stdout.write(JSON.stringify({ url: balanceUrl, balances, securities }))
+    process.stdout.write(JSON.stringify({ url: balanceUrl, balances, securities, onlineAccounts }))
 } finally {
     await browser.close()
 }

@@ -9,7 +9,8 @@ import type {
   SubscriptionCurrency,
   SubscriptionsSnapshot,
 } from "../connectors/subscriptions/types.ts";
-import type { ZaimSnapshot } from "../connectors/zaim/types.ts";
+import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
+import type { ZaimOnlineAccount, ZaimSnapshot } from "../connectors/zaim/types.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 
 /** これを超えたら鮮度が怪しいとみなす。巡回は日次想定。 */
@@ -79,6 +80,17 @@ export interface MoneySummary {
   totals: { balances: number; holdings: number } | null;
   balances: ZaimSnapshot["balances"];
   holdings: ZaimSnapshot["holdings"];
+  /**
+   * 連携口座とZaim側の「最終更新」。**`fetchedAt`（AIDEが巡回した時刻）とは別物。**
+   * Zaimは更新ボタンを押すまで各金融機関から再取得しないため、巡回が新しくても
+   * 中身が何日も前のことがある。
+   */
+  onlineAccounts: ZaimOnlineAccount[];
+  /**
+   * そのうち最終更新が当日（JST）でないもの。**当日の資産額として記録するかどうかは
+   * 呼び出し側が決める**（AIDEは取得した事実だけを持つ）。
+   */
+  staleAccounts: ZaimOnlineAccount[];
   /** 月額固定費。ストックである残高とは別建てで返す。 */
   fixedCosts: FixedCostsView;
   note: string;
@@ -118,6 +130,42 @@ function fixedCostsUnavailable(reason: string): FixedCostsView {
     note:
       "月額固定費を取得できなかったため、以下の残高・保有銘柄だけで判断すること。" +
       "固定費が無いという意味ではない。",
+  };
+}
+
+/** 通知やnoteに口座名を並べるときの上限。全部並べるとnoteが読めなくなる。 */
+const LISTED_STALE_ACCOUNTS_MAX = 5;
+
+/**
+ * 連携口座の鮮度を畳む。**純粋関数。**
+ *
+ * 「当日でない口座がある」ことは伝えるが、その残高を使うか捨てるかは決めない。
+ * 評価は asset-manager 側のドメインロジックにあたる（README「asset-manager との境界」）。
+ */
+export function summarizeAccountFreshness(
+  onlineAccounts: readonly ZaimOnlineAccount[],
+  now: Date,
+): { staleAccounts: ZaimOnlineAccount[]; note: string | null } {
+  if (onlineAccounts.length === 0) {
+    // 古いキャッシュ（この項目を持たない巡回結果）でもここへ来る。
+    return {
+      staleAccounts: [],
+      note: "連携口座の最終更新は取得できていないため、balances・holdings の lastUpdatedAt はすべて null になっている。",
+    };
+  }
+
+  const staleAccounts = findStaleZaimAccounts(onlineAccounts, now);
+  if (staleAccounts.length === 0) return { staleAccounts, note: null };
+
+  const listed = staleAccounts.slice(0, LISTED_STALE_ACCOUNTS_MAX).map((account) => account.name);
+  if (staleAccounts.length > listed.length) {
+    listed.push(`ほか${staleAccounts.length - listed.length}件`);
+  }
+  return {
+    staleAccounts,
+    note:
+      `Zaim側の最終更新が当日でない連携口座が ${staleAccounts.length} 件ある（${listed.join("・")}）。` +
+      "これらの残高は当日の値ではないため、当日の資産額として記録するかは呼び出し側で判断すること。",
   };
 }
 
@@ -226,6 +274,8 @@ export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySu
       totals: null,
       balances: [],
       holdings: [],
+      onlineAccounts: [],
+      staleAccounts: [],
       fixedCosts,
       note: "残高・保有銘柄はまだ一度も取得していない。worker の zaim-sync ジョブを実行する必要がある。",
     };
@@ -241,6 +291,11 @@ export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySu
     );
   }
 
+  // この項目を持たない時期のキャッシュが残っていることがある（キャッシュはデプロイをまたぐ）。
+  const onlineAccounts = cached.data.onlineAccounts ?? [];
+  const freshness = summarizeAccountFreshness(onlineAccounts, now);
+  if (freshness.note) notes.push(freshness.note);
+
   return {
     empty: false,
     fetchedAt: cached.fetchedAt,
@@ -249,6 +304,8 @@ export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySu
     totals: { balances: sum(cached.data.balances), holdings: sum(cached.data.holdings) },
     balances: cached.data.balances,
     holdings: cached.data.holdings,
+    onlineAccounts,
+    staleAccounts: freshness.staleAccounts,
     fixedCosts,
     note: notes.join(" "),
   };

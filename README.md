@@ -141,8 +141,11 @@ Zaimは残高取得の公式APIが無いため、Playwrightで画面を巡回し
 src/core/connectors/zaim/
   parse.ts       生テキスト → 数値化（純粋関数。テストはここに集中する）
   scrape.ts      子プロセスで巡回スクリプトを起動する
+  retry.ts       再試行と自動再ログインの「判断」（純粋関数。テストはここ）
+  session.ts     子プロセスの起動と、失敗時の回復（再試行・自動再ログイン）
   scripts/       Playwright本体（子プロセスとして実行）
     login.mjs        初回の手動ログイン。storage state を保存する
+    auto-login.mjs   ID・パスワードによる自動ログイン（任意機能）
     scrape.mjs       残高＋証券詳細ページの巡回
     keep-alive.mjs   セッション延長のみ（軽量）
 ```
@@ -159,7 +162,7 @@ package-lock を肥大化させず、ブラウザ実行環境をアプリ本体�
 
 ### 初回セットアップ
 
-ID・パスワードは保存しない。GUIのある端末で一度だけ手動ログインし、storage state を保存する。
+GUIのある端末で一度だけ手動ログインし、storage state を保存する。
 
 ```bash
 node src/core/connectors/zaim/scripts/login.mjs
@@ -169,19 +172,69 @@ node src/core/connectors/zaim/scripts/login.mjs
 
 ### セッション
 
-Zaimの認証Cookieは数時間で失効するが、巡回のたびにその時点から延長される。**取得間隔を失効時間より短く保てば手動ログインは不要**。取得を行わない期間は `keep-alive.mjs` で延長だけする。
+Zaimの認証Cookieは**約2時間**で失効するが、アクセスのたびにその時点から延長される。つまり**維持できるかどうかは「2時間以内に1回でも成功したか」だけで決まる**。取得を行わない期間は `keep-alive.mjs` で延長だけする。
 
-失効した場合は自動回避せず `ZAIM_SESSION_EXPIRED` で失敗させ、手動ログインをやり直す。CAPTCHAや追加認証を突破しにいかないための方針。
+**この「1回でも成功したか」が曲者で、単発の失敗がそのままセッション喪失になっていた**（#63）。以前は `zaim-keep-alive` が毎時1回きり・再試行なしで、最悪間隔が1時間5分あった。2026-08-16 に瞬間的なネットワーク断（`net::ERR_ADDRESS_UNREACHABLE`）で1回落ち、次の実行が2時間1分後になった時点で失効している。いまは次の3段で守っている。
+
+| 段 | 何をするか | どこ |
+|---|---|---|
+| 再試行 | 一時的な失敗（ネットワーク断・タイムアウト等）を最大3回・合計40秒の待ちでやり直す | `retry.ts` / `session.ts` |
+| 間隔の余裕 | 30分ごと（揺らぎ2分）に回し、最悪間隔を32分にする。3回続けて失敗しても2時間に間に合う | `deploy/systemd/` |
+| 自動再ログイン | 失効を検知したら、資格情報がある場合だけ**1度だけ**ログインし直してやり直す | `auto-login.mjs` |
+
+**セッション失効は再試行しない。** やり直しても同じ結果になるため、`isRetriableZaimFailure()` で切り分けて即座に次の手（自動再ログイン）へ移る。
+
+### 自動再ログイン（任意機能）
+
+`ZAIM_EMAIL` と `ZAIM_PASSWORD` の**両方**が設定されている環境でだけ有効になる。片方だけの設定は設定漏れとみなし、未設定として扱う。
+
+- 未設定なら従来どおり `ZAIM_SESSION_EXPIRED` で失敗させ、手動ログインをやり直す。**開発機・CIではこちらが既定**
+- **CAPTCHAや追加認証を突破しにいかない方針は変えていない。** `auto-login.mjs` は追加認証を検知したら素直に失敗し、呼び出し側は元の `ZAIM_SESSION_EXPIRED` を投げ直す。通知は従来どおり「手動ログインが必要」として届く
+- 自動再ログインは**1回きり**。ログインし直しても失効するなら（資格情報が古い等）諦める。ログインと失効を往復させないため
+- 資格情報の値は `session.ts` では読まない（設定の有無だけを見る）。子プロセスへ環境変数として渡し、ログ・通知・例外メッセージには出さない
+
+値の正は1Passwordに置くが、**実行時に1Password CLIは呼ばない**（#1）。worker が動くサブPCの `.env` へ人が転記する。VPS側には要らない（VPSはキャッシュを読むだけ）。
+
+ログイン画面は `id.kufu.jp` のSSOで構成が変わりうるため、セレクタは `ZAIM_LOGIN_EMAIL_SELECTOR` / `ZAIM_LOGIN_PASSWORD_SELECTOR` / `ZAIM_LOGIN_SUBMIT_SELECTOR` で上書きできる。未設定なら `type` / `name` 属性から総当たりで探す。
 
 ### 呼び出し方
 
 `scrapeZaimSnapshot()` はヘッドレスChromiumを起動するため**数十秒かかる**。MCPやAPIの同期リクエストから直接呼んではいけない。worker から定期実行してキャッシュに書き、参照側はキャッシュを読む。
+
+### 連携口座の更新（巡回の前に押す）
+
+**Zaimの連携口座は「データを更新する」を押すまで、各金融機関から再取得されない。** 押さないまま巡回すると、その日の資産額として古い残高が記録される。`zaim-refresh` ジョブが `https://zaim.net/online_accounts` のボタンを押し、完了を待ってから `zaim-sync` が巡回する（#62）。
+
+| | 押し方・判定 |
+|---|---|
+| ボタン | `form[action="/online_accounts/renewal"] button[type=submit]`。**クラス名はCSS Modulesのハッシュ付きでZaimのデプロイごとに変わる**ため使わない |
+| 確認ダイアログ | `data-confirm` によるネイティブダイアログが出る。**Playwrightの既定は dismiss** なので `page.on("dialog", (d) => d.accept())` が必須（無いと押しても必ずキャンセルされる） |
+| 完了判定 | Zaim側に完了のシグナルは無い。口座ごとの「最終更新」が進んだかで判定する。反映まで5〜15分 |
+| 打ち切り | 連携設定が壊れている口座は何度押しても進まないため、全口座の完了は待てない。**しばらくどの口座も進まなくなったら打ち切る**（最短5分・静穏3分・上限15分） |
+
+画面の確認は `ZAIM_REFRESH_DRY_RUN=1` で行う。**ボタンを押さず**に、いま読めている口座と最終更新を出力するだけになる（押すとZaimが実際に各金融機関へ取得しにいくため、確認のたびに押さないで済むようにしてある）。
+
+```bash
+ZAIM_REFRESH_DRY_RUN=1 node --env-file-if-exists=.env src/core/connectors/zaim/scripts/refresh.mjs
+```
+
+### 更新できない口座の扱い
+
+連携先のAPIキーの権限エラーや金融機関側のログイン期限切れで、**何度押しても更新できない口座が残る**（Zaim側の連携設定を直すまで解消しない）。AIDEはこれを次のように扱う。
+
+- **古い残高を捨てたり書き換えたりしない。** 取得した事実だけを持つのがAIDEの責務で、当日値として記録するかの判断は asset-manager 側にある
+- 代わりに口座ごとの最終更新を持たせる。`balances` / `holdings` の `lastUpdatedAt` と、連携口座の一覧 `onlineAccounts`（いずれもJSTオフセット付きのISO8601）
+- `GET /api/money/summary` は最終更新が当日でない口座を `staleAccounts` にまとめ、`note` にも断りを入れる。**捨てるか使うかは呼び出し側が決める**
+- `lastUpdatedAt` は**AIDEが巡回した時刻（`fetchedAt`）とは別物**。巡回が新しくても中身が何ヶ月も前ということがある
+- 更新できない口座が出たら Signaly へ通知する（[ジョブ失敗の通知](#ジョブ失敗の通知)）。ジョブ自体は成功扱いのまま
 
 ### asset-manager との境界
 
 | | 置き場所 | 理由 |
 |---|---|---|
 | 巡回・パース | **AIDE** | 「取得」そのもの。他アプリからも再利用する |
+| 連携口座の更新（ボタン押下）と最終更新の取得 | **AIDE** | Zaimへ取りに行く経路そのもの。取得結果に「いつのものか」を添えるところまで |
+| 最終更新が当日でない口座の残高を記録するか | **asset-manager** | 「その日の資産額として何を採るか」は資産管理側の判断 |
 | `Category.valuationAlias` との照合、評価額への反映 | **asset-manager** | 資産管理固有のドメインロジック |
 | 同期を実行できるユーザーの制限 | **asset-manager** | asset-manager の認証・ユーザーモデルに紐づく |
 
@@ -218,8 +271,21 @@ src/core/views/ops.ts        しきい値判定と圧縮（summarizeOps は純�
 HTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
 
 **ops-dashboard 側の読み取りAPIは元々ログインセッション必須**で、サーバー間用のトークン認証は
-[ops-dashboard#85](https://github.com/guchi-apps/ops-dashboard/issues/85) で追加する。それが入るまで
-401 を受けるため、このツールは「取得できなかった」を返す（AIDE側は先行してマージしてよい）。
+[ops-dashboard#85](https://github.com/guchi-apps/ops-dashboard/issues/85) で追加済み
+（`requireSessionOrApiToken`）。
+
+#### 全ソースが 401 になるとき
+
+**トークンは同じ値を2か所で別々に管理している。** ここがずれると6ソースすべてが 401 になる（#63）。
+
+| どちら側 | 環境変数 | 1Password |
+|---|---|---|
+| ops-dashboard（受け） | `OPS_API_TOKEN` | `op://apps/ops-dashboard/ops-api-token` |
+| AIDE（送り） | `AIDE_OPS_DASHBOARD_TOKEN` | `op://apps/aide/ops-dashboard-token` |
+
+`unavailable` が **1本だけ** 401 なら ops-dashboard 側のルート追加漏れ、**6本すべて** 401 なら
+値の不一致か、ops-dashboard 側で `OPS_API_TOKEN` が未設定（未設定だとトークン経路は常に不可）。
+`configured: true` なのに全滅している場合は、AIDE側の設定漏れではなく**値のずれ**を疑う。
 
 ### 返す粒度
 
@@ -394,8 +460,9 @@ worker が定期実行して `data/cache/` に書き、MCPサーバーとAPIは�
 ### ジョブの実行
 
 ```bash
+npm run worker zaim-refresh     # 連携口座を一括更新（押して完了を待つ、日次想定）
 npm run worker zaim-sync        # 巡回してキャッシュ更新（重い、日次想定）
-npm run worker zaim-keep-alive  # セッション延長のみ（軽い、毎時想定）
+npm run worker zaim-keep-alive  # セッション延長のみ（軽い、30分ごと想定）
 ```
 
 常駐させずワンショットで実行し、スケジューリングは外（cron / systemd timer / PM2）に任せる。常駐プロセスを増やさずに済み、失敗しても次回実行で自然に復旧する。失敗時は終了コード1を返すので、スケジューラ側から検知できる。
@@ -404,12 +471,33 @@ npm run worker zaim-keep-alive  # セッション延長のみ（軽い、毎時�
 
 Zaimの認証Cookieは**約2時間**で失効し、アクセスのたびにその時点から延長される。したがって **2時間以内に必ず1回はZaimへアクセスする必要がある**。
 
-| ジョブ | 間隔 | 理由 |
-|---|---|---|
-| `zaim-keep-alive` | 毎時 | 有効期間2時間に対して2倍の余裕を取る |
-| `zaim-sync` | 日次 | 資産評価額は日次で足りる。Zaimへのアクセスを無駄に増やさない |
+| ジョブ | 間隔 | 最悪間隔 | 理由 |
+|---|---|---|---|
+| `zaim-keep-alive` | 30分ごと（揺らぎ2分） | 32分 | 有効期間2時間に対し、**3回続けて失敗しても間に合う**余裕を取る |
+| `zaim-refresh` | 日次 23:15 JST | — | 押してから反映まで5〜15分かかる。24時までにその日の最終データを確定させるための逆算 |
+| `zaim-sync` | 日次 23:35 JST | — | 資産評価額は日次で足りる。`zaim-refresh` の完了を見込んだ時刻に置き、**その日のうちに**当日の値を確定させる |
+
+「最悪間隔」は `RandomizedDelaySec` を含めた実際の空き時間。**`zaim-keep-alive` はここを2時間より十分短く保つことが要件**で、毎時（最悪1時間5分）では1回失敗しただけで超えていた（#63）。日次の2つは巡回そのものが目的なので、この制約は掛からない。
+
+**`zaim-sync` は以前05:00 JSTだった。** 「issue-deckの並行ビルドと競合せず、朝の時点で当日のデータが揃う」ことが理由だったが、その時刻では更新ボタンを押した当日ぶんが翌日のキャッシュにしか載らない。23:35へ移しても朝には前夜23:35のデータ（経過8時間ほど）があり、当日ぶんが揃っているという条件は満たせるため移した（#62）。
+
+subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明示が必須。
 
 **このスケジューリングは常時起動のホストに置く必要がある。** 開発機（メインPC）は常時起動しない前提のため、セッションを維持できない。本番では subpc が担う。
+
+### systemdユニット
+
+ユニットは `deploy/systemd/` にある。**実行場所はサブPCの `~/.config/systemd/user/`** で、リポジトリからは自動反映されない（VPSへの `deploy.yml` が触るのはサーバー側だけ）。間隔を変えたら手で反映する。
+
+```bash
+cp deploy/systemd/*.timer deploy/systemd/*.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導入のユニット）
+systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
+systemctl --user list-timers 'aide-*'
+```
+
+以前はユニットがリポジトリの外にしか無く、間隔がなぜその値なのかを追えなかったため、実体をこちらへ移している。
 
 ### ジョブ失敗の通知
 
@@ -425,14 +513,15 @@ URLに含まれる `channel_id` が宛先の識別子そのもの（Webhook自�
 
 - **失敗**: ジョブ名・失敗理由・発生時刻・実行ホストを載せる。`ZAIM_SESSION_EXPIRED` の場合は手動ログインをやり直すまで直らないため、タイトルと「対応」欄で他の失敗と区別できるようにしている
 - **復旧**: 失敗が記録されている状態で成功したときに1回だけ
+- **一部失敗**: `zaim-refresh` で更新できなかった口座があるとき。**ジョブ自体は成功扱いのまま**（押下は成功しており、AIDE側では直せない）。署名は「更新できなかった口座名の集合」なので、同じ口座が落ち続けている間は静かになり、別の口座が落ちたときは抑制せずに届く。記録は `<ジョブ名>:stale-accounts` としてジョブ自体の失敗とは別に持つ
 
-日次の成功は送らない。`zaim-keep-alive` は毎時なので、成功も送ると1日24件になり肝心の失敗が埋もれる。
+日次の成功は送らない。`zaim-keep-alive` は30分ごとなので、成功も送ると1日48件になり肝心の失敗が埋もれる。
 
-**同じ理由で失敗し続けている間は6時間に1回まで**に抑えている（毎時の `zaim-keep-alive` がセッション失効すると、抑制しないと24件/日届く）。理由が変わった場合は抑制せずに送る。抑制で黙っている状態と直った状態を区別できるように、復旧通知だけは出している。
+**同じ理由で失敗し続けている間は6時間に1回まで**に抑えている（30分ごとの `zaim-keep-alive` がセッション失効すると、抑制しないと48件/日届く）。理由が変わった場合は抑制せずに送る。抑制で黙っている状態と直った状態を区別できるように、復旧通知だけは出している。
 
 未解決の失敗は `data/worker/notify-state.json` に持つ（ジョブ名・失敗理由の署名・時刻・回数だけ。取得データも認証情報も入れない）。**通知の送信失敗でジョブを二重に失敗させない。** 送信・記録まわりの例外はすべて握りつぶし、ログに一行残すだけにする。送れなかった回は通知済みにせず、次の実行で送り直す。
 
-**プロセスが起動する前に落ちるケース（node が起動しない・OOMで強制終了）は拾えない。** そこまで拾うなら systemd の `OnFailure=` が要る。ユニットはこのリポジトリの外（サブPCの `~/.config/systemd/user/`）にある。
+**プロセスが起動する前に落ちるケース（node が起動しない・OOMで強制終了）は拾えない。** そこまで拾うなら systemd の `OnFailure=` が要る（ユニットは `deploy/systemd/` にある）。
 
 ### 金額の扱い
 
@@ -487,9 +576,13 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
   "ageMinutes": 120,
   "stale": false,
   "totals": { "balances": 1234567, "holdings": 234567 },
-  "balances": [{ "name": "〇〇銀行", "amount": 1000000 }],
+  "balances": [{ "name": "〇〇銀行", "amount": 1000000,
+                 "lastUpdatedAt": "2026-08-16T23:20:11+09:00" }],
   "holdings": [{ "account": "〇〇証券", "name": "〇〇インデックス", "amount": 234567,
-                 "occurrence": 1, "occurrenceCount": 1 }],
+                 "occurrence": 1, "occurrenceCount": 1,
+                 "lastUpdatedAt": "2026-08-16T23:21:00+09:00" }],
+  "onlineAccounts": [{ "name": "〇〇銀行", "lastUpdatedAt": "2026-08-16T23:20:11+09:00" }],
+  "staleAccounts": [{ "name": "△△銀行", "lastUpdatedAt": "2024-12-18T10:00:00+09:00" }],
   "note": "..."
 }
 ```
@@ -497,6 +590,11 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 **取得時刻と経過分数を必ず併せて返し、鮮度の判断は呼び出し側に委ねる。** MCP層と同じ方針で、AIDEは
 「古いから返さない」という判断をしない。キャッシュが空でも200を返す（`empty: true`）。まだ一度も巡回して
 いないのは状態であってエラーではなく、呼び出し側が区別できる形で伝わればよい。
+
+`lastUpdatedAt` は **Zaim側が各金融機関から取得した時刻**で、AIDEが巡回した時刻（`fetchedAt`）とは別物。
+更新できない口座があると巡回が新しくても中身は古いままになるため、当日でないものを `staleAccounts` に
+まとめている（[更新できない口座の扱い](#更新できない口座の扱い)）。**これも捨てるかどうかは決めない。**
+連携していない口座（現金・手入力）と、この項目を持たない時期のキャッシュでは `null` になる。
 
 ### キャッシュを素で返さない理由
 

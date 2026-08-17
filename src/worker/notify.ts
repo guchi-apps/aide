@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
 import { isZaimSessionExpired } from "../core/connectors/zaim/errors.ts";
+import type { ZaimOnlineAccount } from "../core/connectors/zaim/types.ts";
 import { DATA_DIR } from "../core/paths.ts";
 
 /**
@@ -36,6 +37,16 @@ const SESSION_EXPIRED_SIGNATURE = "ZAIM_SESSION_EXPIRED";
 // Signalyの色指定は10進整数（Discord形式）。docs/webhook.md 参照。
 const COLOR_FAILURE = 15548997; // #ed4245
 const COLOR_RECOVERY = 5763719; // #57f287
+const COLOR_WARNING = 16705372; // #fee75c
+
+/**
+ * ジョブ自体は成功したが一部だけ失敗した状態の記録キー（`state` はジョブ名で引くため接尾辞で分ける）。
+ * `notifyJobRecovered` が消すのは `state[job]` だけなので、両者は干渉しない。
+ */
+const PARTIAL_STATE_SUFFIX = ":stale-accounts";
+
+/** 通知に並べる口座名の上限。1フィールドの文字数制限に収める。 */
+const LISTED_ACCOUNTS_MAX = 20;
 
 /** ジョブごとの未解決の失敗。復旧通知を出したら消す。 */
 export interface FailureRecord {
@@ -299,6 +310,148 @@ export async function notifyJobFailure(job: string, cause: unknown): Promise<voi
   } catch (cause) {
     console.error(
       `[notify] 失敗通知の処理でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
+    );
+  }
+}
+
+/**
+ * 更新できなかった口座の署名。**顔ぶれが同じなら同じ署名**になるよう名前順に並べる。
+ * 同じ口座が落ち続けている間は静かにし、別の口座が落ちたときは抑制せずに知らせるため。
+ */
+export function staleAccountsSignature(accounts: readonly ZaimOnlineAccount[]): string {
+  return accounts
+    .map((account) => account.name)
+    .sort()
+    .join("／");
+}
+
+/** 最終更新の表示。読めていない口座は「不明」にする。 */
+function formatLastUpdated(account: ZaimOnlineAccount): string {
+  if (!account.lastUpdatedAt) return `${account.name}: 不明`;
+  return `${account.name}: ${formatJst(new Date(account.lastUpdatedAt))}`;
+}
+
+export function buildStaleAccountsPayload(input: {
+  job: string;
+  accounts: readonly ZaimOnlineAccount[];
+  occurredAt: Date;
+  record: FailureRecord;
+}): SignalyPayload {
+  const { job, accounts, occurredAt, record } = input;
+
+  const listed = accounts.slice(0, LISTED_ACCOUNTS_MAX).map(formatLastUpdated);
+  if (accounts.length > listed.length) {
+    listed.push(`ほか${accounts.length - listed.length}件`);
+  }
+
+  const fields: SignalyField[] = [
+    { name: "ジョブ", value: `\`${job}\``, inline: true },
+    { name: "確認時刻", value: formatJst(occurredAt), inline: true },
+    { name: "実行ホスト", value: hostname(), inline: true },
+    { name: "更新できなかった口座", value: listed.join("\n"), inline: false },
+    {
+      // 何をすれば直るかまで書く。通知を見た時点で対応が決まるようにするため。
+      name: "対応",
+      value:
+        "Zaim の「口座の連携」からこの口座の設定を直す" +
+        "（APIキーの権限、金融機関側のログイン期限切れなど）。AIDE側では直せない。",
+      inline: false,
+    },
+  ];
+  if (record.count > 1) {
+    fields.push({
+      name: "連続",
+      value: `${record.count}回目（${formatJst(new Date(record.firstFailedAt))}から）`,
+      inline: false,
+    });
+  }
+
+  return {
+    embeds: [
+      {
+        title: `⚠️ [AIDE] ${job}: 更新できなかった口座があります`,
+        description:
+          "Zaimの連携口座を更新したが、次の口座は最終更新が当日になっていない。" +
+          "**この口座の残高は当日の値ではない。**",
+        color: COLOR_WARNING,
+        fields,
+      },
+    ],
+  };
+}
+
+export function buildStaleAccountsRecoveryPayload(input: {
+  job: string;
+  record: FailureRecord;
+  recoveredAt: Date;
+}): SignalyPayload {
+  const { job, record, recoveredAt } = input;
+
+  return {
+    embeds: [
+      {
+        title: `✅ [AIDE] ${job}: 全口座が更新できました`,
+        description: "更新できていなかった口座が最新化されました。手動の対応は要りません。",
+        color: COLOR_RECOVERY,
+        fields: [
+          { name: "ジョブ", value: `\`${job}\``, inline: true },
+          { name: "確認時刻", value: formatJst(recoveredAt), inline: true },
+          { name: "実行ホスト", value: hostname(), inline: true },
+          {
+            name: "更新できていなかった口座",
+            value: `${record.signature}（${formatJst(new Date(record.firstFailedAt))}から${record.count}回）`,
+            inline: false,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * 一部の口座だけ更新できなかったことを通知する。**ジョブは成功扱いのまま。**
+ *
+ * ジョブ全体の失敗（`notifyJobFailure`）では拾えない。更新ボタンは押せているのに
+ * 特定の口座だけ古い残高が残る状態は、Zaim側の連携設定を直すまで続くため、
+ * 抑制の仕組みはそのまま流用する（同じ顔ぶれなら6時間に1回、直ったら1回だけ復旧を送る）。
+ *
+ * 呼び出し側は失敗させない（例外を投げない）。
+ */
+export async function notifyStaleAccounts(
+  job: string,
+  accounts: readonly ZaimOnlineAccount[],
+): Promise<void> {
+  const url = webhookUrl();
+  if (!url) return;
+
+  const key = `${job}${PARTIAL_STATE_SUFFIX}`;
+  try {
+    const now = new Date();
+    const state = await readState();
+    const previous = state[key];
+
+    if (accounts.length === 0) {
+      // 直ったときだけ1回送る。日常の「全部更新できた」では何も送らない。
+      if (!previous) return;
+      if (!(await send(url, buildStaleAccountsRecoveryPayload({ job, record: previous, recoveredAt: now }))))
+        return;
+      delete state[key];
+      await writeState(state);
+      return;
+    }
+
+    const { shouldNotify, record } = decideNotification(previous, staleAccountsSignature(accounts), now);
+    if (shouldNotify) {
+      const sent = await send(url, buildStaleAccountsPayload({ job, accounts, occurredAt: now, record }));
+      // 送れなかったときは notifiedAt を進めない。次の実行で送り直す。
+      if (sent) record.notifiedAt = now.toISOString();
+    }
+
+    state[key] = record;
+    await writeState(state);
+  } catch (cause) {
+    console.error(
+      `[notify] 一部失敗の通知でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
     );
   }
 }
