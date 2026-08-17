@@ -33,8 +33,9 @@ export const JOB_CATALOG = [
     name: "zaim-keep-alive",
     description:
       "Zaimのセッションを延長するだけの軽量ジョブ。認証Cookieは約2時間で失効し、" +
-      "アクセスのたびにその時点から延長されるため、間隔を失効時間より短く保つ。",
-    interval: "毎時",
+      "アクセスのたびにその時点から延長されるため、間隔を失効時間より短く保つ。" +
+      "一時的な失敗は再試行し、失効を検知したときは資格情報があれば自動で再ログインする。",
+    interval: "30分ごと",
   },
 ] as const satisfies readonly JobInfo[];
 

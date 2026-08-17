@@ -1,0 +1,19 @@
+[Unit]
+# Zaimは「データを更新する」を押すまで各金融機関から再取得しない。押さないまま巡回すると
+# その日の資産額として古い残高が記録される（#62）。押して完了を待つだけで、取得はしない。
+Description=AIDE: Zaimの連携口座を一括更新
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# スクリプト側の待ちは最大15分で、呼び出し側（refresh.ts）は20分で打ち切る。
+# ページ読み込みぶんの余裕を足して25分を上限にする。20分後に走る aide-zaim-sync とは
+# 重なりうるが、どちらもZaimを1タブ開くだけなので支障はない。
+TimeoutStartSec=25min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+# 素の ExecStart=node ... で書くと手元では動くのに再起動後に動かない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts zaim-refresh'

@@ -1,18 +1,14 @@
-import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { ZAIM_SESSION_EXPIRED, isZaimSessionExpired } from "./errors.ts";
 import { buildZaimSnapshot } from "./parse.ts";
+import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
 import type { ZaimRawScrapeResult, ZaimSnapshot } from "./types.ts";
-
-const execFileAsync = promisify(execFile);
 
 // 証券詳細ページを順に巡回するため、1ページ分より長い実行時間を許容する。
 const SCRAPE_TIMEOUT_MS = 300_000;
 
 // 呼び出し元のカレントディレクトリに依存しないよう、このモジュールからの相対で解決する。
 // asset-manager では cwd 相対だったが、AIDEはワーカーからも叩くため成立しない。
-const SCRAPE_SCRIPT = fileURLToPath(new URL("./scripts/scrape.mjs", import.meta.url));
+const SCRAPE_SCRIPT = zaimScriptPath("scrape.mjs");
 
 /**
  * Zaimの残高・保有銘柄を取得する。
@@ -23,14 +19,18 @@ const SCRAPE_SCRIPT = fileURLToPath(new URL("./scripts/scrape.mjs", import.meta.
  *
  * Playwright本体はAIDEの依存に含めず、実行環境へグローバル導入する
  * （`npm install -g playwright && playwright install chromium`）。
+ *
+ * 一時的な失敗の再試行と、セッション失効時の自動再ログインは `runZaimScript` が担う。
+ * 日次で1回しか走らないぶん、ここで落ちると翌日まで残高が古いままになるため、
+ * セッション延長（`keepZaimSessionAlive`）と同じ回復経路を通している。
  */
-export async function scrapeZaimSnapshot(): Promise<ZaimSnapshot> {
+export async function scrapeZaimSnapshot(deps?: ZaimScriptDeps): Promise<ZaimSnapshot> {
   try {
-    const { stdout } = await execFileAsync(process.execPath, [SCRAPE_SCRIPT], {
-      env: process.env,
-      timeout: SCRAPE_TIMEOUT_MS,
-      maxBuffer: 8 * 1024 * 1024,
-    });
+    const stdout = await runZaimScript(
+      SCRAPE_SCRIPT,
+      { timeout: SCRAPE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+      deps,
+    );
 
     const result = JSON.parse(stdout) as ZaimRawScrapeResult;
     if (!Array.isArray(result.balances)) {
