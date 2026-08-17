@@ -72,7 +72,6 @@ jobs:
       AIDE_SUBSCRIPTIONS_TOKEN: ${{ secrets.AIDE_SUBSCRIPTIONS_TOKEN }}
       AIDE_GITHUB_TOKEN: ${{ secrets.AIDE_GITHUB_TOKEN }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
-      PORT: ${{ vars.PORT }}
       AIDE_BASE_URL: ${{ vars.AIDE_BASE_URL }}
 
     steps:
@@ -109,7 +108,6 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           TARGET_DIR: ${{ env.TARGET_DIR }}
-          APP_PORT: ${{ env.PORT }}
           AIDE_AUTH_PASSWORD: ${{ env.AIDE_AUTH_PASSWORD }}
           AIDE_BASE_URL: ${{ env.AIDE_BASE_URL }}
           AIDE_INGEST_SECRET: ${{ env.AIDE_INGEST_SECRET }}
@@ -124,12 +122,14 @@ jobs:
           port: ${{ env.SSH_PORT }}
           # appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない。
           # 上の env: に足しただけでは届かず、.env が空で書かれる（aide#55）。
-          envs: TARGET_DIR,APP_PORT,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_SUBSCRIPTIONS_TOKEN,AIDE_GITHUB_TOKEN
+          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_SUBSCRIPTIONS_TOKEN,AIDE_GITHUB_TOKEN
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
 
-            PORT="${APP_PORT:-3114}"
+            # 待受ポートはシークレットではなく設定値として平文で持つ
+            # （guchi-apps/docs の standards/ports.md「ポート番号は 1Password で管理しない」。#73）。
+            PORT=3114
 
             # .ts を直接実行するため型ストリッピングが要る（Node 23.6以降で既定有効）。
             # 古いNodeだと起動時に構文エラーになるだけで原因が分かりにくいので、ここで止める。
