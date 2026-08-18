@@ -1,0 +1,19 @@
+[Unit]
+# 天気予報（Open-Meteo）を取得してキャッシュへ書く。
+# HTTP GETが1本だけの軽いジョブだが、無料枠に利用回数の条件があるため
+# 呼ばれるたびに外部へ出さず、ここで定期的に取っておく。
+Description=AIDE: 天気予報の取得（Open-Meteo）
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# ジョブ側で8秒のタイムアウトを掛けてあり、通常は数秒で終わる。
+# DNSやネットワークの立ち上がり待ちを見ても2分あれば足りる。
+TimeoutStartSec=2min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+# 素の ExecStart=node ... で書くと手元では動くのに再起動後に動かない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts weather-sync'
