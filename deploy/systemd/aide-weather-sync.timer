@@ -1,0 +1,15 @@
+[Unit]
+Description=AIDE: 天気予報の取得（1時間ごと）
+
+[Timer]
+# Open-Meteo の予報は毎時更新される。朝のブリーフィングが読む用途では、
+# 「最新の1時間ぶん」が入っていれば足りるので毎時で回す。
+# 1日24回なので、無料枠（1日10,000回未満）に対して桁で余裕がある。
+OnCalendar=hourly
+# 停止中に逃した実行を起動直後に走らせる。復帰した時点で予報を取り直せる。
+Persistent=true
+# 毎時ちょうどに一斉に叩かない。他のタイマーと重なるのも避ける。
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
