@@ -71,6 +71,7 @@ jobs:
       AIDE_OPS_DASHBOARD_TOKEN: ${{ secrets.AIDE_OPS_DASHBOARD_TOKEN }}
       AIDE_SUBSCRIPTIONS_TOKEN: ${{ secrets.AIDE_SUBSCRIPTIONS_TOKEN }}
       AIDE_GITHUB_TOKEN: ${{ secrets.AIDE_GITHUB_TOKEN }}
+      AIDE_GITHUB_ISSUE_TOKEN: ${{ secrets.AIDE_GITHUB_ISSUE_TOKEN }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
       AIDE_BASE_URL: ${{ vars.AIDE_BASE_URL }}
 
@@ -115,6 +116,7 @@ jobs:
           AIDE_OPS_DASHBOARD_TOKEN: ${{ env.AIDE_OPS_DASHBOARD_TOKEN }}
           AIDE_SUBSCRIPTIONS_TOKEN: ${{ env.AIDE_SUBSCRIPTIONS_TOKEN }}
           AIDE_GITHUB_TOKEN: ${{ env.AIDE_GITHUB_TOKEN }}
+          AIDE_GITHUB_ISSUE_TOKEN: ${{ env.AIDE_GITHUB_ISSUE_TOKEN }}
         with:
           host: ${{ env.HOST }}
           username: ${{ env.USERNAME }}
@@ -122,7 +124,7 @@ jobs:
           port: ${{ env.SSH_PORT }}
           # appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない。
           # 上の env: に足しただけでは届かず、.env が空で書かれる（aide#55）。
-          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_SUBSCRIPTIONS_TOKEN,AIDE_GITHUB_TOKEN
+          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_SUBSCRIPTIONS_TOKEN,AIDE_GITHUB_TOKEN,AIDE_GITHUB_ISSUE_TOKEN
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
@@ -169,6 +171,7 @@ jobs:
             AIDE_OPS_DASHBOARD_TOKEN=${AIDE_OPS_DASHBOARD_TOKEN:-}
             AIDE_SUBSCRIPTIONS_TOKEN=${AIDE_SUBSCRIPTIONS_TOKEN:-}
             AIDE_GITHUB_TOKEN=${AIDE_GITHUB_TOKEN:-}
+            AIDE_GITHUB_ISSUE_TOKEN=${AIDE_GITHUB_ISSUE_TOKEN:-}
             ENVFILE
             chmod 600 .env
 

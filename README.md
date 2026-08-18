@@ -14,11 +14,25 @@ AIDEがやること:
 - 必要な範囲への**フィルタリング**
 - サービスごとに異なる形式の**共通フォーマットへの整形**
 - 複数ソースを1回の呼び出しに畳んだ**横断ビュー**の提供
+- **他のどこからも塞がっている経路に限った書き込み**（後述。現在はGitHubのIssue起票1本だけ）
 
 AIDEがやらないこと:
 
 - **高コストなAI推論**。意味の解釈・優先順位付け・要約・文章生成は呼び出し側のLLMに渡す。AIDEは取得・選別・整形に徹する
 - **公式MCPと重複する単機能ツールをMCP層に出すこと**（後述）
+- **他のアプリが既に持っている書き込み経路の置き換え**（後述）
+
+### 書き込みをどこまで持つか
+
+AIDEは元々**取得専用**として作った。書き込みを足すかは Issue ごとに判断せず、次の3条件を
+**すべて**満たすものに限る（aide#50 で確定。aide#37 以降の判断もこれに従う）。
+
+1. **他のどこからも塞がっている経路であること。** 既存のアプリ・公式MCP・Claude Code から
+   できることは、AIDEに口を作らない（往復が増えるだけになる）
+2. **読み取りとは別の資格情報を使うこと。** 取得用のトークンに書き込み権限を足さない
+3. **作成だけを持つこと。** 編集・削除・状態の変更は持たない。取り返しのつく操作に限る
+
+現在この3条件を満たすのは `aide_create_issue`（ClaudeアプリからのIssue起票）だけ。
 
 ## Core と MCP層の境界
 
@@ -119,6 +133,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細 |
+| `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みを伴う唯一のツール**（作成のみ。編集・close・コメントは持たない） |
 
 
 ## 機能一覧ページ
@@ -450,7 +465,29 @@ GitHub取得は既に3実装ある。**AIDEはこれらを置き換えない。*
 | `portfolio` | 公開用のリポジトリ情報取り込み |
 
 issue-deck はGitHub Appの認証・webhook受信・書き込みが本体で、AIDE経由にすると往復が増えるだけ。
-AIDEが持つのは**読み取り専用の横断ビュー**に限る。
+AIDEが持つのは**横断ビュー**と、下記のIssue起票だけに限る。
+
+### 書き込みはIssueの起票1本だけ
+
+外出先でClaudeアプリに思いついたことを話し、そのままIssueにしたいという要望
+（guchi-apps/question#15）に対して `aide_create_issue` を持つ（aide#50）。
+
+**Claudeアプリからの経路だけが塞がっていた**ため入れたもの。Claude Code（端末・GitHub Actions）は
+`gh issue create` で起票できるが、issue-deck はMCPサーバーを持たず `POST /api/issues` は
+Cookie認証のため、Claudeアプリから叩けるものが1つも無かった。「責務」の3条件を満たす。
+
+- **作成だけ。** 編集・close・コメント・PR操作は持たない。issue-deck の画面と Claude Code の仕事
+- **トークンを分ける。** 取得用の `AIDE_GITHUB_TOKEN` はRead-onlyのままで、起票は
+  `AIDE_GITHUB_ISSUE_TOKEN`（Issues: Read and write）を使う。フォールバックはしない
+- **AIDEが起票してもissue-deckと食い違わない。** issue-deck は webhook で GitHub 側の Issue を
+  取り込むため、どちらから作っても同じように画面へ出る
+- **暴発を機械的に止める。** Claudeは会話の流れでツールを自発的に呼ぶため、1回の呼び出しで1件・
+  10分あたり3件・直前と同一タイトルは拒否、という上限をコード側に持つ（`write.ts`）
+- **ラベルを勝手に作らない。** GitHubのIssue作成APIは未知のラベル名を渡すとラベルごと新規作成
+  してしまう。起票前に対象リポジトリのラベル一覧を引き、実在するものだけを付ける
+  （既定は `70.confirm`。無いリポジトリでは黙って落ちる）
+- **出所を本文に残す。** 口述の書き起こしは人が自分で書いたIssueと精度が違うため、本文末尾に
+  AIDE経由で起票した旨と `<!-- aide:created-via-mcp -->` を必ず付ける
 
 ### 返す粒度
 
@@ -489,6 +526,7 @@ compare・releases・commits・issues）。GraphQLなら**1リクエスト・実
 | 環境変数 | 未設定のとき |
 |---|---|
 | `AIDE_GITHUB_TOKEN` | 取得を試みず「未設定」を返す |
+| `AIDE_GITHUB_ISSUE_TOKEN` | `aide_create_issue` が「未設定」を返す。GitHubへは何も送らない |
 | `AIDE_GITHUB_ORG` | `guchi-apps` |
 | `AIDE_GITHUB_REPOS` | archived を除き、直近 `AIDE_GITHUB_ACTIVE_DAYS` 日にpushがあったものを自動で拾う |
 | `AIDE_GITHUB_ACTIVE_DAYS` | `90` |
@@ -497,9 +535,18 @@ compare・releases・commits・issues）。GraphQLなら**1リクエスト・実
 HTTPステータスと例外の種別まで丸める。GraphQLの `errors` も `message` は載せず、
 どのリポジトリのどのフィールドかと種別だけを返す（`message` に内部の構成が載ることがあるため）。
 
-fine-grained PAT を使う。必要な権限は Metadata / Contents / Issues / Pull requests / Actions の
-**read のみ**。GitHub App は採らなかった（読み取り専用の用途に対して、秘密鍵の保管と
-JWT署名→インストールトークン交換の実装が重い）。
+fine-grained PAT を使う。GitHub App は採らなかった（この用途に対して、秘密鍵の保管と
+JWT署名→インストールトークン交換の実装が重い）。**取得用と起票用で別のトークンを持つ。**
+
+| トークン | 権限 | 使うところ |
+|---|---|---|
+| `AIDE_GITHUB_TOKEN` | Metadata / Contents / Issues / Pull requests / Actions の **read のみ** | `aide_dev_status` |
+| `AIDE_GITHUB_ISSUE_TOKEN` | Metadata: read と **Issues: read and write** のみ | `aide_create_issue` |
+
+1本にまとめて取得側にも書き込み権限を持たせると、26リポジトリを横断する取得の経路が
+そのまま書き込みのできる経路になる。分ければ、起票を止めたいときにこのトークンだけ失効させればよい。
+`readGitHubWriteConfig()` は `AIDE_GITHUB_TOKEN` へフォールバックしない（Read-onlyのトークンで
+書き込みを試みて403を返すだけの経路ができ、権限を持たせたかが設定から読み取れなくなるため）。
 
 キャッシュは挟まず**都度叩く**。1リクエストで済み、レート制限にも余裕があり、
 「いまどうなっているか」という問いに対してキャッシュの古さは害にしかならない。
