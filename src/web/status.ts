@@ -1,7 +1,17 @@
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthConfig } from "../auth/config.ts";
 import { verifyPassword } from "../auth/config.ts";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
+import {
+  authorizeUrl,
+  CALLBACK_PATH,
+  createPkce,
+  exchangeCode,
+  isAllowedEmail,
+  revokeSession,
+  type SupabaseAuthConfig,
+} from "../auth/supabase.ts";
 import { buildDevStatus } from "../core/views/dev.ts";
 import {
   buildHealth,
@@ -16,12 +26,18 @@ import type { ToolRegistry } from "../mcp/registry.ts";
 import { formatJst } from "../worker/notify.ts";
 import { card, defList, escapeHtml, pill, renderPage, table, type Tone } from "./layout.ts";
 import {
+  clearHandshakeCookie,
+  handshakeCookie,
+  HANDSHAKE_COOKIE,
   loadSessionKey,
   loginCookie,
   logoutCookie,
   readCookie,
+  readHandshake,
+  readSession,
   SESSION_COOKIE,
-  verifySession,
+  stateMatches,
+  type StatusSession,
 } from "./session.ts";
 
 /**
@@ -32,7 +48,12 @@ import {
  *
  * **機能一覧（`/features`）とは公開範囲が正反対。** あちらは認証なしで公開する代わりに
  * 静的なカタログしか載せない。こちらは実データ（取得時刻・失敗理由・設定の有無）を載せるため、
- * パスワードの内側に置く。同じ配色・同じ部品を使うが、境界は混ぜない。
+ * ログインの内側に置く。同じ配色・同じ部品を使うが、境界は混ぜない。
+ *
+ * **ログインの手段は設定で決まる。** Supabaseの設定（`src/auth/supabase.ts`）があれば
+ * 許可したメールアドレスだけが通るGoogleログイン、無ければ従来のパスワードになる。
+ * **併存はさせない。** パスワードを残したままにすると、「特定のメールアドレスの人しか
+ * 開けない」という制限をパスワード1本で迂回できてしまう。
  *
  * 判定そのものは `src/core/views/health.ts` が持ち、ここは並べ方と色だけを決める。
  */
@@ -56,6 +77,8 @@ async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
 
 export interface StatusOptions {
   authConfig: AuthConfig;
+  /** Googleログインの設定。`null` なら従来のパスワードでのログインになる。 */
+  supabase: SupabaseAuthConfig | null;
   baseUrl: string;
   registry: ToolRegistry;
 }
@@ -80,15 +103,25 @@ function isSecure(req: IncomingMessage): boolean {
 }
 
 /**
- * ログイン済みか。
+ * いまログインしている人。ログインしていなければ `null`。
  *
  * **認証が無効な環境（`AIDE_AUTH_DISABLED=1`）では素通しする。** MCPも `/api` も
  * 素通しになっている状態でこの画面だけログインを求めても、守るものが無い。
  * その場合はページ自身が「認証が無効」と警告を出す（`buildHealth`）。
+ *
+ * **許可リストはCookieを出すときだけでなく、開くたびに照合する。** リストから外した
+ * アドレスが、発行済みのCookieの有効期間（7日）だけ入れ続けられるのを避ける。
  */
-async function isSignedIn(req: IncomingMessage, config: AuthConfig): Promise<boolean> {
-  if (!config.enabled) return true;
-  return verifySession(readCookie(req, SESSION_COOKIE), await loadSessionKey());
+async function currentSession(
+  req: IncomingMessage,
+  options: StatusOptions,
+): Promise<StatusSession | null> {
+  if (!options.authConfig.enabled) return { email: null };
+
+  const session = readSession(readCookie(req, SESSION_COOKIE), await loadSessionKey());
+  if (!session) return null;
+  if (options.supabase && !isAllowedEmail(session.email, options.supabase)) return null;
+  return session;
 }
 
 // ---- 表示 ----
@@ -280,7 +313,11 @@ document.getElementById('probe-run').addEventListener('click', async (event) => 
 </script>`;
 
 /** ページのHTMLを組み立てる純粋関数。テストはここに当てる。 */
-export function renderStatusPage(health: Health, registry: ToolRegistry): string {
+export function renderStatusPage(
+  health: Health,
+  registry: ToolRegistry,
+  session: StatusSession | null = null,
+): string {
   const body = `<section class="hero">
 <div class="hero-top"><h1>${escapeHtml(headline(health))}</h1>${pill(TONE[health.severity], SEVERITY_LABEL[health.severity])}</div>
 <div class="stamp"><span>確認 ${escapeHtml(formatJst(new Date(health.checkedAt)))}</span><span>稼働 ${escapeHtml(formatDuration(Math.round(health.server.uptimeSeconds / 60)))}</span><span>v${escapeHtml(health.server.version || "?")}</span><span>Node ${escapeHtml(health.server.nodeVersion)}</span></div>
@@ -301,37 +338,61 @@ ${connectorsCard(health)}
       { href: "/features", label: "機能一覧", current: false },
     ],
     headerAction: health.server.authEnabled
-      ? `<form method="post" action="/status/logout"><button class="linkish" type="submit">ログアウト</button></form>`
+      ? `${session?.email ? `<span class="who">${escapeHtml(session.email)}</span>` : ""}<form method="post" action="/status/logout"><button class="linkish" type="submit">ログアウト</button></form>`
       : "",
     body,
-    footer:
-      "このページはパスワード認証の内側にあります。シークレットの値・残高の金額は表示しません。",
+    footer: session?.email
+      ? "このページは許可されたGoogleアカウントだけが開けます。シークレットの値・残高の金額は表示しません。"
+      : "このページはパスワード認証の内側にあります。シークレットの値・残高の金額は表示しません。",
   });
 }
 
-/** パスワードの入力画面。`error` があれば理由を出す。 */
-export function renderLoginPage(error: string): string {
-  return renderPage({
-    title: TITLE,
-    centered: true,
-    body: `<form class="box" method="post" action="/status/login">
+/**
+ * ログイン画面。`google` が true なら「Googleでログイン」だけを出す。
+ *
+ * **Googleログインが有効なときにパスワード欄を残さない。** 残すと、許可した
+ * メールアドレスに絞った意味がパスワード1本で消える。
+ */
+export function renderLoginPage(options: { google: boolean; error?: string }): string {
+  const error = options.error ? `<p class="err">${escapeHtml(options.error)}</p>` : "";
+
+  const body = options.google
+    ? `<div class="box">
+<span class="brand">AIDE</span>
+<h1>動作状況を見る</h1>
+<p>許可されたGoogleアカウントだけが開けます。</p>
+${error}
+<a class="signin" href="/status/auth/start">Googleでログイン</a>
+</div>`
+    : `<form class="box" method="post" action="/status/login">
 <span class="brand">AIDE</span>
 <h1>動作状況を見る</h1>
 <p>Claudeアプリの接続に使うパスワードと同じです。</p>
 <label>パスワード<input type="password" name="password" autofocus required autocomplete="current-password"></label>
-${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
+${error}
 <button type="submit">開く</button>
 <p>5回間違えると15分ロックされます。</p>
-</form>`,
-  });
+</form>`;
+
+  return renderPage({ title: TITLE, centered: true, body });
 }
 
 // ---- ハンドラ ----
 
-function html(res: ServerResponse, status: number, body: string, headers: Record<string, string> = {}): void {
+function html(
+  res: ServerResponse,
+  status: number,
+  body: string,
+  headers: Record<string, string | string[]> = {},
+): void {
   res
     .writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...headers })
     .end(body);
+}
+
+/** 設定上そのエンドポイントが存在しない場合。サーバーの既定の404と同じ見た目にする。 */
+function notFound(res: ServerResponse): void {
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("not found\n");
 }
 
 export async function handleStatusPage(
@@ -339,8 +400,9 @@ export async function handleStatusPage(
   res: ServerResponse,
   options: StatusOptions,
 ): Promise<void> {
-  if (!(await isSignedIn(req, options.authConfig))) {
-    html(res, 200, renderLoginPage(""));
+  const session = await currentSession(req, options);
+  if (!session) {
+    html(res, 200, renderLoginPage({ google: options.supabase !== null }));
     return;
   }
 
@@ -348,8 +410,110 @@ export async function handleStatusPage(
     authEnabled: options.authConfig.enabled,
     baseUrl: options.baseUrl,
   });
-  html(res, 200, renderStatusPage(health, options.registry));
+  html(res, 200, renderStatusPage(health, options.registry, session));
 }
+
+// ---- Googleログイン ----
+
+/**
+ * Googleへ送り出す。**素のリンクで踏めるようにGETで受ける。**
+ * ボタンのJavaScriptに依存させると、スクリプトが動かない環境で押しても何も起きない
+ * （guchi-apps/docs の knowledge/supabase.md）。
+ */
+export async function handleStatusAuthStart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: StatusOptions,
+): Promise<void> {
+  const config = options.supabase;
+  if (!config) {
+    notFound(res);
+    return;
+  }
+
+  const { verifier, challenge } = createPkce();
+  const state = randomBytes(16).toString("base64url");
+
+  // 戻り先に state を載せる。Supabaseは redirect_to のクエリをそのまま残して戻す。
+  const redirect = new URL(CALLBACK_PATH, options.baseUrl);
+  redirect.searchParams.set("state", state);
+
+  res
+    .writeHead(302, {
+      Location: authorizeUrl(config, { redirectUri: redirect.toString(), challenge }),
+      "Set-Cookie": handshakeCookie(await loadSessionKey(), { state, verifier }, isSecure(req)),
+      "Cache-Control": "no-store",
+    })
+    .end();
+}
+
+/**
+ * Googleから戻ってきたところ。ここで初めて身元が分かる。
+ *
+ * 失敗の理由は画面には出さず（許可されているアドレスを当てる材料になる）、
+ * ログにだけ残す。**往復用のCookieは成否によらず必ず消す。**
+ */
+export async function handleStatusAuthCallback(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  options: StatusOptions,
+): Promise<void> {
+  const config = options.supabase;
+  if (!config) {
+    notFound(res);
+    return;
+  }
+
+  const secure = isSecure(req);
+  const key = await loadSessionKey();
+  const handshake = readHandshake(readCookie(req, HANDSHAKE_COOKIE), key);
+  const cookies = [clearHandshakeCookie(secure)];
+
+  const deny = (reason: string, message: string): void => {
+    console.warn(`[status] Googleログイン失敗: ${reason}`);
+    html(res, 401, renderLoginPage({ google: true, error: message }), { "Set-Cookie": cookies });
+  };
+
+  const failed = url.searchParams.get("error_description") ?? url.searchParams.get("error");
+  if (failed) {
+    deny(`Supabaseがエラーを返した: ${failed}`, "ログインを完了できませんでした。");
+    return;
+  }
+
+  const code = url.searchParams.get("code") ?? "";
+  const state = url.searchParams.get("state") ?? "";
+  if (!code || !handshake || !stateMatches(state, handshake.state)) {
+    // 往復のCookieが切れている・別のタブで始めたログインが混ざった場合もここへ来る。
+    deny("ログインの往復を確認できなかった", "ログインをやり直してください。");
+    return;
+  }
+
+  let user;
+  try {
+    user = await exchangeCode(config, { code, verifier: handshake.verifier });
+  } catch (cause) {
+    deny(String(cause instanceof Error ? cause.message : cause), "ログインを完了できませんでした。");
+    return;
+  }
+
+  // 身元が分かった時点でSupabase側のセッションは用済み。以降は自前のCookieだけで通す。
+  await revokeSession(config, user.accessToken);
+
+  if (!isAllowedEmail(user.email, config)) {
+    console.warn(`[status] 許可されていないアカウントのログイン試行: ${user.email}`);
+    html(res, 403, renderLoginPage({ google: true, error: "このアカウントでは開けません。" }), {
+      "Set-Cookie": cookies,
+    });
+    return;
+  }
+
+  console.log(`[status] Googleログイン成功: ${user.email}`);
+  cookies.push(loginCookie(key, { secure, email: user.email }));
+  res.writeHead(303, { Location: "/status", "Cache-Control": "no-store", "Set-Cookie": cookies }).end();
+}
+
+// ---- パスワードでのログイン（Google未設定の環境）----
 
 export async function handleStatusLogin(
   req: IncomingMessage,
@@ -357,6 +521,11 @@ export async function handleStatusLogin(
   options: StatusOptions,
 ): Promise<void> {
   const config = options.authConfig;
+  // Googleログインが有効な環境では、この受け口そのものを無くす。
+  if (options.supabase) {
+    notFound(res);
+    return;
+  }
   if (!config.enabled) {
     res.writeHead(303, { Location: "/status" }).end();
     return;
@@ -370,7 +539,10 @@ export async function handleStatusLogin(
     html(
       res,
       429,
-      renderLoginPage(`試行回数が多すぎます。${Math.ceil(locked / 60)}分後に試してください。`),
+      renderLoginPage({
+        google: false,
+        error: `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に試してください。`,
+      }),
       { "Retry-After": String(locked) },
     );
     return;
@@ -381,7 +553,7 @@ export async function handleStatusLogin(
     recordFailure(key);
     console.warn(`[status] ログイン失敗: from=${key}`);
     await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
-    html(res, 401, renderLoginPage("パスワードが違います。"));
+    html(res, 401, renderLoginPage({ google: false, error: "パスワードが違います。" }));
     return;
   }
   recordSuccess(key);
@@ -389,7 +561,7 @@ export async function handleStatusLogin(
   res
     .writeHead(303, {
       Location: "/status",
-      "Set-Cookie": loginCookie(await loadSessionKey(), isSecure(req)),
+      "Set-Cookie": loginCookie(await loadSessionKey(), { secure: isSecure(req), email: null }),
     })
     .end();
 }
@@ -464,7 +636,7 @@ export async function handleStatusChecks(
   res: ServerResponse,
   options: StatusOptions,
 ): Promise<void> {
-  if (!(await isSignedIn(req, options.authConfig))) {
+  if (!(await currentSession(req, options))) {
     res
       .writeHead(401, { "Content-Type": "application/json; charset=utf-8" })
       .end(JSON.stringify({ error: "unauthorized" }));

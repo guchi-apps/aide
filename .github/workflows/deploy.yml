@@ -72,6 +72,9 @@ jobs:
       AIDE_SUBSCRIPTIONS_TOKEN: ${{ secrets.AIDE_SUBSCRIPTIONS_TOKEN }}
       AIDE_GITHUB_TOKEN: ${{ secrets.AIDE_GITHUB_TOKEN }}
       AIDE_GITHUB_ISSUE_TOKEN: ${{ secrets.AIDE_GITHUB_ISSUE_TOKEN }}
+      AIDE_SUPABASE_URL: ${{ secrets.AIDE_SUPABASE_URL }}
+      AIDE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.AIDE_SUPABASE_PUBLISHABLE_KEY }}
+      AIDE_STATUS_ALLOWED_EMAILS: ${{ secrets.AIDE_STATUS_ALLOWED_EMAILS }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
       AIDE_BASE_URL: ${{ vars.AIDE_BASE_URL }}
 
@@ -117,6 +120,9 @@ jobs:
           AIDE_SUBSCRIPTIONS_TOKEN: ${{ env.AIDE_SUBSCRIPTIONS_TOKEN }}
           AIDE_GITHUB_TOKEN: ${{ env.AIDE_GITHUB_TOKEN }}
           AIDE_GITHUB_ISSUE_TOKEN: ${{ env.AIDE_GITHUB_ISSUE_TOKEN }}
+          AIDE_SUPABASE_URL: ${{ env.AIDE_SUPABASE_URL }}
+          AIDE_SUPABASE_PUBLISHABLE_KEY: ${{ env.AIDE_SUPABASE_PUBLISHABLE_KEY }}
+          AIDE_STATUS_ALLOWED_EMAILS: ${{ env.AIDE_STATUS_ALLOWED_EMAILS }}
         with:
           host: ${{ env.HOST }}
           username: ${{ env.USERNAME }}
@@ -124,7 +130,7 @@ jobs:
           port: ${{ env.SSH_PORT }}
           # appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない。
           # 上の env: に足しただけでは届かず、.env が空で書かれる（aide#55）。
-          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_SUBSCRIPTIONS_TOKEN,AIDE_GITHUB_TOKEN,AIDE_GITHUB_ISSUE_TOKEN
+          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_SUBSCRIPTIONS_TOKEN,AIDE_GITHUB_TOKEN,AIDE_GITHUB_ISSUE_TOKEN,AIDE_SUPABASE_URL,AIDE_SUPABASE_PUBLISHABLE_KEY,AIDE_STATUS_ALLOWED_EMAILS
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
@@ -172,6 +178,12 @@ jobs:
             AIDE_SUBSCRIPTIONS_TOKEN=${AIDE_SUBSCRIPTIONS_TOKEN:-}
             AIDE_GITHUB_TOKEN=${AIDE_GITHUB_TOKEN:-}
             AIDE_GITHUB_ISSUE_TOKEN=${AIDE_GITHUB_ISSUE_TOKEN:-}
+            # 動作状況ページのGoogleログイン（#90）。3つとも空ならパスワードでのログインになる。
+            # **半端に設定するとサーバーが起動しない**（許可メールだけ空の状態＝Googleアカウントが
+            # あれば誰でも開ける状態を作らないため）。設定するなら3つまとめて。
+            AIDE_SUPABASE_URL=${AIDE_SUPABASE_URL:-}
+            AIDE_SUPABASE_PUBLISHABLE_KEY=${AIDE_SUPABASE_PUBLISHABLE_KEY:-}
+            AIDE_STATUS_ALLOWED_EMAILS=${AIDE_STATUS_ALLOWED_EMAILS:-}
             ENVFILE
             chmod 600 .env
 
