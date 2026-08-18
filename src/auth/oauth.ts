@@ -18,7 +18,7 @@ import {
   findClient,
   findToken,
 } from "./store.ts";
-import { headTags } from "../web/assets.ts";
+import { escapeHtml, renderPage } from "../web/layout.ts";
 
 /**
  * MCP向けの OAuth 2.1 認可サーバー兼リソースサーバー。
@@ -131,25 +131,25 @@ export async function handleRegister(req: IncomingMessage, res: ServerResponse):
 
 // ---- 認可エンドポイント ----
 
-const LOGIN_PAGE = (params: string, error: string) => `<!doctype html>
-<html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AIDE への接続を許可</title>
-${headTags({ manifest: false })}
-<style>
- body{font-family:system-ui,sans-serif;max-width:24rem;margin:4rem auto;padding:0 1rem;line-height:1.7}
- h1{font-size:1.25rem} input{width:100%;padding:.6rem;font-size:1rem;box-sizing:border-box}
- button{width:100%;padding:.7rem;margin-top:1rem;font-size:1rem;cursor:pointer}
- .err{color:#b00;margin-top:.5rem} .note{color:#666;font-size:.875rem}
-</style></head><body>
-<h1>AIDE への接続を許可</h1>
-<p class="note">クライアントが AIDE のデータへのアクセスを求めています。許可する場合はパスワードを入力してください。</p>
-<form method="post" action="/oauth/authorize?${params}">
-  <input type="password" name="password" placeholder="パスワード" autofocus required autocomplete="current-password">
-  ${error ? `<p class="err">${error}</p>` : ""}
-  <button type="submit">許可する</button>
-</form>
-</body></html>`;
+/**
+ * 認可画面。見た目は他のページと共通の部品（`src/web/layout.ts`）に載せている。
+ * **`clientName` は登録時にクライアントが名乗った値**なので、必ずエスケープして出す。
+ */
+const LOGIN_PAGE = (params: string, clientName: string, error: string): string =>
+  renderPage({
+    title: "AIDE への接続を許可",
+    centered: true,
+    // 接続を許可するだけの画面をホーム画面へ追加させない（マニフェストは機能一覧側だけ）。
+    manifest: false,
+    body: `<form class="box" method="post" action="/oauth/authorize?${escapeHtml(params)}">
+<span class="brand">AIDE</span>
+<h1>接続を許可する</h1>
+<p>${escapeHtml(clientName)} が AIDE のデータへのアクセスを求めています。許可する場合はパスワードを入力してください。</p>
+<label>パスワード<input type="password" name="password" autofocus required autocomplete="current-password"></label>
+${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
+<button type="submit">許可する</button>
+</form>`,
+  });
 
 export async function handleAuthorize(
   req: IncomingMessage,
@@ -182,7 +182,7 @@ export async function handleAuthorize(
   if (req.method === "GET") {
     res
       .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(LOGIN_PAGE(url.searchParams.toString(), ""));
+      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, ""));
     return;
   }
 
@@ -191,7 +191,13 @@ export async function handleAuthorize(
   if (locked !== null) {
     res
       .writeHead(429, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": String(locked) })
-      .end(LOGIN_PAGE(url.searchParams.toString(), `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に再試行してください。`));
+      .end(
+        LOGIN_PAGE(
+          url.searchParams.toString(),
+          client.clientName,
+          `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に再試行してください。`,
+        ),
+      );
     return;
   }
 
@@ -203,7 +209,7 @@ export async function handleAuthorize(
     await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
     res
       .writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(LOGIN_PAGE(url.searchParams.toString(), "パスワードが違います"));
+      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, "パスワードが違います"));
     return;
   }
   recordSuccess(key);
