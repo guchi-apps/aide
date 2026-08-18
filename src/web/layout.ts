@@ -1,3 +1,5 @@
+import { headTags } from "./assets.ts";
+
 /**
  * 人間向けHTMLページの共通レイアウト。
  *
@@ -7,6 +9,7 @@
  *
  * 外部のCSS・フォント・スクリプトを読み込まない。ページを表示しただけで第三者へ
  * リクエストが飛ぶのを避けるためで、書体は端末が持っているものから選ぶ。
+ * アイコンとPWAマニフェスト（`src/web/assets.ts`）だけは自分で配信しているため `<head>` に入れる。
  * 実行時依存を増やさない方針（README）と同じ理由で、ここでもテンプレートエンジンは使わない。
  */
 
@@ -185,6 +188,11 @@ export interface PageOptions {
   footer?: string;
   /** 中央寄せの1枚もの（パスワード入力）にする。 */
   centered?: boolean;
+  /**
+   * PWAのマニフェストを指すか。既定は指す。
+   * 接続を許可するだけの画面など、ホーム画面へ追加させたくないページで false にする。
+   */
+  manifest?: boolean;
 }
 
 /** ページ全体を組み立てる純粋関数。テストはここに当てる。 */
@@ -209,6 +217,7 @@ export function renderPage(options: PageOptions): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${escapeHtml(options.title)}</title>
+${headTags({ manifest: options.manifest ?? true })}
 <style>${STYLE}</style></head><body${options.centered ? ' class="centered"' : ""}>
 ${header}${main}${footer}
 </body></html>

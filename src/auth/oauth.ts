@@ -139,6 +139,8 @@ const LOGIN_PAGE = (params: string, clientName: string, error: string): string =
   renderPage({
     title: "AIDE への接続を許可",
     centered: true,
+    // 接続を許可するだけの画面をホーム画面へ追加させない（マニフェストは機能一覧側だけ）。
+    manifest: false,
     body: `<form class="box" method="post" action="/oauth/authorize?${escapeHtml(params)}">
 <span class="brand">AIDE</span>
 <h1>接続を許可する</h1>

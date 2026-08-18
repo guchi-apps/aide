@@ -57,6 +57,16 @@ const ENDPOINTS: FeatureItem[] = [
     description: "このページ。認証は不要。",
   },
   {
+    name: "/manifest.webmanifest",
+    meta: "GET",
+    description: "PWAのマニフェスト。ホーム画面へ追加したときの名前とアイコンを返す。認証は不要。",
+  },
+  {
+    name: "/icons/:name",
+    meta: "GET",
+    description: "アイコン画像。/favicon.ico も同じ画像を返す。認証は不要。",
+  },
+  {
     name: "/health",
     meta: "GET",
     description: "死活確認。ok を返すだけ。認証は不要。",
