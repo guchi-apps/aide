@@ -49,7 +49,18 @@ const ENDPOINTS: FeatureItem[] = [
     name: "/status",
     meta: "GET",
     description:
-      "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定を人間向けに表示する。パスワードが要る。",
+      "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定を人間向けに表示する。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+  },
+  {
+    name: "/status/auth/start",
+    meta: "GET",
+    description: "動作状況の画面のGoogleログインを始める。Supabase経由でGoogleへ送り出す。",
+  },
+  {
+    name: "/status/auth/callback",
+    meta: "GET",
+    description:
+      "Googleログインの戻り先。メールアドレスが許可リストにあるときだけログイン状態にする。",
   },
   {
     name: "/features",

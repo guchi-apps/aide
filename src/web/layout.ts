@@ -78,6 +78,7 @@ nav a:hover{color:var(--ink)}
 .linkish{font:inherit;font-size:.8rem;color:var(--muted);background:none;border:0;
  border-bottom:1px solid var(--line);padding:0;cursor:pointer}
 .linkish:hover{color:var(--ink)}
+.who{font-family:${FONT_MONO};font-size:.74rem;color:var(--muted);overflow-wrap:anywhere}
 
 /* ---- 本文 ---- */
 main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;flex:1;
@@ -153,7 +154,7 @@ button.act{font:inherit;font-size:.82rem;padding:.35rem .85rem;background:var(--
 button.act:hover{border-color:var(--accent);color:var(--accent)}
 button.act[disabled]{opacity:.6;cursor:progress}
 
-/* ---- パスワード入力（動作状況のログイン・接続の許可） ---- */
+/* ---- ログイン（動作状況のログイン・接続の許可） ---- */
 body.centered{justify-content:center;align-items:center;padding:2rem 1rem}
 .box{background:var(--panel);border:1px solid var(--line);padding:1.6rem 1.4rem;width:100%;
  max-width:22rem;display:flex;flex-direction:column;gap:.85rem}
@@ -164,6 +165,9 @@ body.centered{justify-content:center;align-items:center;padding:2rem 1rem}
  color:var(--ink);border:1px solid var(--line);width:100%}
 .box button{font:inherit;font-weight:700;font-size:.9rem;padding:.6rem;background:var(--accent);
  color:var(--on-accent);border:1px solid var(--accent);cursor:pointer}
+/* Googleログインは素のリンク。JSが動かなくても押せるようにボタンの見た目だけを与える。 */
+.box .signin{font-weight:700;font-size:.9rem;padding:.6rem;background:var(--accent);
+ color:var(--on-accent);border:1px solid var(--accent);text-align:center;text-decoration:none}
 .err{color:var(--bad);font-size:.82rem;background:var(--bad-bg);border-left:3px solid var(--bad);padding:.4rem .6rem}
 
 footer{padding:.9rem 1rem 1.4rem;color:var(--muted);font-size:.78rem;border-top:1px solid var(--line);

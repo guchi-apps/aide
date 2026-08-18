@@ -3,13 +3,18 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { describe, it } from "node:test";
 import {
+  handshakeCookie,
+  HANDSHAKE_COOKIE,
+  issueHandshake,
   issueSession,
   loginCookie,
   logoutCookie,
   readCookie,
+  readHandshake,
+  readSession,
   SESSION_COOKIE,
   sessionCookie,
-  verifySession,
+  stateMatches,
 } from "./session.ts";
 
 const KEY = randomBytes(32);
@@ -20,48 +25,100 @@ function requestWith(cookie: string | undefined): IncomingMessage {
 }
 
 describe("動作状況ページのログイン状態", () => {
-  it("発行した値は同じ鍵で通る", () => {
-    assert.equal(verifySession(issueSession(KEY), KEY), true);
+  it("発行した値は同じ鍵で通り、誰でログインしたかが読める", () => {
+    assert.deepEqual(readSession(issueSession(KEY, "me@example.com"), KEY), {
+      email: "me@example.com",
+    });
+  });
+
+  it("パスワードでのログインは身元なしとして通る", () => {
+    assert.deepEqual(readSession(issueSession(KEY, null), KEY), { email: null });
   });
 
   it("別の鍵では通らない（鍵を作り直せば全セッションが失効する）", () => {
-    assert.equal(verifySession(issueSession(KEY), OTHER_KEY), false);
+    assert.equal(readSession(issueSession(KEY, null), OTHER_KEY), null);
   });
 
   it("署名を書き換えた値は通らない", () => {
-    const value = issueSession(KEY);
+    const value = issueSession(KEY, null);
     const tampered = `${value.slice(0, -1)}${value.endsWith("A") ? "B" : "A"}`;
-    assert.equal(verifySession(tampered, KEY), false);
+    assert.equal(readSession(tampered, KEY), null);
   });
 
   it("期限だけ延ばしても署名が合わないので通らない", () => {
     const now = new Date("2026-08-18T00:00:00Z");
-    const value = issueSession(KEY, now);
-    const forged = `${now.getTime() + 999_999_999}.${value.split(".")[1]}`;
-    assert.equal(verifySession(forged, KEY, now), false);
+    const value = issueSession(KEY, null, now);
+    const [, body, signature] = value.split(".");
+    const forged = `${now.getTime() + 999_999_999}.${body}.${signature}`;
+    assert.equal(readSession(forged, KEY, now), null);
+  });
+
+  it("メールアドレスだけ差し替えた値は通らない（別人を名乗れない）", () => {
+    // 署名の対象にメールアドレスが入っていないと、ここが通ってしまう。
+    const allowed = issueSession(KEY, "me@example.com");
+    const [expiresAt, , signature] = allowed.split(".");
+    const forged = [
+      expiresAt,
+      Buffer.from("someone-else@example.com", "utf8").toString("base64url"),
+      signature,
+    ].join(".");
+    assert.equal(readSession(forged, KEY), null);
   });
 
   it("期限が切れたら通らない", () => {
     const issuedAt = new Date("2026-08-01T00:00:00Z");
-    const value = issueSession(KEY, issuedAt);
-    assert.equal(verifySession(value, KEY, new Date("2026-08-02T00:00:00Z")), true);
+    const value = issueSession(KEY, null, issuedAt);
+    assert.notEqual(readSession(value, KEY, new Date("2026-08-02T00:00:00Z")), null);
     // 有効期間は7日。8日後には切れている。
-    assert.equal(verifySession(value, KEY, new Date("2026-08-09T00:00:01Z")), false);
+    assert.equal(readSession(value, KEY, new Date("2026-08-09T00:00:01Z")), null);
   });
 
   it("壊れた値・空の値では通らない", () => {
-    for (const value of [undefined, "", ".", "abc", "abc.def", "1.2.3"]) {
-      assert.equal(verifySession(value, KEY), false, `${String(value)} が通ってしまった`);
+    for (const value of [undefined, "", ".", "abc", "abc.def", "1.2.3.4"]) {
+      assert.equal(readSession(value, KEY), null, `${String(value)} が通ってしまった`);
     }
+  });
+
+  it("ログインの往復用の値をセッションとして持ち込めない", () => {
+    // 用途ごとに署名の接頭辞を変えていないと、片方の値がもう片方で通ってしまう。
+    const handshake = issueHandshake(KEY, { state: "s", verifier: "v" });
+    assert.equal(readSession(handshake, KEY), null);
   });
 
   it("Cookieの値からパスワードを推測する材料を与えない", () => {
     // 鍵をパスワードから導くと、Cookieを1つ手に入れた相手がオフラインで総当たりできる。
     // 回数制限はオンライン試行にしか効かないため、鍵は独立した乱数でなければならない。
     const password = "correct horse battery staple";
-    const value = issueSession(KEY);
+    const value = issueSession(KEY, null);
     assert.equal(value.includes(password), false);
-    assert.equal(verifySession(value, Buffer.from(password, "utf8")), false);
+    assert.equal(readSession(value, Buffer.from(password, "utf8")), null);
+  });
+});
+
+describe("Googleログインの往復", () => {
+  it("発行した state と verifier を取り出せる", () => {
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz" });
+    assert.deepEqual(readHandshake(value, KEY), { state: "abc", verifier: "xyz" });
+  });
+
+  it("書き換えた値は通らない", () => {
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz" });
+    const [expiresAt, , verifier, signature] = value.split(".");
+    assert.equal(readHandshake([expiresAt, "zzz", verifier, signature].join("."), KEY), null);
+  });
+
+  it("10分で切れる", () => {
+    const issuedAt = new Date("2026-08-18T00:00:00Z");
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz" }, issuedAt);
+    assert.notEqual(readHandshake(value, KEY, new Date("2026-08-18T00:09:00Z")), null);
+    assert.equal(readHandshake(value, KEY, new Date("2026-08-18T00:10:01Z")), null);
+  });
+
+  it("state の照合は一致したときだけ true", () => {
+    assert.equal(stateMatches("abc", "abc"), true);
+    assert.equal(stateMatches("abc", "abd"), false);
+    assert.equal(stateMatches("abc", "abcd"), false);
+    assert.equal(stateMatches("", "abc"), false);
   });
 });
 
@@ -89,8 +146,16 @@ describe("Cookieの読み書き", () => {
   });
 
   it("HTTPSで届いていなければ Secure を付けない（開発機でログインできなくなるため）", () => {
-    assert.doesNotMatch(loginCookie(KEY, false), /Secure/);
-    assert.match(loginCookie(KEY, true), /Secure/);
+    assert.doesNotMatch(loginCookie(KEY, { secure: false, email: null }), /Secure/);
+    assert.match(loginCookie(KEY, { secure: true, email: null }), /Secure/);
+  });
+
+  it("ログインの往復用のCookieも同じ守り方をする", () => {
+    const value = handshakeCookie(KEY, { state: "abc", verifier: "xyz" }, true);
+    assert.match(value, new RegExp(`^${HANDSHAKE_COOKIE}=`));
+    assert.match(value, /HttpOnly/);
+    assert.match(value, /SameSite=Lax/);
+    assert.match(value, /Secure/);
   });
 
   it("ログアウトのCookieは即座に消える", () => {

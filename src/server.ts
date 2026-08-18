@@ -10,6 +10,7 @@ import {
   protectedResourceMetadata,
   requireBearer,
 } from "./auth/oauth.ts";
+import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
 import { devStatusTool } from "./mcp/tools/dev.ts";
@@ -20,6 +21,8 @@ import { pingTool } from "./mcp/tools/ping.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
+  handleStatusAuthCallback,
+  handleStatusAuthStart,
   handleStatusChecks,
   handleStatusLogin,
   handleStatusLogout,
@@ -41,6 +44,9 @@ const HOST = process.env["HOST"] ?? "127.0.0.1";
 // 起動時に読んで、設定不備ならここで落とす。
 // リクエストが来て初めて「認証が無効だった」と気づく事態を避ける。
 const authConfig = loadAuthConfig();
+// 動作状況ページのGoogleログイン。未設定なら null で、画面は従来のパスワードになる。
+// 半端に設定されている場合はここで例外になる（許可メールだけ抜けた状態を通さないため）。
+const supabaseAuthConfig = loadSupabaseAuthConfig();
 
 const registry = new ToolRegistry();
 registry.register(pingTool);
@@ -81,11 +87,25 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
 
   // ---- 動作状況の画面 ----
-  // **機能一覧とは公開範囲が逆で、実データを載せるためパスワードの内側に置く。**
-  // 認証はOAuthではなく画面用のCookie（src/web/session.ts）。照合するパスワードは同じ。
-  const statusOptions: StatusOptions = { authConfig, baseUrl, registry };
+  // **機能一覧とは公開範囲が逆で、実データを載せるためログインの内側に置く。**
+  // 認証はMCPのOAuthではなく画面用のCookie（src/web/session.ts）。
+  // Supabaseが設定されていれば許可メールだけのGoogleログイン、無ければパスワード。
+  const statusOptions: StatusOptions = {
+    authConfig,
+    supabase: supabaseAuthConfig,
+    baseUrl,
+    registry,
+  };
   if (path === "/status" && (req.method === "GET" || req.method === "HEAD")) {
     await handleStatusPage(req, res, statusOptions);
+    return;
+  }
+  if (path === "/status/auth/start" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleStatusAuthStart(req, res, statusOptions);
+    return;
+  }
+  if (path === CALLBACK_PATH && (req.method === "GET" || req.method === "HEAD")) {
+    await handleStatusAuthCallback(req, res, url, statusOptions);
     return;
   }
   if (path === "/status/login" && req.method === "POST") {
@@ -162,4 +182,11 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
 server.listen(PORT, HOST, () => {
   console.log(`AIDE listening on http://${HOST}:${PORT} (mcp: /mcp)`);
   console.log(`[auth] 認証: ${authConfig.enabled ? "有効" : "無効"}`);
+  console.log(
+    `[status] 画面のログイン: ${
+      supabaseAuthConfig
+        ? `Google（許可 ${supabaseAuthConfig.allowedEmails.length} 件）`
+        : "パスワード（Googleログインは未設定）"
+    }`,
+  );
 });
