@@ -182,6 +182,26 @@ describe("接続先の設定状況", () => {
   it("Zaimは画面から疎通確認しない（巡回が重く、外部への実アクセスになる）", () => {
     assert.equal(readConnectors().find((connector) => connector.key === "zaim")?.probeable, false);
   });
+
+  it("GitHubは取得用と起票用を別々に出す（片方だけ設定が落ちても気づけるように）", () => {
+    // 本番の .env はデプロイのたびに丸ごと上書きされる（#55）。取得用だけを見ていると、
+    // 起票用の配線が落ちても「設定済み」に見えてしまう。
+    withEnv({ AIDE_GITHUB_TOKEN: "read-only" }, () => {
+      const connectors = readConnectors();
+      assert.equal(connectors.find((connector) => connector.key === "github")?.configured, true);
+      assert.equal(connectors.find((connector) => connector.key === "github-write")?.configured, false);
+    });
+
+    withEnv({ AIDE_GITHUB_ISSUE_TOKEN: "write" }, () => {
+      const connectors = readConnectors();
+      assert.equal(connectors.find((connector) => connector.key === "github")?.configured, false);
+      assert.equal(connectors.find((connector) => connector.key === "github-write")?.configured, true);
+    });
+  });
+
+  it("起票の疎通は画面から確認しない（確認そのものがIssueを1件立ててしまう）", () => {
+    assert.equal(readConnectors().find((connector) => connector.key === "github-write")?.probeable, false);
+  });
 });
 
 describe("表示の補助", () => {

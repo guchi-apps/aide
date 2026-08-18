@@ -138,7 +138,13 @@ describe("本番の.envへの配線（deploy.yml）", () => {
 
   it("未発行でもデプロイが止まらないよう、トークン類は空を許している", () => {
     // 認証まわり（AIDE_AUTH_PASSWORD）は空だと起動しないので、あえて既定値を付けない。
-    for (const name of ["AIDE_READ_SECRET", "AIDE_OPS_DASHBOARD_TOKEN", "AIDE_SUBSCRIPTIONS_TOKEN", "AIDE_GITHUB_TOKEN"]) {
+    for (const name of [
+      "AIDE_READ_SECRET",
+      "AIDE_OPS_DASHBOARD_TOKEN",
+      "AIDE_SUBSCRIPTIONS_TOKEN",
+      "AIDE_GITHUB_TOKEN",
+      "AIDE_GITHUB_ISSUE_TOKEN",
+    ]) {
       assert.match(
         envHeredoc,
         new RegExp(`^\\s*${name}=\\$\\{${name}:-\\}$`, "m"),
