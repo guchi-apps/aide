@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
+import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
 
@@ -98,7 +99,7 @@ await mkdir(dirname(statePath), { recursive: true })
 // 失効したCookieを引き継ぐと、ログイン画面へ飛ばずに中途半端な状態になることがある。
 // 保存済みの状態は読み込まず、まっさらな状態からログインし直す。
 const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext()
+const context = await browser.newContext({ ...ZAIM_CONTEXT_OPTIONS })
 const page = await context.newPage()
 
 try {

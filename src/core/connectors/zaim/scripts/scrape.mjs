@@ -1,3 +1,4 @@
+import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { readOnlineAccounts, resolveOnlineAccountsUrl } from "./online-accounts.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
@@ -171,7 +172,7 @@ const holdingTableConfig = {
 }
 
 const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ storageState: statePath })
+const context = await browser.newContext({ storageState: statePath, ...ZAIM_CONTEXT_OPTIONS })
 const page = await context.newPage()
 
 try {

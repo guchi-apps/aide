@@ -1,3 +1,4 @@
+import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { readOnlineAccounts, resolveOnlineAccountsUrl } from "./online-accounts.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
@@ -54,7 +55,7 @@ const url = resolveOnlineAccountsUrl()
 
 const { chromium } = await loadPlaywright()
 const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ storageState: resolveStatePath() })
+const context = await browser.newContext({ storageState: resolveStatePath(), ...ZAIM_CONTEXT_OPTIONS })
 const page = await context.newPage()
 
 // ボタンには data-confirm によるネイティブ確認ダイアログが付いている。
