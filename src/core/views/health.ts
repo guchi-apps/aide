@@ -78,7 +78,17 @@ export interface HealthCache {
 export interface HealthConnector {
   key: string;
   label: string;
-  configured: boolean;
+  /**
+   * その設定を使うプロセス。
+   *
+   * **`worker` のものはこのサーバーからは判定できない。** 本番では worker がサブPC、
+   * サーバーがVPSで動き、`.env` が別（`deploy.yml` がVPSへ書くのは `AIDE_*` の一部だけで、
+   * `ZAIM_*` と `AIDE_SIGNALY_WEBHOOK_URL` は含まれない）。サーバー側の環境変数を見て
+   * 「未設定」と表示すると、正しく動いていても常に未設定と出る。
+   */
+  side: "server" | "worker";
+  /** サーバー側の設定だけを判定する。worker 側は null（判定しない）。 */
+  configured: boolean | null;
   /** この画面から疎通を確認できるか。false の理由は `note` に書く。 */
   probeable: boolean;
   note: string;
@@ -209,6 +219,7 @@ export function readConnectors(): HealthConnector[] {
     {
       key: "ops-dashboard",
       label: "ops-dashboard",
+      side: "server",
       configured: readOpsDashboardConfig() !== null,
       probeable: true,
       note: "VPS・サブPCの稼働状況の取得元（aide_ops_status）。",
@@ -216,6 +227,7 @@ export function readConnectors(): HealthConnector[] {
     {
       key: "github",
       label: "GitHub",
+      side: "server",
       configured: readGitHubConfig() !== null,
       probeable: true,
       note: "開発状況の取得元（aide_dev_status）。",
@@ -223,23 +235,26 @@ export function readConnectors(): HealthConnector[] {
     {
       key: "subscription-lists",
       label: "subscription-lists",
+      side: "server",
       configured: readSubscriptionsConfig() !== null,
       probeable: true,
       note: "月額固定費の取得元（aide_money_summary の固定費）。",
     },
     {
       key: "zaim",
-      label: "Zaim（自動再ログイン）",
-      configured: Boolean(process.env["ZAIM_EMAIL"] && process.env["ZAIM_PASSWORD"]),
+      label: "Zaim",
+      side: "worker",
+      configured: null,
       probeable: false,
-      note: "巡回は worker が担当する。ログインは重く、この画面からは触らない。",
+      note: "巡回は worker（サブPC）が担当する。動いているかは定期ジョブの記録で分かる。",
     },
     {
       key: "signaly",
       label: "Signaly（通知）",
-      configured: Boolean(process.env["AIDE_SIGNALY_WEBHOOK_URL"]?.trim()),
+      side: "worker",
+      configured: null,
       probeable: false,
-      note: "ジョブの失敗と復旧の通知先。送信専用で、確認のために送らない。",
+      note: "ジョブの失敗と復旧の通知先。worker（サブPC）から送る。送信専用。",
     },
   ];
 }
@@ -249,7 +264,8 @@ export function readConnectors(): HealthConnector[] {
  * 続き、他の注意（ジョブの失敗など）が押し出される。
  */
 function connectorAttention(connectors: HealthConnector[]): HealthAttention[] {
-  const missing = connectors.filter((connector) => !connector.configured);
+  // `configured === null`（worker 側）は判定していないだけなので、未設定に数えない。
+  const missing = connectors.filter((connector) => connector.configured === false);
   if (missing.length === 0) return [];
   return [
     {

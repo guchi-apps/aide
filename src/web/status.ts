@@ -15,7 +15,14 @@ import { buildOpsStatus } from "../core/views/ops.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { formatJst } from "../worker/notify.ts";
 import { card, defList, escapeHtml, pill, renderPage, table, type Tone } from "./layout.ts";
-import { loginCookie, logoutCookie, readCookie, SESSION_COOKIE, verifySession } from "./session.ts";
+import {
+  loadSessionKey,
+  loginCookie,
+  logoutCookie,
+  readCookie,
+  SESSION_COOKIE,
+  verifySession,
+} from "./session.ts";
 
 /**
  * 動作状況ページ（`GET /status`）。
@@ -79,9 +86,9 @@ function isSecure(req: IncomingMessage): boolean {
  * 素通しになっている状態でこの画面だけログインを求めても、守るものが無い。
  * その場合はページ自身が「認証が無効」と警告を出す（`buildHealth`）。
  */
-function isSignedIn(req: IncomingMessage, config: AuthConfig): boolean {
+async function isSignedIn(req: IncomingMessage, config: AuthConfig): Promise<boolean> {
   if (!config.enabled) return true;
-  return verifySession(readCookie(req, SESSION_COOKIE), config.password!);
+  return verifySession(readCookie(req, SESSION_COOKIE), await loadSessionKey());
 }
 
 // ---- 表示 ----
@@ -221,10 +228,16 @@ function cacheCard(health: Health): string {
 }
 
 function connectorsCard(health: Health): string {
-  const allConfigured = health.connectors.every((connector) => connector.configured);
+  const missing = health.connectors.some((connector) => connector.configured === false);
   const rows = health.connectors.map((connector) => [
     `<span class="mono">${escapeHtml(connector.key)}</span>`,
-    connector.configured ? pill("ok", "設定済み") : pill("warn", "未設定"),
+    // worker 側（サブPC）の設定は、このサーバーの環境変数に無いので判定しない。
+    // 未設定と出すと、正しく動いていても常に未設定に見える。
+    connector.configured === null
+      ? pill("muted", "worker側")
+      : connector.configured
+        ? pill("ok", "設定済み")
+        : pill("warn", "未設定"),
     connector.probeable
       ? `<span id="probe-${escapeHtml(connector.key)}" class="mono">—</span>`
       : `<span class="sub">確認しない</span>`,
@@ -232,11 +245,12 @@ function connectorsCard(health: Health): string {
 
   return card({
     title: "接続先",
-    status: pill(allConfigured ? "ok" : "warn", allConfigured ? "正常" : "未設定あり"),
+    status: pill(missing ? "warn" : "ok", missing ? "未設定あり" : "正常"),
     body:
       table(["接続先", "設定", "疎通"], rows) +
       `<button class="act" type="button" id="probe-run">疎通を確認する</button>` +
-      `<p class="sub">押したときだけ外部へ問い合わせます。Zaim の巡回と Signaly への送信は行いません。</p>`,
+      `<p class="sub">押したときだけ外部へ問い合わせます。worker（サブPC）側の設定はこのサーバーからは判定できないため、
+       動いているかは上の定期ジョブの記録で確認してください。</p>`,
   });
 }
 
@@ -325,7 +339,7 @@ export async function handleStatusPage(
   res: ServerResponse,
   options: StatusOptions,
 ): Promise<void> {
-  if (!isSignedIn(req, options.authConfig)) {
+  if (!(await isSignedIn(req, options.authConfig))) {
     html(res, 200, renderLoginPage(""));
     return;
   }
@@ -375,7 +389,7 @@ export async function handleStatusLogin(
   res
     .writeHead(303, {
       Location: "/status",
-      "Set-Cookie": loginCookie(config.password!, isSecure(req)),
+      "Set-Cookie": loginCookie(await loadSessionKey(), isSecure(req)),
     })
     .end();
 }
@@ -450,7 +464,7 @@ export async function handleStatusChecks(
   res: ServerResponse,
   options: StatusOptions,
 ): Promise<void> {
-  if (!isSignedIn(req, options.authConfig)) {
+  if (!(await isSignedIn(req, options.authConfig))) {
     res
       .writeHead(401, { "Content-Type": "application/json; charset=utf-8" })
       .end(JSON.stringify({ error: "unauthorized" }));

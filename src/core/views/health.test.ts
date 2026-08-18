@@ -146,10 +146,26 @@ describe("接続先の設定状況", () => {
     }
   }
 
-  it("環境変数が無ければ未設定として出す", () => {
+  it("サーバー側の環境変数が無ければ未設定として出す", () => {
     withEnv({}, () => {
+      const server = readConnectors().filter((connector) => connector.side === "server");
+      assert.ok(server.length > 0);
       assert.equal(
-        readConnectors().every((connector) => !connector.configured),
+        server.every((connector) => connector.configured === false),
+        true,
+      );
+    });
+  });
+
+  it("worker側の設定は判定しない（本番では別マシンの .env にある）", () => {
+    withEnv({}, () => {
+      const worker = readConnectors().filter((connector) => connector.side === "worker");
+      assert.deepEqual(
+        worker.map((connector) => connector.key),
+        ["zaim", "signaly"],
+      );
+      assert.equal(
+        worker.every((connector) => connector.configured === null),
         true,
       );
     });

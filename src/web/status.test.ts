@@ -58,9 +58,18 @@ function health(overrides: Partial<Health> = {}): Health {
       {
         key: "ops-dashboard",
         label: "ops-dashboard",
+        side: "server",
         configured: true,
         probeable: true,
         note: "稼働状況の取得元。",
+      },
+      {
+        key: "zaim",
+        label: "Zaim",
+        side: "worker",
+        configured: null,
+        probeable: false,
+        note: "巡回は worker（サブPC）が担当する。",
       },
     ],
     mcp: { clients: 2, tokens: 2, nearestExpiryAt: "2026-09-11T00:00:00.000Z" },
@@ -156,6 +165,14 @@ describe("動作状況ページ", () => {
 
   it("登録済みのMCPツールが出る", () => {
     assert.ok(renderStatusPage(health(), registry()).includes(pingTool.name));
+  });
+
+  it("worker側の設定は「未設定」と断定せず、判定しないことを示す", () => {
+    // 本番では worker がサブPC・サーバーがVPSにいて .env が別。サーバー側の環境変数で
+    // 判定すると、正しく動いていても常に「未設定」と出てしまう。
+    const html = renderStatusPage(health(), registry());
+    assert.ok(html.includes("worker側"));
+    assert.ok(!html.includes("未設定あり"));
   });
 
   it("機能一覧への行き来ができる", () => {
