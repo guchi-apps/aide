@@ -38,6 +38,21 @@ export interface FeatureSection {
   items: FeatureItem[];
 }
 
+/**
+ * 外部データの帰属表示。
+ *
+ * Open-Meteo の無料利用は **CC BY 4.0 の帰属表示が条件**（非商用・1日10,000回未満と併せて3つ）。
+ * 天気予報そのものは認証の内側（キャッシュ・横断ビュー）にしか出ないため、**誰でも見られる
+ * このページを表示場所と決めている**。取得元を増やしたらここへ足す。
+ *
+ * リンクは踏むまで外部へリクエストが飛ばないので、レイアウトの「外部を読み込まない」方針
+ * （`src/web/layout.ts`）とは両立する。
+ */
+const ATTRIBUTION_HTML =
+  '天気予報のデータは <a href="https://open-meteo.com/" rel="noopener noreferrer">Open-Meteo</a>' +
+  '（<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener noreferrer">CC BY 4.0</a>）' +
+  "を利用しています。";
+
 /** `src/server.ts` が処理するHTTPエンドポイント。ルートを増やしたらここも足す。 */
 const ENDPOINTS: FeatureItem[] = [
   {
@@ -49,7 +64,18 @@ const ENDPOINTS: FeatureItem[] = [
     name: "/status",
     meta: "GET",
     description:
-      "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定を人間向けに表示する。パスワードが要る。",
+      "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定を人間向けに表示する。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+  },
+  {
+    name: "/status/auth/start",
+    meta: "GET",
+    description: "動作状況の画面のGoogleログインを始める。Supabase経由でGoogleへ送り出す。",
+  },
+  {
+    name: "/status/auth/callback",
+    meta: "GET",
+    description:
+      "Googleログインの戻り先。メールアドレスが許可リストにあるときだけログイン状態にする。",
   },
   {
     name: "/features",
@@ -176,8 +202,7 @@ ${sections.map(renderSection).join("\n")}
       { href: "/features", label: "機能一覧", current: true },
     ],
     body,
-    footer:
-      "このページには機能の一覧だけを載せています（実データ・設定値は含みません）。稼働状況は /status で確認できます。",
+    footer: `このページには機能の一覧だけを載せています（実データ・設定値は含みません）。稼働状況は /status で確認できます。<br>${ATTRIBUTION_HTML}`,
   });
 }
 

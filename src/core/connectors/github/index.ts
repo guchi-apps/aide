@@ -14,7 +14,15 @@ import type {
  *
  * ただし **AIDEをGitHub取得の唯一の口にはしない。** issue-deck（GitHub Appでの書き込み）・
  * ops-dashboard（Actions残枠）・portfolio（公開用の取り込み）の3実装はそのまま残し、
- * AIDEが持つのは**読み取り専用の横断ビュー**だけにする。
+ * AIDEが持つのは**横断ビューと、他のどこからも塞がっている経路**だけにする。
+ *
+ * **書き込みはIssueの新規作成1本に限る**（`write.ts`。aide#50）。ClaudeアプリからIssueを
+ * 起票する経路が他に無いため（issue-deckはMCPサーバーを持たず、`POST /api/issues` は
+ * Cookie認証）AIDEに置くが、編集・close・コメントは持たない。それらはissue-deckの仕事で、
+ * AIDE経由にすると往復が増えるだけになる。
+ * **資格情報も分ける。** このファイルが読む `AIDE_GITHUB_TOKEN` はRead-onlyのままで、
+ * 書き込みは `AIDE_GITHUB_ISSUE_TOKEN` を使う（`src/api/secret.ts` の
+ * 「読み取りと書き込みでシークレットを分ける」と同じ考え方）。
  *
  * REST ではなく **GraphQL v4** を使う。対象が26リポジトリあり、RESTだと同じ内容に
  * 約80リクエストかかる（リポジトリごとに compare・releases・commits・issues）。
@@ -56,12 +64,28 @@ export function readGitHubConfig(): GitHubConfig | null {
 }
 
 /**
+ * 書き込み（Issueの起票）用の設定を読む。トークンが無ければ null（＝起票ツールは動かない）。
+ *
+ * **読み取り用の `AIDE_GITHUB_TOKEN` へフォールバックしない。** フォールバックすると、
+ * Read-onlyのトークンで書き込みを試みて403を返すだけの経路ができ、
+ * 「書き込み権限を持たせたか」が設定から読み取れなくなる。
+ */
+export function readGitHubWriteConfig(): GitHubConfig | null {
+  const token = process.env["AIDE_GITHUB_ISSUE_TOKEN"];
+  if (!token) return null;
+
+  return { token, org: process.env["AIDE_GITHUB_ORG"] ?? DEFAULT_ORG };
+}
+
+/**
  * 失敗の理由を、外へ出してよい粒度まで丸める。
  *
  * 例外の `message` にはURLが載ることがある。HTTPステータスと例外の種別だけに落とす。
  * ops-dashboard コネクタの `describeFailure` と同じ考え方。
+ *
+ * 制限時間は取得と書き込みで違うため引数で受ける（既定はこのファイルの取得用）。
  */
-function describeFailure(cause: unknown): string {
+export function describeFailure(cause: unknown, timeoutMs: number = TIMEOUT_MS): string {
   if (cause instanceof Response) {
     // 401/403 は「トークンが無効・権限不足」で、対処が他の失敗とまったく違うので区別する。
     if (cause.status === 401) return "HTTP 401（トークンが無効）";
@@ -69,7 +93,7 @@ function describeFailure(cause: unknown): string {
     return `HTTP ${cause.status}`;
   }
   if (cause instanceof Error) {
-    if (cause.name === "TimeoutError") return `${TIMEOUT_MS}ms 以内に応答しなかった`;
+    if (cause.name === "TimeoutError") return `${timeoutMs}ms 以内に応答しなかった`;
     if (cause.name === "SyntaxError") return "JSONとして読めない応答が返った";
     return "接続できなかった";
   }

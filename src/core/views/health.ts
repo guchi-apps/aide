@@ -6,7 +6,7 @@ import { jobRecordKey, type JobRecord } from "../../worker/record.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 import { readCache, type CachedValue } from "../cache/store.ts";
 import { REPO_ROOT } from "../paths.ts";
-import { readGitHubConfig } from "../connectors/github/index.ts";
+import { readGitHubConfig, readGitHubWriteConfig } from "../connectors/github/index.ts";
 import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
 import { readSubscriptionsConfig } from "../connectors/subscriptions/index.ts";
 import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
@@ -230,7 +230,17 @@ export function readConnectors(): HealthConnector[] {
       side: "server",
       configured: readGitHubConfig() !== null,
       probeable: true,
-      note: "開発状況の取得元（aide_dev_status）。",
+      note: "開発状況の取得元（aide_dev_status）。読み取り専用。",
+    },
+    {
+      key: "github-write",
+      label: "GitHub（起票）",
+      side: "server",
+      // 取得用とは別のトークン。読み取りだけ設定されていても、ここは未設定になる。
+      configured: readGitHubWriteConfig() !== null,
+      // 疎通の確認が「実際にIssueを1件立てる」ことになるため、押せる確認は用意しない。
+      probeable: false,
+      note: "Issue起票の書き込み用トークン（aide_create_issue）。疎通の確認が実際の起票になるため確認しない。",
     },
     {
       key: "subscription-lists",

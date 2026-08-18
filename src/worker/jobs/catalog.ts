@@ -50,6 +50,16 @@ export const JOB_CATALOG = [
     // 30分間隔なので、2回ぶん飛んだら気づけるように90分。
     staleAfterMinutes: 90,
   },
+  {
+    name: "weather-sync",
+    description:
+      "Open-Meteo から今日・明日の天気・最高／最低気温・降水確率を取得し、キャッシュを更新する。" +
+      "取得自体は軽いが、無料枠に利用回数の条件があるため呼ばれるたびに外部へ出さず、" +
+      "毎時ここで取っておく。朝のブリーフィングが読む。",
+    interval: "1時間ごと",
+    // 毎時なので、3回ぶん飛んだら気づけるように180分。
+    staleAfterMinutes: 180,
+  },
 ] as const satisfies readonly JobInfo[];
 
 export type JobName = (typeof JOB_CATALOG)[number]["name"];

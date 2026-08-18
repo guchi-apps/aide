@@ -46,6 +46,14 @@ describe("機能一覧ページ", () => {
     }
   });
 
+  it("Open-Meteo の帰属表示（CC BY 4.0）を出す", () => {
+    // 無料枠の利用条件そのものなので、消えたら気づけるようにしておく。
+    const html = render(registryWith(pingTool));
+    assert.ok(html.includes("Open-Meteo"));
+    assert.ok(html.includes("CC BY 4.0"));
+    assert.ok(html.includes('href="https://creativecommons.org/licenses/by/4.0/"'));
+  });
+
   it("アイコンとPWAマニフェストを head で指す", () => {
     const html = render(registryWith(pingTool));
     assert.match(html, /rel="icon"[^>]*favicon-32\.png/);

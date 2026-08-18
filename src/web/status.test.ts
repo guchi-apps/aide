@@ -175,6 +175,24 @@ describe("動作状況ページ", () => {
     assert.ok(!html.includes("未設定あり"));
   });
 
+  it("Googleログインなら、誰で入っているかを画面に出す", () => {
+    const html = renderStatusPage(health(), registry(), { email: "me@example.com" });
+    assert.ok(html.includes("me@example.com"));
+    assert.ok(html.includes("ログアウト"));
+    assert.ok(html.includes("許可されたGoogleアカウント"));
+  });
+
+  it("パスワードでのログインなら、身元は出さない", () => {
+    const html = renderStatusPage(health(), registry(), { email: null });
+    assert.ok(html.includes("ログアウト"));
+    assert.ok(html.includes("パスワード認証の内側"));
+  });
+
+  it("メールアドレスもエスケープして出す", () => {
+    const html = renderStatusPage(health(), registry(), { email: "<img src=x onerror=1>@e.com" });
+    assert.ok(!html.includes("<img src=x"));
+  });
+
   it("機能一覧への行き来ができる", () => {
     const html = renderStatusPage(health(), registry());
     assert.ok(html.includes('href="/features"'));
@@ -204,17 +222,34 @@ describe("動作状況ページ", () => {
 
 describe("ログイン画面", () => {
   it("パスワードだけを尋ね、値を埋め込まない", () => {
-    const html = renderLoginPage("");
+    const html = renderLoginPage({ google: false });
     assert.ok(html.includes('type="password"'));
     assert.ok(html.includes('action="/status/login"'));
     assert.ok(!html.includes("value="));
   });
 
+  it("Googleログインが有効なら、パスワード欄を出さない", () => {
+    // 残すと「許可したメールアドレスの人しか開けない」制限がパスワード1本で迂回できる。
+    const html = renderLoginPage({ google: true });
+    assert.ok(html.includes('href="/status/auth/start"'));
+    assert.ok(html.includes("Googleでログイン"));
+    assert.ok(!html.includes('type="password"'));
+    assert.ok(!html.includes('action="/status/login"'));
+  });
+
   it("失敗の理由を出す", () => {
-    assert.ok(renderLoginPage("パスワードが違います。").includes("パスワードが違います。"));
+    const html = renderLoginPage({ google: false, error: "パスワードが違います。" });
+    assert.ok(html.includes("パスワードが違います。"));
+  });
+
+  it("許可されていないアカウントには、誰なら開けるのかを教えない", () => {
+    const html = renderLoginPage({ google: true, error: "このアカウントでは開けません。" });
+    assert.ok(html.includes("このアカウントでは開けません。"));
+    // 許可リストの中身が画面に出ると、総当たりの手がかりになる。
+    assert.doesNotMatch(html, /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
   });
 
   it("エラー文もエスケープする", () => {
-    assert.ok(!renderLoginPage("<b>x</b>").includes("<b>x</b>"));
+    assert.ok(!renderLoginPage({ google: false, error: "<b>x</b>" }).includes("<b>x</b>"));
   });
 });

@@ -41,6 +41,8 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",
   AIDE_SIGNALY_WEBHOOK_URL: "workerジョブの通知用。workerはサブPCで動く",
   AIDE_SUBSCRIPTIONS_URL: "既定 http://127.0.0.1:3107 で足りる",
+  AIDE_WEATHER_LAT: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
+  AIDE_WEATHER_LON: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
   AIDE_WORKER_STATE_DIR: "worker（サブPC）の記録の置き場",
 };
 
@@ -138,7 +140,13 @@ describe("本番の.envへの配線（deploy.yml）", () => {
 
   it("未発行でもデプロイが止まらないよう、トークン類は空を許している", () => {
     // 認証まわり（AIDE_AUTH_PASSWORD）は空だと起動しないので、あえて既定値を付けない。
-    for (const name of ["AIDE_READ_SECRET", "AIDE_OPS_DASHBOARD_TOKEN", "AIDE_SUBSCRIPTIONS_TOKEN", "AIDE_GITHUB_TOKEN"]) {
+    for (const name of [
+      "AIDE_READ_SECRET",
+      "AIDE_OPS_DASHBOARD_TOKEN",
+      "AIDE_SUBSCRIPTIONS_TOKEN",
+      "AIDE_GITHUB_TOKEN",
+      "AIDE_GITHUB_ISSUE_TOKEN",
+    ]) {
       assert.match(
         envHeredoc,
         new RegExp(`^\\s*${name}=\\$\\{${name}:-\\}$`, "m"),
