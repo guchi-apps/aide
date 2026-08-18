@@ -13,8 +13,8 @@ import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
 import type { ZaimOnlineAccount, ZaimSnapshot } from "../connectors/zaim/types.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 
-/** これを超えたら鮮度が怪しいとみなす。巡回は日次想定。 */
-const STALE_AFTER_MINUTES = 60 * 24;
+/** これを超えたら鮮度が怪しいとみなす。巡回は日次想定。動作状況ページ（`/status`）も同じ基準で判定する。 */
+export const STALE_AFTER_MINUTES = 60 * 24;
 
 /** 「次の支払予定」として返す期間。1ヶ月ぶんの支払を必ず1周ぶん含められる長さにしてある。 */
 const UPCOMING_DAYS = 31;
