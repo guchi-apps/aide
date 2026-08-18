@@ -16,6 +16,7 @@ import { devStatusTool } from "./mcp/tools/dev.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
+import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 
 /**
@@ -60,6 +61,9 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok\n");
     return;
   }
+
+  // アイコンとPWAマニフェスト。公開してよい静的ファイルなので認証は通さない。
+  if (await handleAsset(req.method, path, res)) return;
 
   // 機能一覧。何が使えるかを載せるだけで実データは返さないため、認証は通さない。
   if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {

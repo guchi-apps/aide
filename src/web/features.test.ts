@@ -46,6 +46,12 @@ describe("機能一覧ページ", () => {
     }
   });
 
+  it("アイコンとPWAマニフェストを head で指す", () => {
+    const html = render(registryWith(pingTool));
+    assert.match(html, /rel="icon"[^>]*favicon-32\.png/);
+    assert.ok(html.includes('rel="manifest" href="/manifest.webmanifest"'));
+  });
+
   it("HTTPエンドポイントが載る", () => {
     const html = render(registryWith(pingTool));
     for (const path of [

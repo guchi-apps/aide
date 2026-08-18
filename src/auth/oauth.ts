@@ -18,6 +18,7 @@ import {
   findClient,
   findToken,
 } from "./store.ts";
+import { headTags } from "../web/assets.ts";
 
 /**
  * MCP向けの OAuth 2.1 認可サーバー兼リソースサーバー。
@@ -134,6 +135,7 @@ const LOGIN_PAGE = (params: string, error: string) => `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AIDE への接続を許可</title>
+${headTags({ manifest: false })}
 <style>
  body{font-family:system-ui,sans-serif;max-width:24rem;margin:4rem auto;padding:0 1rem;line-height:1.7}
  h1{font-size:1.25rem} input{width:100%;padding:.6rem;font-size:1rem;box-sizing:border-box}

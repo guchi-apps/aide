@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
+import { headTags } from "./assets.ts";
 
 /**
  * 機能一覧ページ（`GET /features`）。
@@ -43,6 +44,16 @@ const ENDPOINTS: FeatureItem[] = [
     name: "/features",
     meta: "GET",
     description: "このページ。認証は不要。",
+  },
+  {
+    name: "/manifest.webmanifest",
+    meta: "GET",
+    description: "PWAのマニフェスト。ホーム画面へ追加したときの名前とアイコンを返す。認証は不要。",
+  },
+  {
+    name: "/icons/:name",
+    meta: "GET",
+    description: "アイコン画像。/favicon.ico も同じ画像を返す。認証は不要。",
   },
   {
     name: "/health",
@@ -168,6 +179,7 @@ export function renderFeaturesPage(sections: FeatureSection[], baseUrl: string):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>AIDE の機能一覧</title>
+${headTags()}
 <style>${STYLE}</style></head><body>
 <h1>AIDE の機能一覧</h1>
 <p class="lead">生活情報まわりの共通バックエンド／ハブ。このサーバーで使える機能の一覧です。</p>
