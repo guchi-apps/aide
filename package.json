@@ -1,14 +1,14 @@
 {
   "name": "aide",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node --watch src/server.ts",
-    "start": "node src/server.ts",
+    "dev": "node --watch --env-file-if-exists=.env src/server.ts",
+    "start": "node --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\"",
     "worker": "node --env-file-if-exists=.env src/worker/run.ts"

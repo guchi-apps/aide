@@ -39,12 +39,19 @@
 
 `@claude` コメントを起点に、計画提示〜実装〜develop向けPR作成までを GitHub Actions 上で無人実行する。
 ワークフローの実体は `guchi-apps/issue-deck` にあり、このリポジトリの `.github/workflows/` には
-`uses:` で参照する薄い caller だけを置いている（`@workflows/v15`）。
+`uses:` で参照する薄い caller だけを置いている（`@workflows/v23`）。
+
+develop向けPRが `develop` とコンフリクトした場合は、`claude-conflict-resolve.yml`（caller）が
+無人でClaude Codeによる解消を試みる。人が `@claude コンフリクトを解消して` と依頼する必要はない。
+
+**caller の `uses:` のタグと `prompts-ref` は必ず同じ値にする。** 参照タグを上げるときは
+`.github/workflows/` 配下の caller をまとめて更新し、この節の記述も合わせて直す。
 
 設計・運用の詳細は issue-deck 側を参照する。
 
 - 進捗管理の設計: [progress-status-architecture.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/progress-status-architecture.md)
 - 無人実行の挙動: [multi-agent/dispatch.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/multi-agent/dispatch.md)
+- 自動修復の挙動: [multi-agent/auto-repair.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/multi-agent/auto-repair.md)
 
 ### ブランチ
 

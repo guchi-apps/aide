@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
+import { card, escapeHtml, renderPage } from "./layout.ts";
 
 /**
  * 機能一覧ページ（`GET /features`）。
@@ -14,10 +15,15 @@ import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
  * - キャッシュの中身・取得時刻などの実データや稼働状況
  * - 環境変数の値、シークレットの設定有無、認証の有効・無効
  *
+ * それらを見たい場合は動作状況ページ（`/status`）が答える。**あちらは認証の内側にある。**
+ * 見た目は共通（`src/web/layout.ts`）だが、公開範囲は混ぜない。
+ *
  * MCPツールは登録簿（`src/mcp/registry.ts`）から自動生成するため、ツールを増やせば
  * 何もしなくてもここに出る。HTTPエンドポイントだけは静的な宣言（`ENDPOINTS`）なので、
  * `src/server.ts` にルートを足したらここも更新する。
  */
+
+export { escapeHtml };
 
 export interface FeatureItem {
   name: string;
@@ -40,9 +46,25 @@ const ENDPOINTS: FeatureItem[] = [
     description: "MCPサーバー本体（Streamable HTTP）。OAuthのアクセストークンが要る。",
   },
   {
+    name: "/status",
+    meta: "GET",
+    description:
+      "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定を人間向けに表示する。パスワードが要る。",
+  },
+  {
     name: "/features",
     meta: "GET",
     description: "このページ。認証は不要。",
+  },
+  {
+    name: "/manifest.webmanifest",
+    meta: "GET",
+    description: "PWAのマニフェスト。ホーム画面へ追加したときの名前とアイコンを返す。認証は不要。",
+  },
+  {
+    name: "/icons/:name",
+    meta: "GET",
+    description: "アイコン画像。/favicon.ico も同じ画像を返す。認証は不要。",
   },
   {
     name: "/health",
@@ -111,76 +133,52 @@ export function buildSections(registry: ToolRegistry): FeatureSection[] {
   ];
 }
 
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-const STYLE = `
- :root{color-scheme:light dark;--fg:#1a1a1a;--muted:#666;--line:#e2e2e2;--card:#fff;--bg:#fafafa;--accent:#2b6cb0}
- @media (prefers-color-scheme:dark){
-  :root{--fg:#e8e8e8;--muted:#a0a0a0;--line:#333;--card:#1c1c1c;--bg:#121212;--accent:#7fb3e8}
- }
- *{box-sizing:border-box}
- body{font-family:system-ui,sans-serif;max-width:48rem;margin:0 auto;padding:3rem 1rem 4rem;
-      line-height:1.7;color:var(--fg);background:var(--bg)}
- h1{font-size:1.5rem;margin:0 0 .25rem}
- h2{font-size:1.05rem;margin:2.5rem 0 .25rem;padding-bottom:.4rem;border-bottom:1px solid var(--line)}
- p{margin:.25rem 0}
- .lead{color:var(--muted)}
- .note{color:var(--muted);font-size:.875rem;margin:.5rem 0 1rem}
- .conn{margin-top:1.5rem;padding:.75rem 1rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card)}
- .conn dt{color:var(--muted);font-size:.8125rem}
- .conn dd{margin:0 0 .5rem}
- .conn dd:last-child{margin-bottom:0}
- ul{list-style:none;padding:0;margin:0}
- li{padding:.75rem 1rem;border:1px solid var(--line);border-radius:.5rem;background:var(--card);margin-bottom:.5rem}
- .name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;color:var(--accent);
-       word-break:break-all}
- .meta{margin-left:.5rem;color:var(--muted);font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
- .desc{margin:.25rem 0 0;font-size:.9375rem}
- code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9375rem;word-break:break-all}
- footer{margin-top:3rem;color:var(--muted);font-size:.8125rem}
-`;
-
 function renderItem(item: FeatureItem): string {
-  const meta = item.meta ? `<span class="meta">${escapeHtml(item.meta)}</span>` : "";
-  return `<li><span class="name">${escapeHtml(item.name)}</span>${meta}
-  <p class="desc">${escapeHtml(item.description)}</p></li>`;
+  const meta = item.meta ? `<span class="mt">${escapeHtml(item.meta)}</span>` : "";
+  return `<li><span><span class="nm">${escapeHtml(item.name)}</span>${meta}</span>
+<span class="ds">${escapeHtml(item.description)}</span></li>`;
 }
 
 function renderSection(section: FeatureSection): string {
-  const note = section.note ? `<p class="note">${escapeHtml(section.note)}</p>` : "";
+  const note = section.note ? `<p class="sub">${escapeHtml(section.note)}</p>` : "";
   const items = section.items.length
-    ? `<ul>${section.items.map(renderItem).join("\n")}</ul>`
-    : `<p class="note">（まだありません）</p>`;
-  return `<h2>${escapeHtml(section.title)}</h2>\n${note}\n${items}`;
+    ? `<ul class="items">${section.items.map(renderItem).join("\n")}</ul>`
+    : `<p class="sub">（まだありません）</p>`;
+  return card({
+    title: section.title,
+    meta: String(section.items.length),
+    body: `${note}${items}`,
+    // 節ごとの項目数に差があるため、2列に分けず縦に並べる。
+    wide: true,
+  });
 }
 
 /** ページのHTMLを組み立てる純粋関数。テストはここに当てる。 */
 export function renderFeaturesPage(sections: FeatureSection[], baseUrl: string): string {
-  return `<!doctype html>
-<html lang="ja"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex">
-<title>AIDE の機能一覧</title>
-<style>${STYLE}</style></head><body>
-<h1>AIDE の機能一覧</h1>
+  const body = `<section class="hero">
+<div class="hero-top"><h1>機能一覧</h1></div>
 <p class="lead">生活情報まわりの共通バックエンド／ハブ。このサーバーで使える機能の一覧です。</p>
-<dl class="conn">
-  <dt>MCP接続先URL</dt>
-  <dd><code>${escapeHtml(baseUrl)}/mcp</code></dd>
+<dl class="connect">
+  <dt>MCP接続先</dt>
+  <dd><span class="mono">${escapeHtml(baseUrl)}/mcp</span></dd>
   <dt>接続方法</dt>
-  <dd>ClaudeアプリのカスタムコネクタにこのURLを登録します（末尾の <code>/mcp</code> が要ります）。</dd>
+  <dd>ClaudeアプリのカスタムコネクタにこのURLを登録します（末尾の <span class="mono">/mcp</span> が要ります）。</dd>
 </dl>
+</section>
+<div class="grid">
 ${sections.map(renderSection).join("\n")}
-<footer>このページには機能の一覧だけを載せています（実データ・設定値は含みません）。</footer>
-</body></html>
-`;
+</div>`;
+
+  return renderPage({
+    title: "AIDE の機能一覧",
+    nav: [
+      { href: "/status", label: "動作状況", current: false },
+      { href: "/features", label: "機能一覧", current: true },
+    ],
+    body,
+    footer:
+      "このページには機能の一覧だけを載せています（実データ・設定値は含みません）。稼働状況は /status で確認できます。",
+  });
 }
 
 export function handleFeaturesPage(res: ServerResponse, registry: ToolRegistry, baseUrl: string): void {

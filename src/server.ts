@@ -16,7 +16,15 @@ import { devStatusTool } from "./mcp/tools/dev.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
+import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
+import {
+  handleStatusChecks,
+  handleStatusLogin,
+  handleStatusLogout,
+  handleStatusPage,
+  type StatusOptions,
+} from "./web/status.ts";
 
 /**
  * AIDE のエントリポイント。
@@ -61,9 +69,34 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
+  // アイコンとPWAマニフェスト。公開してよい静的ファイルなので認証は通さない。
+  if (await handleAsset(req.method, path, res)) return;
+
   // 機能一覧。何が使えるかを載せるだけで実データは返さないため、認証は通さない。
   if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {
     handleFeaturesPage(res, registry, baseUrl);
+    return;
+  }
+
+  // ---- 動作状況の画面 ----
+  // **機能一覧とは公開範囲が逆で、実データを載せるためパスワードの内側に置く。**
+  // 認証はOAuthではなく画面用のCookie（src/web/session.ts）。照合するパスワードは同じ。
+  const statusOptions: StatusOptions = { authConfig, baseUrl, registry };
+  if (path === "/status" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleStatusPage(req, res, statusOptions);
+    return;
+  }
+  if (path === "/status/login" && req.method === "POST") {
+    await handleStatusLogin(req, res, statusOptions);
+    return;
+  }
+  if (path === "/status/logout" && req.method === "POST") {
+    handleStatusLogout(req, res);
+    return;
+  }
+  // 疎通確認。押したときだけ外部のコネクタへ問い合わせる。
+  if (path === "/status/checks" && req.method === "POST") {
+    await handleStatusChecks(req, res, statusOptions);
     return;
   }
 

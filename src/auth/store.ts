@@ -91,6 +91,29 @@ export async function consumeRefreshToken(refreshToken: string): Promise<AccessT
   return found;
 }
 
+/** 動作状況ページ（`/status`）へ出す集計。**トークンの値そのものは返さない。** */
+export interface AuthSummary {
+  /** 動的登録されたクライアントの数。 */
+  clients: number;
+  /** 期限内のアクセストークンの数。 */
+  tokens: number;
+  /** そのうち最も早い失効時刻（ISO8601）。1件も無ければ null。 */
+  nearestExpiryAt: string | null;
+}
+
+export async function readAuthSummary(): Promise<AuthSummary> {
+  const state = prune(await load());
+  const nearest = state.tokens.reduce<number | null>(
+    (earliest, token) => (earliest === null || token.expiresAt < earliest ? token.expiresAt : earliest),
+    null,
+  );
+  return {
+    clients: state.clients.length,
+    tokens: state.tokens.length,
+    nearestExpiryAt: nearest === null ? null : new Date(nearest).toISOString(),
+  };
+}
+
 /** テスト用。プロセス内キャッシュを捨てる。 */
 export function resetCache(): void {
   cached = null;
