@@ -14,6 +14,7 @@ import {
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
+import { dailyBriefingTool } from "./mcp/tools/briefing.ts";
 import { devStatusTool } from "./mcp/tools/dev.ts";
 import { createIssueTool } from "./mcp/tools/issue.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
@@ -55,6 +56,7 @@ registry.register(pingTool);
 registry.register(moneySummaryTool);
 registry.register(opsStatusTool);
 registry.register(roomStatusTool);
+registry.register(dailyBriefingTool);
 registry.register(devStatusTool);
 registry.register(createIssueTool);
 
