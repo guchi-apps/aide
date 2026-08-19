@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
+import type { McpIcon } from "../mcp/types.ts";
 
 /**
  * アイコンとPWAマニフェストの配信（`src/web/icons/`）。
@@ -77,6 +78,24 @@ export function manifest(): unknown {
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
+}
+
+/**
+ * MCPの `initialize` で名乗るアイコン（仕様 2025-11-25 の `Implementation.icons`）。
+ * ブラウザに出しているのと同じ画像を、Claudeアプリなどのクライアントにも出す。
+ *
+ * **同一オリジンの絶対URLで渡す。** クライアントはアイコンを資格情報なしで取りに行き、
+ * サーバーと別オリジンのURLは拒否してよいことになっているため、相対パスでは足りない。
+ * `baseUrl` は `AIDE_BASE_URL`（無ければリクエストのHost）から組み立てたもの。
+ *
+ * サイズを選ぶのはクライアントの仕事なので、配信しているものをそのまま並べる。
+ */
+export function mcpIcons(baseUrl: string): McpIcon[] {
+  return ICONS.map((icon) => ({
+    src: `${baseUrl}${icon.path}`,
+    mimeType: "image/png",
+    sizes: [`${icon.size}x${icon.size}`],
+  }));
 }
 
 /**

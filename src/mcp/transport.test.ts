@@ -62,6 +62,9 @@ function request(body: unknown, headers: Record<string, string> = {}): IncomingM
   return stream as unknown as IncomingMessage;
 }
 
+/** テストから見たAIDEの公開URL。本番では `resolveBaseUrl()` が返すものが入る。 */
+const BASE_URL = "https://aide.example";
+
 function transport(): InstanceType<typeof McpTransport> {
   const registry = new ToolRegistry();
   registry.register({
@@ -96,6 +99,7 @@ describe("MCPのやり取りの記録", () => {
     await transport().handle(
       request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "aide_ok" } }),
       response(),
+      BASE_URL,
     );
 
     const [entry] = await waitForEntries(1);
@@ -111,6 +115,7 @@ describe("MCPのやり取りの記録", () => {
     await transport().handle(
       request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "aide_boom" } }),
       res,
+      BASE_URL,
     );
     assert.equal(res.status, 200);
     assert.ok(res.body.includes('"isError":true'));
@@ -124,6 +129,7 @@ describe("MCPのやり取りの記録", () => {
     await transport().handle(
       request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "aide_missing" } }),
       response(),
+      BASE_URL,
     );
 
     const [entry] = await waitForEntries(1);
@@ -145,6 +151,7 @@ describe("MCPのやり取りの記録", () => {
         params: { protocolVersion: "2025-06-18", clientInfo: { name: "Claude", version: "1.4.2" } },
       }),
       res,
+      BASE_URL,
     );
     const sessionId = res.headers["Mcp-Session-Id"]!;
     assert.ok(sessionId, "セッションIDが発行されていない");
@@ -155,6 +162,7 @@ describe("MCPのやり取りの記録", () => {
         { "mcp-session-id": sessionId },
       ),
       response(),
+      BASE_URL,
     );
 
     const entries = await waitForEntries(2);
@@ -171,6 +179,7 @@ describe("MCPのやり取りの記録", () => {
     await transport().handle(
       request({ jsonrpc: "2.0", id: 1, method: "ping" }, { "user-agent": "Anthropic/Toolbox 2.0" }),
       response(),
+      BASE_URL,
     );
 
     const [entry] = await waitForEntries(1);
@@ -188,10 +197,35 @@ describe("MCPのやり取りの記録", () => {
         params: { name: "aide_ok", arguments: { secret: "この文字列は残ってはいけない" } },
       }),
       res,
+      BASE_URL,
     );
 
     const [entry] = await waitForEntries(1);
     assert.ok(!JSON.stringify(entry).includes("この文字列は残ってはいけない"));
     assert.ok(!Object.keys(entry!).includes("sessionId"));
+  });
+});
+
+describe("initialize が名乗る内容", () => {
+  it("アイコンを同一オリジンの絶対URLで返す", async () => {
+    // クライアントは資格情報なしでアイコンを取りに行き、サーバーと別オリジンのURLは
+    // 拒否してよいことになっている。相対パスや別ホストになっていないかを確かめる。
+    const res = response();
+    await transport().handle(
+      request({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+      res,
+      BASE_URL,
+    );
+
+    const { result } = JSON.parse(res.body) as {
+      result: { serverInfo: { icons?: { src: string; mimeType: string; sizes: string[] }[] } };
+    };
+    const icons = result.serverInfo.icons ?? [];
+    assert.ok(icons.length > 0, "アイコンを名乗っていない");
+    for (const icon of icons) {
+      assert.ok(icon.src.startsWith(`${BASE_URL}/icons/`), icon.src);
+      assert.equal(icon.mimeType, "image/png");
+      assert.match(icon.sizes[0]!, /^\d+x\d+$/);
+    }
   });
 });

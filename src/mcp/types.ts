@@ -22,6 +22,18 @@ export interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
+/**
+ * サーバーが名乗るアイコン（仕様 2025-11-25 の `Icon`）。
+ * `initialize` の `serverInfo.icons` に載せると、対応するクライアントがUIに出す。
+ */
+export interface McpIcon {
+  /** 画像のURL。HTTPS か data: に限る（クライアントは他のスキームを拒否してよい）。 */
+  src: string;
+  mimeType: string;
+  /** `"192x192"` の形。可変サイズ（SVG等）なら `["any"]`。 */
+  sizes: string[];
+}
+
 /** ツールが返すコンテンツ。今はテキストのみ扱う。 */
 export interface ToolContent {
   type: "text";
