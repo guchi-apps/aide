@@ -14,7 +14,7 @@ AIDEがやること:
 - 必要な範囲への**フィルタリング**
 - サービスごとに異なる形式の**共通フォーマットへの整形**
 - 複数ソースを1回の呼び出しに畳んだ**横断ビュー**の提供
-- **他のどこからも塞がっている経路に限った書き込み**（後述。現在はGitHubのIssue起票1本だけ）
+- **他のどこからも塞がっている経路に限った書き込み**（後述。現在はGitHubのIssue起票と、Zaimへの支出登録の2つ）
 
 AIDEがやらないこと:
 
@@ -32,7 +32,25 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 2. **読み取りとは別の資格情報を使うこと。** 取得用のトークンに書き込み権限を足さない
 3. **作成だけを持つこと。** 編集・削除・状態の変更は持たない。取り返しのつく操作に限る
 
-現在この3条件を満たすのは `aide_create_issue`（ClaudeアプリからのIssue起票）だけ。
+現在この基準で入れている書き込みは次の2つ。
+
+| | 経路 | 条件1 | 条件2（資格情報） | 条件3 |
+|---|---|---|---|---|
+| `aide_create_issue`（aide#50） | ClaudeアプリからのGitHub Issue起票 | 満たす | `AIDE_GITHUB_ISSUE_TOKEN`（取得用とは別のPAT） | 作成のみ |
+| `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
+
+#### Zaimへの登録は条件1の例外（aide#37）
+
+Zaim の `POST /v2/home/money/payment` は**公開APIで、car-care / asset-manager から直接叩ける**。
+「他のどこからも塞がっている経路」ではないため、条件1は文言どおりには満たしていない。
+それでもAIDEへ寄せたのは、塞がっているからではなく **Zaimの資格情報を1か所に閉じ込めるため**。
+各アプリがそれぞれZaimクライアントと認証情報を持つと、読み取り側で起きた重複（asset-manager#191）を
+書き込み側でも作ることになる。条件2・3は文言どおり満たしている。
+
+**この例外を前例として使わない。** 「経路は開いているが資格情報を分散させたくない」という形の要望は
+他のサービスでも出うるので、次に持ち込むときはこの節を根拠にせず、Issueで改めて決める。
+
+詳細は[個人アプリ向けのZaim登録API](#個人アプリ向けのzaim登録api)。
 
 ## Core と MCP層の境界
 
@@ -79,6 +97,7 @@ src/
   api/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
     read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary）
+    zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
     secret.ts          /api 配下の共有シークレット認証
   core/
     connectors/        外部サービスからの取得
@@ -132,6 +151,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
 | `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
+| `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
+| `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細 |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みを伴う唯一のツール**（作成のみ。編集・close・コメントは持たない） |
 
@@ -377,6 +398,25 @@ ZAIM_REFRESH_DRY_RUN=1 node --env-file-if-exists=.env src/core/connectors/zaim/s
 
 asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読み取りapi)（`GET /api/money/summary`）から受け取る。
 
+### 取得は巡回、登録は公式API
+
+同じZaimでも、**読む経路と書く経路はまったく別**にしている。混同すると、片方の資格情報で
+もう片方を動かそうとして詰まる。
+
+| | 取得（残高・保有銘柄） | 登録（支出） |
+|---|---|---|
+| 手段 | Playwrightでの画面巡回 | 公式API（`POST /v2/home/money/payment`） |
+| 資格情報 | ログイン状態（storage state。Cookieそのもの） | OAuth 1.0a（`AIDE_ZAIM_*`） |
+| 動く場所 | サブPCの worker | VPSのサーバー（同期リクエスト内） |
+| 実装 | `scrape.ts` / `parse.ts` / `session.ts` | `oauth.ts` / `write.ts` |
+
+**Zaim APIで扱えるのは利用者が手入力したレコードだけ**という制約があり、残高も取れない。
+だから取得は巡回のまま残している。逆に登録はAPIで素直にできるため、Playwrightを持ち出さない
+（同期リクエスト中にChromiumを起動しないという「取得と提供の分離」の方針とも合う）。
+
+銀行・カード・スマートレシート由来の**自動連携レコードはAPIから見えず、編集もできない**。
+既存レコードの口座付け替え・集計対象外化はこの経路では実現できない（asset-manager#153 Phase 5）。
+
 
 ## コネクタ: ops-dashboard
 
@@ -489,6 +529,60 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 通貨は `JPY` / `USD` の混在を許すため、**合計は通貨別**で返す。円換算値（`monthlyJpy`）は相手が
 Frankfurter のレートで計算した参考値で、取得できていなければ `null` になる。
+
+
+## コネクタ: myroom
+
+いまの部屋の状態（室温・湿度・気圧・CO2・照度とエアコンの運転状態）。**AIDEはセンサーの値を
+集めない。** [myroom](https://github.com/guchi-apps/myroom) が Raspberry Pi からの受信・保存・
+鮮度判定まで持っているため、サーバー間参照用の読み取りAPI（`GET /api/internal/room-state`）を
+叩いて `aide_room_status` に畳むだけにしている。ops-dashboard・subscription-lists と同じ
+「既にある集約を横断ビューへ畳む」ケース。
+
+```
+src/core/connectors/myroom/
+  types.ts   myroom のレスポンスのうち、AIDEが使うフィールドだけを再宣言
+  index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
+src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
+```
+
+### 経路
+
+両方とも同じVPS上で動くため **localhost で届き、myroom を外部公開する必要がない**。
+`fetch` しか使わないので実行時依存も増えない。
+
+| 環境変数 | 未設定のとき | 設定したとき |
+|---|---|---|
+| `AIDE_MYROOM_URL` | `http://127.0.0.1:8000` | そのURLへ問い合わせる |
+| `AIDE_MYROOM_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+
+トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
+止まる）。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
+
+**myroom の読み取りAPIは元々 Supabase のユーザーログイン必須**で、サーバー間から読める口が無い。
+内部APIは [myroom#161](https://github.com/guchi-apps/myroom/issues/161) で追加する。**未実装の
+バージョンに対しては 404 が返り、`unavailable` に「内部APIが未実装のバージョン」として出る。**
+
+### 鮮度と判定
+
+**センサーの鮮度判定・気圧オフセットの適用・デバイスの表示名は myroom 側が持っている。**
+こちらで再実装すれば必ずズレるため、判定済みの値を受け取る（しきい値は `staleThresholdMinutes`
+として一緒に返る）。
+
+**受信が止まっているセンサー（`stale`）の値は判定に使わない。** 数日前に止まったセンサーの32℃を
+「いまの室温」として報告してしまうため（ops ビューがオフラインのホストを評価しないのと同じ）。
+値そのものは残すので、後から見れば何度で止まったかは分かる。
+
+快適域のしきい値は `src/core/views/room.ts` の `THRESHOLDS` にまとめてある（CO2の1000ppmは
+建築物衛生法の管理基準）。
+
+### 返す粒度
+
+「いま部屋がどうなっているか」に答えられるところまで。**履歴・日別統計・記録の一覧は返さない。**
+生の時系列を渡してもコンテキストを食うだけで答えは良くならない（詳細は myroom の画面がある）。
+
+**キャッシュを挟まない。** 部屋の状態は鮮度そのものが価値であり、ジョブ間隔ぶん古くなると
+「いま暑いか」に答えられなくなる（README「どこまでを『重い取得』とみなすか」の右側）。
 
 
 ## コネクタ: GitHub
@@ -657,6 +751,74 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 座標は自宅の位置にあたるため、**ログにも失敗通知にも出さない**。失敗理由はHTTPステータスと
 種別まで丸める（`Open-Meteo が HTTP 429 を返しました（利用回数の上限）` など）。
 
+
+## 横断ビュー: 朝のブリーフィング
+
+Claudeアプリから「今日はどんな感じ？」と聞いたときに、**今日の予定・交通・天気**を1回の呼び出しで
+返す（guchi-apps/question#7・aide#36）。3ソースをClaudeに個別に叩かせると往復もトークンも増えるため、
+AIDE側で1本に畳む。
+
+```
+src/core/views/briefing.ts   セクションの器・天気の畳み込み・未接続の表現（純粋関数。テストはここ）
+src/mcp/tools/briefing.ts    aide_daily_briefing
+```
+
+**MCPツールはこの1本だけ。** `aide_weather`・`aide_transit_delay` のような単機能ツールは作らない。
+各コネクタは Core に置き、MCP層へ出す口はこのビューへ集約する（「Core は広く、MCP層は狭く」）。
+
+### ソースごとに独立して失敗させる
+
+「予定は取れたが交通が取れなかった」を表現できるように、セクションごとに `state` を持たせ、
+**1つの失敗で全体を落とさない**。`state` は4つ。
+
+| 値 | 意味 |
+|---|---|
+| `ok` | 中身が入っている |
+| `unavailable` | 接続は設定されているが取得できなかった（対象日ぶんが無い場合も含む） |
+| `not_configured` | 接続が設定されていない（トークン等が未設定） |
+| `not_connected` | コネクタ自体がまだ無い。依存Issueの完了待ち |
+
+`unavailable` と `not_connected` を分けているのは、**前者は直せば取れる／後者はまだ存在しない**という
+違いをClaudeに伝えるため。どちらも「情報が無い」だが、言うべきことが違う。
+
+### 「今日」はJSTの暦日で切る
+
+`Asia/Tokyo` の暦日（`YYYY-MM-DD`）を対象日とし、深夜も暦日どおりに扱う。ツールは引数を取らない。
+
+**天気は日付で突き合わせる。配列の先頭を「今日」とみなさない。** キャッシュは日付をまたいで残るため、
+添字で取ると日付が変わった直後に昨日の予報を「今日」として返してしまう。対象日が含まれていない場合は
+`unavailable` にして、取得済みの時刻と理由を添える。
+
+#### 深夜0時台は「明日」が必ず欠ける
+
+天気の取得は今日・明日の2日ぶん固定（`FORECAST_DAYS`）で、同期は毎時。**日付が変わってから次の同期が
+走るまでは、キャッシュの中身が「前日・当日」のまま**になり、`tomorrow` が見つからない。このとき
+キャッシュ自体は新しいので `stale` にはならない（180分に満たない）。
+
+セクション全体は落とさず `tomorrow` だけを `null` にし、**「明日の天気が無い」と読まれないよう `note` に
+断り書きを添える**。日をまたいだ直後だけ毎日起きる状態なので、鮮度の判定で表現しようとすると壊れる。
+
+### `aide_room_status` との棲み分け
+
+`aide_daily_briefing` が返す天気は**今日・明日の予報**、`aide_room_status` が返すのは**いまの実測**
+（室温・湿度・CO2と、myroom 経由の屋外の気温・湿度・気圧）。「いま暑いか」は後者、「今日は暑くなるか」
+「傘は要るか」は前者にあたる。**両方のツールの説明文でこの違いを書き分ける**——横断ビュー同士でも、
+選択が曖昧になればMCP層を狭くしている意味が無くなる。
+
+### 鮮度はビュー全体で揃えない
+
+天気は毎時更新のキャッシュ、交通は分単位、予定は都度と性質が違うため、1つの `stale` に潰すと意味が
+壊れる。`fetchedAt` / `ageMinutes` / `stale` は**セクションごとに持つ**。
+
+### 揃った順に足す
+
+現時点で実データを返せるのは天気だけで、予定（DaySpan側のGET API: guchi-apps/dayspan#236 ＋ AIDE側の
+コネクタ）と交通（aide#33）は `not_connected` を返す。セクションは名前付きフィールドと共通の器
+（`BriefingSection<T>`）にしてあるので、コネクタが入ったら該当セクションを差し替えるだけで足せる。
+ニュース（question#7 で保留中）を後から加える場所も同じ。
+
+**MCPの同期リクエスト内で重い取得は行わない。** 天気はキャッシュを読むだけ。交通・予定を足すときも
+localhost への軽いHTTP GETに、短いタイムアウトを必ず掛ける（「どこまでを『重い取得』とみなすか」）。
 
 ## キャッシュと worker
 
@@ -872,7 +1034,90 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 経由する必要はない。
 
 ただし `/api` を丸ごと外部から遮断することはできない。worker はサブPCから `POST /api/cache/:key` を
-外向けURLへ送るためで、Apacheで絞るなら `/api/money` だけを対象にする。
+外向けURLへ送るためで、Apacheで絞るなら `/api/money` と `/api/zaim` を対象にする。
+
+
+## 個人アプリ向けのZaim登録API
+
+car-care（給油記録）・asset-manager（レシート由来の支出）がZaimへ支出を登録するための口。実装は `src/api/zaim.ts`。
+
+| | |
+|---|---|
+| エンドポイント | `POST /api/zaim/payment` / `GET /api/zaim/master` |
+| 認証 | `Authorization: Bearer $AIDE_ZAIM_WRITE_SECRET` |
+| 必要な設定 | 上のシークレットと、Zaim OAuthの4つ（`AIDE_ZAIM_CONSUMER_KEY` ほか）。**1つでも欠ければ503** |
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
+  -H "Content-Type: application/json" http://127.0.0.1:3114/api/zaim/payment \
+  -d '{"requestId":"car-care:fuel-log:1234","amount":6800,"date":"2026-08-19",
+       "categoryId":101,"genreId":10101,"fromAccountId":12345,"place":"〇〇SS"}'
+# => {"ok":true,"moneyId":987654321,"duplicated":false,"requestId":"car-care:fuel-log:1234"}
+```
+
+### 呼び出しの向きは「アプリ → AIDE」
+
+読み取り（`GET /api/money/summary`）はアプリがAIDEから引くが、登録も**アプリからのpush**にしている。
+登録済みかどうかの状態（Zaimの `money_id`）を持つのは各アプリのレコードで、登録の起点も画面操作だから。
+AIDEがアプリを巡回して「未登録の支出」を集める形にすると、アプリごとに取得APIを生やすことになる。
+
+### カテゴリ・ジャンルはAIDEが決めない
+
+`categoryId` / `genreId` / `fromAccountId` は**呼び出し元がIDで指定する**。「ガソリン代 → 自動車費/ガソリン」
+のような対応はアプリ側のドメイン知識で、AIDEに持ち込むとアプリが増えるたびにここが太る。
+IDは `GET /api/zaim/master`（口座・カテゴリ・ジャンルの一覧）で引ける。連携先の設定時に一度引いて、
+アプリ側の設定として持つ想定。
+
+### 二重登録を止める
+
+**同じ支出をZaimへ2回登録しても、この経路からは取り消せない**（作成だけを持ち、削除は持たない）。
+呼び出し元が自分のレコードごとに一意な `requestId` を付け、AIDE側は
+`data/zaim-payments.json` に `requestId` → `money_id` を記録する（直近500件）。
+
+- **Zaimへ送る前に記録する。** 送った後に記録すると、応答が届かなかった場合に何も残らず、再送で二重登録になる
+- 登録済みの `requestId` はZaimへ送らず、前回の `money_id` を `duplicated: true` で返す
+- **前回の結果が確定していない `requestId` は 409 で止める。** 打ち切り・Zaim側の障害では登録された
+  可能性が残るため、機械的な再送を許さない（人がZaimを確認し、未登録なら別の `requestId` で送り直す）
+- Zaimが内容を拒んだ（4xx）ときだけ記録を消し、直してからの再送を許す
+
+記録に書くのは `requestId`・`money_id`・時刻の3つだけで、**金額・店名・コメントは持たない**。
+二重登録を防ぐのに要らないうえ、支出の中身そのものを持つのは取得・整形という責務から外れる。
+
+### 応答の意味
+
+| 状態 | 意味 |
+|---|---|
+| 200 | 登録できた（`duplicated: true` なら再送で、Zaimへは送っていない） |
+| 400 | 入力が不正。直して送り直す |
+| 409 | 前回の結果が不明。**再送しない**。Zaimを確認する |
+| 422 | Zaimが内容を拒んだ。登録はされていない |
+| 502 | Zaimへ届かない・打ち切り。登録されたかは不明 |
+| 503 | `AIDE_ZAIM_*` が揃っておらず、口が開いていない |
+
+### 公開範囲と、遮断が入るまでの守り
+
+呼び出し元は同じVPS上のアプリなので `http://127.0.0.1:3114` で叩く。ただし上記のとおり
+**`/api` を丸ごと外部から遮断できない**ため、この2本も公開URL上に出ている。晒されるのは
+「書き込む口」だけでなく、`GET /api/zaim/master` が返す**口座名の一覧**も含む。
+
+- Apacheで `/api/zaim` を外部から落とす（vps側の設定。aide#103 の手作業に含めている）
+- 遮断が入るまでのあいだ、盾は `AIDE_ZAIM_WRITE_SECRET` 1本になるため、**認可画面と同じ
+  総当たり対策**（送信元ごとに15分あたり5回まで・失敗時に固定の待ち・超過で429）を掛けている
+  （`src/api/zaim.ts`）。回数の枠は画面のログインとは別に数える
+- シークレットは `openssl rand -base64 32` 相当の長さにする（推測ではなく総当たりの対象になるため）
+
+### アクセストークンの取得
+
+consumer key / secret は [dev.zaim.net](https://dev.zaim.net/) でのアプリ登録で発行する。
+アクセストークンはブラウザでの認可が要るため、実行時ではなく次のスクリプトで1回だけ取る。
+
+```bash
+AIDE_ZAIM_CONSUMER_KEY=xxx AIDE_ZAIM_CONSUMER_SECRET=yyy \
+  node src/core/connectors/zaim/scripts/oauth-token.mjs
+```
+
+認可の画面は手元のPCのブラウザで開き、戻り先URLに付く `oauth_verifier` を貼り付ける。
+取れた値は本番の `.env`（GitHubのsecret経由）と1Passwordにだけ置く。
 
 
 ## 認証

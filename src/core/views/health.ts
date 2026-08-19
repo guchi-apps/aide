@@ -7,6 +7,7 @@ import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 import { readCache, type CachedValue } from "../cache/store.ts";
 import { REPO_ROOT } from "../paths.ts";
 import { readGitHubConfig, readGitHubWriteConfig } from "../connectors/github/index.ts";
+import { readMyRoomConfig } from "../connectors/myroom/index.ts";
 import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
 import { readSubscriptionsConfig } from "../connectors/subscriptions/index.ts";
 import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
@@ -241,6 +242,14 @@ export function readConnectors(): HealthConnector[] {
       // 疎通の確認が「実際にIssueを1件立てる」ことになるため、押せる確認は用意しない。
       probeable: false,
       note: "Issue起票の書き込み用トークン（aide_create_issue）。疎通の確認が実際の起票になるため確認しない。",
+    },
+    {
+      key: "myroom",
+      label: "myroom",
+      side: "server",
+      configured: readMyRoomConfig() !== null,
+      probeable: true,
+      note: "部屋の状態（室温・湿度・CO2・エアコン）の取得元（aide_room_status）。",
     },
     {
       key: "subscription-lists",

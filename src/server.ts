@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { handleIngest } from "./api/ingest.ts";
 import { handleMoneySummary } from "./api/read.ts";
+import { handleZaimMaster, handleZaimPayment } from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -13,11 +14,13 @@ import {
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
+import { dailyBriefingTool } from "./mcp/tools/briefing.ts";
 import { devStatusTool } from "./mcp/tools/dev.ts";
 import { createIssueTool } from "./mcp/tools/issue.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
+import { roomStatusTool } from "./mcp/tools/room.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
@@ -52,6 +55,8 @@ const registry = new ToolRegistry();
 registry.register(pingTool);
 registry.register(moneySummaryTool);
 registry.register(opsStatusTool);
+registry.register(roomStatusTool);
+registry.register(dailyBriefingTool);
 registry.register(devStatusTool);
 registry.register(createIssueTool);
 
@@ -165,6 +170,18 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 読み取り側に書き込み権限を渡さないよう、受け口とはシークレットを分けている。
   if (path === "/api/money/summary") {
     await handleMoneySummary(req, res);
+    return;
+  }
+
+  // ---- 個人アプリ向けのZaim登録API ----
+  // Zaimの資格情報をAIDEだけに持たせるための口（#37）。上の2つとはさらに別のシークレットで、
+  // 残高を読みたいだけのアプリへZaimへの書き込み権限を渡さない。
+  if (path === "/api/zaim/payment") {
+    await handleZaimPayment(req, res);
+    return;
+  }
+  if (path === "/api/zaim/master") {
+    await handleZaimMaster(req, res);
     return;
   }
 

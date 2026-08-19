@@ -133,6 +133,18 @@ const ENDPOINTS: FeatureItem[] = [
     description:
       "個人アプリ向けの読み取りAPI。aide_money_summary と同じ内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数）をJSONで返す。読み取り専用の共有シークレットで認証する。",
   },
+  {
+    name: "/api/zaim/payment",
+    meta: "POST",
+    description:
+      "個人アプリ向けのZaim登録API。支出を1件Zaimへ登録し、Zaim側のレコードID（money_id）を返す。requestId が同じ再送はZaimへ送らず前回の結果を返す。Zaim書き込み専用の共有シークレットで認証する。",
+  },
+  {
+    name: "/api/zaim/master",
+    meta: "GET",
+    description:
+      "Zaimの口座・カテゴリ・ジャンルのID一覧。登録時に渡すIDを呼び出し元が引くための口で、/api/zaim/payment と同じシークレットで認証する。",
+  },
 ];
 
 export function buildSections(registry: ToolRegistry): FeatureSection[] {
