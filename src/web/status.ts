@@ -3,9 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthConfig } from "../auth/config.ts";
 import { verifyPassword } from "../auth/config.ts";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
+import { checkRedirectAllowed } from "../auth/redirect-check.ts";
 import {
   authorizeUrl,
-  CALLBACK_PATH,
+  callbackUrl,
   createPkce,
   exchangeCode,
   isAllowedEmail,
@@ -409,6 +410,7 @@ export async function handleStatusPage(
 
   const health = await buildHealth({
     authEnabled: options.authConfig.enabled,
+    supabase: options.supabase,
     baseUrl: options.baseUrl,
   });
   html(res, 200, renderStatusPage(health, options.registry, session));
@@ -436,12 +438,12 @@ export async function handleStatusAuthStart(
   const state = randomBytes(16).toString("base64url");
 
   // 戻り先に state を載せる。Supabaseは redirect_to のクエリをそのまま残して戻す。
-  const redirect = new URL(CALLBACK_PATH, options.baseUrl);
-  redirect.searchParams.set("state", state);
+  // 組み立ては callbackUrl() に寄せてある（検証と同じ形にするため。src/auth/redirect-check.ts）。
+  const redirect = callbackUrl(options.baseUrl, state);
 
   res
     .writeHead(302, {
-      Location: authorizeUrl(config, { redirectUri: redirect.toString(), challenge }),
+      Location: authorizeUrl(config, { redirectUri: redirect, challenge }),
       "Set-Cookie": handshakeCookie(await loadSessionKey(), { state, verifier }, isSecure(req)),
       "Cache-Control": "no-store",
     })
@@ -580,14 +582,26 @@ export interface ProbeResult {
   detail: string;
 }
 
+export interface ProbeOptions {
+  /** Googleログインの設定。未設定なら戻り先の確認は行わない。 */
+  supabase?: SupabaseAuthConfig | null;
+  /** 戻り先を組み立てるための公開URL。 */
+  baseUrl?: string;
+}
+
 /**
  * 疎通確認。**押されたときだけ走る。**
  *
  * 各コネクタを直接叩かず、MCPツールと同じ横断ビューを通す。ビュー側が失敗理由を
  * 外へ出してよい粒度（HTTPステータスと種別だけ）に丸めているため、URLやトークンが
  * 画面へ漏れる経路を新たに作らずに済む。
+ *
+ * **Googleログインの戻り先（`supabase-redirect`）だけは横断ビューを持たない。**
+ * 畳む先の「外の世界」が無く、確かめたいのはSupabase側の設定とこちらの組み立てが
+ * 一致しているかどうかだけなので、`src/auth/redirect-check.ts` を直接呼ぶ。
  */
-export async function runProbes(): Promise<ProbeResult[]> {
+export async function runProbes(options: ProbeOptions = {}): Promise<ProbeResult[]> {
+  const { supabase, baseUrl } = options;
   const measure = async (
     key: string,
     run: () => Promise<{ ok: boolean; detail: string }>,
@@ -608,6 +622,15 @@ export async function runProbes(): Promise<ProbeResult[]> {
   };
 
   return Promise.all([
+    // Googleログインを使っていないときは行そのものが無いので確認しない（readConnectors と対）。
+    ...(supabase && baseUrl
+      ? [
+          measure("supabase-redirect", async () => {
+            const result = await checkRedirectAllowed(supabase, baseUrl);
+            return { ok: result.status === "ok", detail: result.detail };
+          }),
+        ]
+      : []),
     measure("ops-dashboard", async () => {
       const status = await buildOpsStatus();
       return {
@@ -662,5 +685,9 @@ export async function handleStatusChecks(
 
   res
     .writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" })
-    .end(JSON.stringify({ results: await runProbes() }));
+    .end(
+      JSON.stringify({
+        results: await runProbes({ supabase: options.supabase, baseUrl: options.baseUrl }),
+      }),
+    );
 }

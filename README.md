@@ -244,8 +244,39 @@ ops-dashboard や GitHub を叩くと、相手が落ちているだけで画面�
 **Googleログインが有効な環境では、パスワードでのログインは受け口ごと無効になる**（404）。
 残すと、メールアドレスで絞った意味がパスワード1本で消える。
 
-Supabaseダッシュボードの Authentication > URL Configuration > Redirect URLs に
-`<AIDE_BASE_URL>/status/auth/callback` を登録しておく必要がある。
+### 戻り先URLの登録ずれは、起動時とその画面から検知する
+
+Supabaseダッシュボードの Authentication > URL Configuration > Redirect URLs に、
+AIDEの戻り先を登録しておく必要がある。**ここが一致しないとき、Supabase（GoTrue）はエラーを返さず
+プロジェクトの Site URL へ静かに倒す。** ログインは「成功したのに別のアプリの画面が開く」という形で
+壊れ、devtoolsで302先を1文字ずつ見比べるまで原因が分からなかった（#93）。認証基盤は他アプリと
+共用のため、AIDEが何も変えていなくても他アプリ側の変更で許可リストが書き換われば同じことが起きる。
+
+照合の規則が直感に反する。**フラグメントだけを落とし、クエリは付いたまま glob で照合される**
+（GoTrue の `utilities.IsRedirectURLValid`）。AIDEの戻り先は CSRF 対策の `state` を載せた
+`<AIDE_BASE_URL>/status/auth/callback?state=<乱数>` なので、**パスだけを完全一致で登録しても通らない。**
+末尾に `**` を付けた形で登録する。
+
+```
+https://aide.gucchii.com/status/auth/callback**
+```
+
+（Site URL と scheme・ホスト・ポートが一致する戻り先は許可リストを見ずに通るため、Site URL が
+AIDEのものであるプロジェクトではこのずれは起きない。共有プロジェクトの Site URL は別アプリのもの。）
+
+一致しているかは `src/auth/redirect-check.ts` が確かめる。`GET /auth/v1/verify` に**成立しない
+トークン**を渡すと、GoTrue は `/auth/v1/authorize` とまったく同じ判定関数で戻り先を決めてから
+エラーのリダイレクトを返すため、`Location` に「実際に採用された戻り先」がそのまま出る。
+許可リストの中身そのものを読むには Management API とアカウント全体に及ぶ Personal Access Token が
+要るが、**欲しいのは一覧ではなく「AIDEの戻り先が通るか」なので、既にある公開鍵だけで足りる**
+この経路を採った。成立しないトークンなのでセッションもメール送信も起こらない。
+
+確認は2か所で走る。
+
+- **起動時に1回**（`AIDE_BASE_URL` があるときだけ）。結果はログに出し、**起動は止めない。**
+  Googleログインが壊れていると `/status` に入れず画面側の確認にも辿り着けないため、
+  そのときに気づける場所はログしかない
+- **`/status` の「疎通を確認する」ボタン**（`supabase-redirect`）。他の接続先と並べて表示する
 
 ### セッションはOAuthとは別系統
 

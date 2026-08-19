@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readAuthSummary, type AuthSummary } from "../../auth/store.ts";
+import type { SupabaseAuthConfig } from "../../auth/supabase.ts";
 import { JOB_CATALOG, type JobInfo } from "../../worker/jobs/catalog.ts";
 import { jobRecordKey, type JobRecord } from "../../worker/record.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
@@ -215,8 +216,22 @@ export function summarizeCache(
  * 本番の `.env` はデプロイのたびに丸ごと上書きされるため、配線を1か所落とすと
  * 静かに「未設定」へ戻る（#55）。それに気づける場所がこれまで無かった。
  */
-export function readConnectors(): HealthConnector[] {
+export function readConnectors(options: { supabase?: SupabaseAuthConfig | null } = {}): HealthConnector[] {
   return [
+    // Googleログインを使っていないときは行ごと出さない。他の接続先と違って
+    // 「未設定」が正常な状態（パスワードでのログイン）にあたり、警告にすると常時鳴り続ける。
+    ...(options.supabase
+      ? [
+          {
+            key: "supabase-redirect",
+            label: "Supabase（戻り先URL）",
+            side: "server" as const,
+            configured: true,
+            probeable: true,
+            note: "Googleログインの戻り先が Redirect URLs に登録されているか（#114）。共有プロジェクトのため他アプリの変更で外れうる。",
+          },
+        ]
+      : []),
     {
       key: "ops-dashboard",
       label: "ops-dashboard",
@@ -309,6 +324,8 @@ async function readVersion(): Promise<string> {
 export interface HealthInput {
   /** 起動時に決まった認証の有効・無効。ここで読み直すと未設定時に例外になる。 */
   authEnabled: boolean;
+  /** 起動時に決まったGoogleログインの設定。`authEnabled` と同じ理由で読み直さない。 */
+  supabase?: SupabaseAuthConfig | null;
   baseUrl: string;
   now?: Date;
 }
@@ -326,7 +343,7 @@ export async function buildHealth(input: HealthInput): Promise<Health> {
 
   const jobs = JOB_CATALOG.map((job, index) => summarizeJob(job, jobRecords[index] ?? null));
   const cache = summarizeCache(zaimCache, now);
-  const connectors = readConnectors();
+  const connectors = readConnectors({ supabase: input.supabase ?? null });
 
   const attention: HealthAttention[] = [
     ...jobs.flatMap(jobAttention),
