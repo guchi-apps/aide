@@ -29,11 +29,18 @@ export interface MyRoomSensor {
   illuminance?: number | null;
 }
 
-/** 屋外の観測値。myroom が Open-Meteo から取っているもの。 */
+/**
+ * 屋外の観測値。myroom が Open-Meteo から取っている**現在値**。
+ *
+ * **AIDE の weather コネクタでは代替できない。** あちらが持っているのは日別予報の
+ * 最高／最低気温だけで、いまの外気温はどこにも無い（`src/core/connectors/weather/types.ts`）。
+ */
 export interface MyRoomOutdoor {
   temperature?: number | null;
   humidity?: number | null;
   pressure?: number | null;
+  /** 観測時刻（ISO8601）。予報値の丸めが効くため、室温の測定時刻とは一致しない。 */
+  observedAt?: string | null;
 }
 
 /** エアコン1台ぶんの最新の状態。 */

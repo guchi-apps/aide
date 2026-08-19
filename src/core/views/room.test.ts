@@ -32,7 +32,7 @@ function snapshot(overrides: Partial<MyRoomSnapshot> = {}): MyRoomSnapshot {
     fetchedAt: "2026-08-19T21:00:00+09:00",
     staleThresholdMinutes: 15,
     sensors: [sensor()],
-    outdoor: { temperature: 31.2, humidity: 68, pressure: 1007.4 },
+    outdoor: { temperature: 31.2, humidity: 68, pressure: 1007.4, observedAt: "2026-08-19T21:00:00+09:00" },
     aircons: [
       {
         acId: 1,
@@ -69,6 +69,12 @@ describe("summarizeRoom", () => {
 
     // 26.4 − 31.2。小数の誤差を持ち込まないよう1桁へ丸める。
     assert.equal(status.sensors[0]?.outdoorDeltaCelsius, -4.8);
+  });
+
+  it("屋外の観測時刻を添える（室温の測定時刻とは別）", () => {
+    const status = summarizeRoom(snapshot(), NOW);
+
+    assert.equal(status.outdoor?.observedAt, "2026-08-19T21:00:00+09:00");
   });
 
   it("屋外の値が無ければ気温差は null にする", () => {

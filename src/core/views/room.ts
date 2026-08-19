@@ -58,6 +58,8 @@ export interface RoomOutdoorSummary {
   temperature: number | null;
   humidity: number | null;
   pressure: number | null;
+  /** 観測時刻。室温の測定時刻とは一致しない（予報値の丸めが効くため）。 */
+  observedAt: string | null;
 }
 
 export interface RoomAirconSummary {
@@ -224,6 +226,7 @@ export function summarizeRoom(snapshot: MyRoomSnapshot, now: Date): RoomStatus {
         temperature: num(outdoorRaw.temperature),
         humidity: num(outdoorRaw.humidity),
         pressure: num(outdoorRaw.pressure),
+        observedAt: text(outdoorRaw.observedAt),
       }
     : null;
 
