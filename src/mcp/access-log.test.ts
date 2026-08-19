@@ -12,11 +12,13 @@ const dir = await mkdtemp(join(tmpdir(), "aide-mcp-access-test-"));
 process.env["AIDE_MCP_ACCESS_LOG_PATH"] = join(dir, "mcp-access.json");
 const {
   ACCESS_LOG_PATH,
+  AUTH_METHOD,
   flushMcpAccessLog,
   isQuietMethod,
   MAX_ENTRIES,
   readMcpAccessLog,
   recordMcpAccess,
+  recordMcpAuthFailure,
   resetMcpAccessLog,
   summarizeMcpAccess,
 } = await import("./access-log.ts");
@@ -102,6 +104,42 @@ describe("MCPアクセスの記録", () => {
     } finally {
       await rm(blocker, { recursive: true, force: true });
     }
+  });
+});
+
+describe("認証で弾かれたアクセス", () => {
+  it("401で終わったぶんも失敗として残す", async () => {
+    // /mcp は requireBearer が401を返した時点で終わり、transport まで届かない。
+    // ここで残さないと、トークンが切れている状態と誰も繋いでいない状態を見分けられない。
+    await recordMcpAuthFailure({ userAgent: "Anthropic/ClaudeAI 1.0", ms: 3 });
+
+    const [saved] = await readMcpAccessLog();
+    assert.equal(saved?.method, AUTH_METHOD);
+    assert.equal(saved?.ok, false);
+    assert.equal(saved?.client, "Anthropic/ClaudeAI");
+  });
+
+  it("叩かれ続けても1分に1件しか残さない", async () => {
+    // /mcp は公開されている。1件ずつ残すと、外から叩かれただけで記録が埋まる。
+    await recordMcpAuthFailure({ userAgent: undefined, ms: 0 });
+    await recordMcpAuthFailure({ userAgent: undefined, ms: 0 });
+    await recordMcpAuthFailure({ userAgent: undefined, ms: 0 });
+
+    assert.equal((await readMcpAccessLog()).length, 1);
+  });
+
+  it("上限を超えたときは、ツールの呼び出しより先に捨てる", async () => {
+    await recordMcpAccess(entry({ tool: "aide_daily_briefing" }));
+    for (let i = 0; i < MAX_ENTRIES; i += 1) {
+      await recordMcpAccess(entry({ method: AUTH_METHOD, tool: null, ok: false, detail: "拒否" }));
+    }
+
+    const entries = await readMcpAccessLog();
+    assert.equal(entries.length, MAX_ENTRIES);
+    assert.ok(
+      entries.some((saved) => saved.tool === "aide_daily_briefing"),
+      "ツールの呼び出しが押し出されている",
+    );
   });
 });
 

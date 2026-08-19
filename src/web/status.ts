@@ -25,6 +25,7 @@ import { buildMoneySummary } from "../core/views/money.ts";
 import { buildOpsStatus } from "../core/views/ops.ts";
 import { buildRoomStatus } from "../core/views/room.ts";
 import {
+  AUTH_METHOD,
   isQuietMethod,
   MAX_ENTRIES,
   type McpAccessEntry,
@@ -215,6 +216,7 @@ function mcpCard(health: Health, registry: ToolRegistry): string {
 
 /** メソッドの日本語。ツールの呼び出し以外は、何をしたのかが名前から読めないため置き換える。 */
 const METHOD_LABEL: Record<string, string> = {
+  [AUTH_METHOD]: "認証で拒否",
   initialize: "接続開始",
   ping: "接続確認",
   "tools/list": "ツール一覧",
@@ -285,6 +287,13 @@ function mcpAccessCard(access: McpAccessSummary, now: Date): string {
           "接続クライアント",
           access.clients.length === 0 ? "不明" : escapeHtml(access.clients.join(" ／ ")),
         ],
+        // 0件のときは行ごと出さない。常時0が並ぶと、実際に弾いたときの1が目に入らない。
+        ...(access.authFailures > 0
+          ? ([["認証で拒否", `${access.authFailures} 件（同じ相手の連続は1分に1件だけ残します）`]] as [
+              string,
+              string,
+            ][])
+          : []),
       ]) +
       `<div class="log">` +
       `<input type="checkbox" id="mcp-quiet" class="logtoggle">` +

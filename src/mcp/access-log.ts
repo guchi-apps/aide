@@ -21,8 +21,24 @@ import { DATA_DIR } from "../core/paths.ts";
  * 「最後にClaudeが繋いだのはいつか」に答えられなくなる。
  */
 
-/** 保持する件数。超えた分は古いものから落とす。 */
+/** 保持する件数。超えた分は落とす（落とす順は `trim()`）。 */
 export const MAX_ENTRIES = 200;
+
+/**
+ * 認証で弾かれたアクセスのメソッド名。JSON-RPCまで届いていないので、実在するメソッド名とは
+ * 重ならない値にしてある。
+ */
+export const AUTH_METHOD = "auth";
+
+/**
+ * 認証失敗を記録する間隔。**`/mcp` は公開されている**ため、トークンを持たない相手が
+ * 繰り返し叩けば記録がその行で埋まる。1分に1件へ落として、「弾かれている」ことは残しつつ
+ * ツールの呼び出しの履歴を守る。
+ */
+const AUTH_FAILURE_INTERVAL_MS = 60_000;
+
+/** 名乗り・User-Agent の取り込み上限。相手の申告をそのまま画面へ流さない。 */
+export const MAX_CLIENT_LENGTH = 40;
 
 /** 書き込みをまとめる間隔。1件ごとに書くとツール呼び出しのたびにディスクを触ることになる。 */
 const FLUSH_DELAY_MS = 2_000;
@@ -70,6 +86,16 @@ export function isQuietMethod(method: string): boolean {
   return QUIET_METHODS.has(method) || method.startsWith("notifications/");
 }
 
+/**
+ * User-Agent から名前だけを取る。`Anthropic/ClaudeAI 1.2.3` → `Anthropic/ClaudeAI`。
+ * バージョンやOSの並びまで記録しても、どのクライアントかの区別には足さない。
+ */
+export function shortUserAgent(value: string | string[] | undefined): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const first = (raw ?? "").trim().split(/[\s;]/)[0];
+  return first ? first.slice(0, MAX_CLIENT_LENGTH) : null;
+}
+
 // ---- 保存 ----
 
 let loaded: Promise<McpAccessEntry[]> | null = null;
@@ -99,15 +125,17 @@ function load(): Promise<McpAccessEntry[]> {
 }
 
 /**
- * 上限を超えた分を落とす。**接続確認・一覧の取得から先に捨てる。**
+ * 上限を超えた分を落とす。**捨てる順は「接続確認・一覧の取得 → 認証で弾いたもの → 残り」。**
  *
- * 単純に古い順で捨てると、Claudeが定期的に投げてくる `ping` が並んだだけで
- * ツールの呼び出しが押し出され、いちばん見たいものが残らない。
+ * 単純に古い順で捨てると、Claudeが定期的に投げてくる `ping` や、外から叩かれた認証失敗が
+ * 並んだだけでツールの呼び出しが押し出され、いちばん見たいものが残らない。
+ * 枠は1つのままにして、優先順位だけで守る（枠を分けると、片方が空でも他方に使えない）。
  */
 function trim(entries: McpAccessEntry[]): void {
   while (entries.length > MAX_ENTRIES) {
     const quiet = entries.findIndex((entry) => isQuietMethod(entry.method));
-    entries.splice(quiet === -1 ? 0 : quiet, 1);
+    const auth = quiet === -1 ? entries.findIndex((entry) => entry.method === AUTH_METHOD) : -1;
+    entries.splice(quiet !== -1 ? quiet : auth !== -1 ? auth : 0, 1);
   }
 }
 
@@ -174,6 +202,37 @@ export async function recordMcpAccess(entry: McpAccessEntry): Promise<void> {
   }
 }
 
+let lastAuthFailureAt = 0;
+
+/**
+ * 認証で弾かれたアクセスを記録する。
+ *
+ * **`transport.ts` の内側では記録できない。** `/mcp` はトークンが無ければ
+ * `requireBearer()` が401を返してそこで終わり、transport まで届かない（`src/server.ts`）。
+ * そのままだと、Claudeのトークンが切れて呼び出しが全部失敗している状態と、
+ * 誰も繋いでいない状態が画面上で区別できない。
+ */
+export async function recordMcpAuthFailure(input: {
+  userAgent: string | string[] | undefined;
+  ms: number;
+}): Promise<void> {
+  const now = Date.now();
+  // 公開されている口なので、外から叩かれ続けたぶんまで1件ずつは残さない。
+  if (now - lastAuthFailureAt < AUTH_FAILURE_INTERVAL_MS) return;
+  lastAuthFailureAt = now;
+
+  await recordMcpAccess({
+    at: new Date(now).toISOString(),
+    method: AUTH_METHOD,
+    tool: null,
+    client: shortUserAgent(input.userAgent),
+    clientVersion: null,
+    ok: false,
+    ms: input.ms,
+    detail: "アクセストークンが無効か、提示されていない",
+  });
+}
+
 /** 記録の全件。古い順。 */
 export async function readMcpAccessLog(): Promise<McpAccessEntry[]> {
   return [...(await load())];
@@ -186,6 +245,7 @@ export function resetMcpAccessLog(): void {
     flushTimer = null;
   }
   loaded = null;
+  lastAuthFailureAt = 0;
 }
 
 // ---- 集計 ----
@@ -202,6 +262,8 @@ export interface McpAccessSummary {
   toolCalls: number;
   /** 失敗した呼び出し。 */
   failures: number;
+  /** そのうち、認証で弾いたもの（JSON-RPCまで届いていない）。 */
+  authFailures: number;
   /** 直近24時間の失敗。カードの状態はこれで決める。 */
   recentFailures: number;
   lastAt: string | null;
@@ -257,6 +319,7 @@ export function summarizeMcpAccess(
     total: entries.length,
     toolCalls: calls.length,
     failures: entries.filter((entry) => !entry.ok).length,
+    authFailures: entries.filter((entry) => entry.method === AUTH_METHOD).length,
     recentFailures,
     lastAt: last?.at ?? null,
     lastAgeMinutes,

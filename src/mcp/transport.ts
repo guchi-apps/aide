@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { recordMcpAccess } from "./access-log.ts";
+import { MAX_CLIENT_LENGTH, recordMcpAccess, shortUserAgent } from "./access-log.ts";
 import type { ToolRegistry } from "./registry.ts";
 import {
   DEFAULT_PROTOCOL,
@@ -257,18 +257,6 @@ export class McpTransport {
       .writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS, ...headers })
       .end(JSON.stringify(body));
   }
-}
-
-/** 名乗り・User-Agent の取り込み上限。相手の申告をそのまま画面へ流さない。 */
-const MAX_CLIENT_LENGTH = 40;
-
-/**
- * User-Agent から名前だけを取る。`Anthropic/ClaudeAI 1.2.3` → `Anthropic/ClaudeAI`。
- * バージョンやOSの並びまで記録しても、どのクライアントかの区別には足さない。
- */
-function shortUserAgent(value: string | undefined): string | null {
-  const first = (value ?? "").trim().split(/[\s;]/)[0];
-  return first ? first.slice(0, MAX_CLIENT_LENGTH) : null;
 }
 
 /**
