@@ -43,6 +43,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_SUBSCRIPTIONS_URL: "既定 http://127.0.0.1:3107 で足りる",
   AIDE_WEATHER_LAT: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
   AIDE_WEATHER_LON: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
+  AIDE_ZAIM_PAYMENT_LOG_PATH: "Zaim登録の冪等記録の置き場。既定（data/zaim-payments.json）で足りる",
   AIDE_WORKER_STATE_DIR: "worker（サブPC）の記録の置き場",
 };
 
