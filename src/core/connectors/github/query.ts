@@ -41,6 +41,13 @@ export const OVERVIEW_DEPTH = { commits: 1, issueNodes: 3 } as const;
 /** 詳細モード（`repo` 指定時）で掘る深さ。 */
 export const DETAIL_DEPTH = { commits: 5, issueNodes: 10 } as const;
 
+/**
+ * 詳細モードで取るラベル定義の上限。
+ * issue-deck が配るラベルは30件前後で、100を超えるリポジトリは運用上ありえない。
+ * 超えた場合は `totalCount` との差で切れたことが分かる。
+ */
+export const LABEL_FETCH_LIMIT = 100;
+
 /** 俯瞰用と詳細用で共有する、リポジトリ1件ぶんの取得内容。`types.ts` と1対1に対応する。 */
 const REPO_STATUS_FRAGMENT = `
 fragment RepoStatus on Repository {
@@ -136,6 +143,17 @@ query DevRepoStatus($org: String!, $repo: String!, $commits: Int!, $issueNodes: 
   }
   repository(owner: $org, name: $repo) {
     ...RepoStatus
+    # ラベル定義は**フラグメントの外**で取る。共有すると俯瞰モードでも26リポジトリぶんの
+    # ラベルが返り、要らない情報でレスポンスが数倍になる（起票先は1リポジトリだけなので、
+    # 候補が要るのは詳細モードだけ）。types.ts 側も詳細モード専用として宣言してある。
+    labels(first: ${LABEL_FETCH_LIMIT}, orderBy: { field: NAME, direction: ASC }) {
+      totalCount
+      nodes {
+        name
+        color
+        description
+      }
+    }
   }
 }
 ${REPO_STATUS_FRAGMENT}`;
