@@ -92,6 +92,18 @@ describe("worker からの取り込み", () => {
     }
   });
 
+  // 天気予報のキーが漏れていて、送信のたびに404になっていた（#108）。
+  it("天気予報を受け入れてキャッシュへ書く", async () => {
+    const { WEATHER_CACHE_KEY } = await import("../worker/jobs/weather-sync.ts");
+    const forecast = { days: [{ date: "2026-08-19", summary: "晴れ" }] };
+
+    const captured = await post(WEATHER_CACHE_KEY, { source: "open-meteo", data: forecast });
+
+    assert.equal(captured.status, 200);
+    const cached = await readCache<typeof forecast>(WEATHER_CACHE_KEY);
+    assert.deepEqual(cached?.data, forecast);
+  });
+
   it("未知のキーは404で弾く", async () => {
     const captured = await post("unknown-key", { source: "worker", data: {} });
 
