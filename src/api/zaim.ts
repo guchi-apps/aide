@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
 import { loadZaimOAuthCredentials } from "../core/connectors/zaim/oauth.ts";
 import {
   createZaimPayment,
@@ -19,6 +20,9 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * とは別の値**にする。残高を読みたいだけのアプリへ、Zaimへ書き込む権限まで渡さないため。
  *
  * 呼び出し元は同じVPS上で動くので `http://127.0.0.1:<port>` で届く。外向けURLは要らない。
+ * ただし**`/api` を丸ごと外部から遮断することはできない**（workerがサブPCから
+ * `POST /api/cache/:key` を外向けURLへ送るため）。Apacheで `/api/zaim` を落とすまでのあいだ、
+ * シークレット1本だけが盾になるので、認可画面と同じ総当たり対策をここにも掛けている。
  */
 
 /** ボディの上限。登録1件のJSONは数百バイトで、これを大きく超えるものは読み切らない。 */
@@ -44,18 +48,32 @@ function json(res: ServerResponse, status: number, body: unknown): void {
  * シークレット未設定は503で401とは分ける（`src/api/read.ts` と同じ理由。
  * 「設定していないから開いていない」と「値が違う」を切り分けられるようにする）。
  */
-function authorize(req: IncomingMessage, res: ServerResponse, label: string): boolean {
+async function authorize(req: IncomingMessage, res: ServerResponse, label: string): Promise<boolean> {
   const expected = zaimWriteSecret();
   if (!expected) {
     json(res, 503, { error: "AIDE_ZAIM_WRITE_SECRET が未設定のため利用できません" });
     return false;
   }
+
+  // 回数制限は画面のログインとは別の枠で数える（守っている値が別なので、
+  // 片方の失敗でもう片方が止まると切り分けられない）。
+  const key = `zaim:${clientKey(req)}`;
+  const locked = lockedFor(key);
+  if (locked !== null) {
+    json(res, 429, { error: `試行回数の上限に達しています。${locked}秒後に再試行してください` });
+    return false;
+  }
+
   const presented = bearerToken(req);
   if (!presented || !secretMatches(presented, expected)) {
-    console.warn(`[zaim-api] 認証失敗: ${label}`);
+    recordFailure(key);
+    console.warn(`[zaim-api] 認証失敗: ${label} from=${key}`);
+    // 固定の待ちを挟んで、スクリプトによる高速な試行の速度を落とす。
+    await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
     json(res, 401, { error: "unauthorized" });
     return false;
   }
+  recordSuccess(key);
   return true;
 }
 
@@ -107,7 +125,7 @@ export async function handleZaimPayment(req: IncomingMessage, res: ServerRespons
       .end(JSON.stringify({ error: "method not allowed" }));
     return;
   }
-  if (!authorize(req, res, "POST /api/zaim/payment")) return;
+  if (!(await authorize(req, res, "POST /api/zaim/payment"))) return;
 
   const credentials = loadZaimOAuthCredentials();
   if (!credentials) {
@@ -156,7 +174,7 @@ export async function handleZaimMaster(req: IncomingMessage, res: ServerResponse
       .end(JSON.stringify({ error: "method not allowed" }));
     return;
   }
-  if (!authorize(req, res, "GET /api/zaim/master")) return;
+  if (!(await authorize(req, res, "GET /api/zaim/master"))) return;
 
   const credentials = loadZaimOAuthCredentials();
   if (!credentials) {

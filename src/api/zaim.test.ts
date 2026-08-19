@@ -3,12 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, describe, it } from "node:test";
+import { after, beforeEach, describe, it } from "node:test";
 
 // 検査を通らない要求はZaimへ届かないが、記録の置き場だけは本番と分けておく。
 const dir = await mkdtemp(join(tmpdir(), "aide-zaim-api-test-"));
 process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
 const { handleZaimMaster, handleZaimPayment } = await import("./zaim.ts");
+const { resetRateLimits } = await import("../auth/ratelimit.ts");
 
 /**
  * **Zaimへ実際にリクエストが飛ぶ経路はここでは扱わない。**
@@ -34,6 +35,11 @@ function setOAuthEnv(configured: boolean): void {
 
 after(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+// 認証の失敗は回数として積み上がる。テストの並び順で後続がロックされないよう毎回戻す。
+beforeEach(() => {
+  resetRateLimits();
 });
 
 interface Captured {
@@ -62,6 +68,8 @@ function fakeReq(method: string, body: string, authorization: string | null): In
   return {
     method,
     headers,
+    // 回数制限は送信元ごとに数えるため、実物と同じく socket を持たせる。
+    socket: { remoteAddress: "127.0.0.1" },
     async *[Symbol.asyncIterator]() {
       yield Buffer.from(body, "utf8");
     },
@@ -95,6 +103,15 @@ describe("POST /api/zaim/payment", () => {
     setOAuthEnv(true);
     assert.equal((await post(VALID_BODY, "Bearer wrong")).status, 401);
     assert.equal((await post(VALID_BODY, null)).status, 401);
+  });
+
+  it("失敗が続けば429で締め出す（公開URLからも届くため）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    setOAuthEnv(true);
+    for (let attempt = 0; attempt < 5; attempt += 1) await post(VALID_BODY, "Bearer wrong");
+
+    // 正しい鍵でもロック中は通さない。
+    assert.equal((await post(VALID_BODY)).status, 429);
   });
 
   it("POST以外は405（認証より先に見る）", async () => {
