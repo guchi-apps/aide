@@ -60,6 +60,19 @@ export interface GitHubLabel {
   name: string;
 }
 
+/**
+ * リポジトリに定義されているラベル1件。
+ *
+ * PRに付いているラベル（`GitHubLabel`）と違い、**候補として提示するためのもの**なので
+ * 色と説明まで持つ。`color` はGitHubの返すまま（`#` 無しの6桁16進）で、`#` を付けるのは
+ * ビュー側（`src/core/views/dev.ts`）の仕事。
+ */
+export interface GitHubRepositoryLabel {
+  name: string;
+  color: string;
+  description: string | null;
+}
+
 export interface GitHubIssueNode {
   number: number;
   title: string;
@@ -85,6 +98,11 @@ export interface GitHubRepositoryNode {
   pullRequests?: { totalCount: number; nodes: GitHubPullRequestNode[] } | null;
   /** `00.check-user` が付いた open Issue。エイリアスでもう一度 issues を引いている。 */
   checkUser?: { totalCount: number; nodes: GitHubIssueNode[] } | null;
+  /**
+   * リポジトリに定義されているラベルの一覧。
+   * **詳細モード（`DEV_REPO_QUERY`）でだけ埋まる**（フラグメントの外で取っているため）。
+   */
+  labels?: { totalCount: number; nodes: (GitHubRepositoryLabel | null)[] } | null;
 }
 
 /** 残ポイント。GitHubのGraphQLは1時間5000ポイント制。 */

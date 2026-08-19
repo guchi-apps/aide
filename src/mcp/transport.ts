@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { mcpIcons } from "../web/assets.ts";
 import { MAX_CLIENT_LENGTH, recordMcpAccess, shortUserAgent } from "./access-log.ts";
 import type { ToolRegistry } from "./registry.ts";
 import {
@@ -36,6 +37,8 @@ export interface McpServerInfo {
 
 interface RpcContext {
   sessionId: string | null;
+  /** このリクエストから見たAIDEの公開URL。アイコンを絶対URLで名乗るのに使う。 */
+  baseUrl: string;
   /** initialize で新規発行したセッションID。レスポンスヘッダに載せる。 */
   issuedSessionId: string | null;
   /**
@@ -62,8 +65,12 @@ export class McpTransport {
     this.#serverInfo = serverInfo;
   }
 
-  /** MCPエンドポイントへのリクエストを処理する。パスの振り分けは呼び出し側の責務。 */
-  async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  /**
+   * MCPエンドポイントへのリクエストを処理する。パスの振り分けは呼び出し側の責務。
+   * `baseUrl` は `initialize` で名乗るアイコンのURLに使う（`src/auth/config.ts` の
+   * `resolveBaseUrl()` が返すもの）。
+   */
+  async handle(req: IncomingMessage, res: ServerResponse, baseUrl: string): Promise<void> {
     switch (req.method) {
       case "OPTIONS":
         res.writeHead(204, CORS_HEADERS).end();
@@ -78,7 +85,7 @@ export class McpTransport {
         return;
       }
       case "POST":
-        await this.#handlePost(req, res);
+        await this.#handlePost(req, res, baseUrl);
         return;
       default:
         res.writeHead(405, { Allow: "GET, POST, DELETE, OPTIONS", ...CORS_HEADERS }).end();
@@ -101,7 +108,7 @@ export class McpTransport {
     req.on("close", () => clearInterval(keepalive));
   }
 
-  async #handlePost(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async #handlePost(req: IncomingMessage, res: ServerResponse, baseUrl: string): Promise<void> {
     let payload: unknown;
     try {
       payload = JSON.parse(await readBody(req));
@@ -119,6 +126,7 @@ export class McpTransport {
     const known = sessionId ? this.#sessions.get(sessionId) : undefined;
     const ctx: RpcContext = {
       sessionId,
+      baseUrl,
       issuedSessionId: null,
       // 名乗りは initialize の1回だけ来る。以降のリクエストはセッションから引き、
       // それも無ければ User-Agent（`Anthropic/ClaudeAI` など）で代用する。
@@ -191,6 +199,12 @@ export class McpTransport {
               ? info.version.trim().slice(0, MAX_CLIENT_LENGTH)
               : null;
         }
+        // ネゴシエート結果を1行だけ残す。`serverInfo.icons` のような**新しい版で足された
+        // フィールドは、相手が古い版で繋いでいると読まれない**（#125）。アクセスの記録に
+        // プロトコル版は持たせていないため、出ない原因を切り分ける手掛かりがここしかない。
+        console.log(
+          `[mcp] initialize: protocol=${protocolVersion} client=${ctx.client ?? "(不明)"}`,
+        );
         ctx.issuedSessionId = randomUUID();
         this.#sessions.set(ctx.issuedSessionId, {
           client: ctx.client,
@@ -199,7 +213,9 @@ export class McpTransport {
         return ok({
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: this.#serverInfo,
+          // アイコンは 2025-11-25 で追加されたが、それより前のプロトコルで繋いできた
+          // クライアントも知らないフィールドは無視するだけなので、出し分けない。
+          serverInfo: { ...this.#serverInfo, icons: mcpIcons(ctx.baseUrl) },
         });
       }
 
