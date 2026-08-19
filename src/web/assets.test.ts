@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import { describe, it } from "node:test";
-import { handleAsset, headTags, ICONS, manifest, MANIFEST_PATH } from "./assets.ts";
+import { handleAsset, headTags, ICONS, manifest, mcpIcons, MANIFEST_PATH } from "./assets.ts";
 
 interface Captured {
   status: number;
@@ -115,5 +115,23 @@ describe("head のタグ", () => {
     const html = headTags({ manifest: false });
     assert.ok(!html.includes("rel=\"manifest\""));
     assert.match(html, /rel="icon"/);
+  });
+});
+
+describe("MCPで名乗るアイコン", () => {
+  it("配信しているパスを、渡された公開URLの絶対URLで返す", () => {
+    const icons = mcpIcons("https://aide.example");
+    assert.deepEqual(
+      icons.map((icon) => icon.src),
+      ICONS.map((icon) => `https://aide.example${icon.path}`),
+    );
+    for (const icon of icons) assert.equal(icon.mimeType, "image/png");
+  });
+
+  it("宣言したサイズがアイコンの定義と一致する", () => {
+    assert.deepEqual(
+      mcpIcons("https://aide.example").map((icon) => icon.sizes),
+      ICONS.map((icon) => [`${icon.size}x${icon.size}`]),
+    );
   });
 });

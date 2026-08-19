@@ -201,7 +201,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       });
       return;
     }
-    await mcp.handle(req, res);
+    await mcp.handle(req, res, baseUrl);
     return;
   }
 
