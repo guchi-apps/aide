@@ -315,6 +315,56 @@ describe("summarizeDev", () => {
     assert.equal(detail?.openPullRequests[0]?.draft, false);
   });
 
+  it("repo 指定のときはラベルの候補を返し、色に # を補う", () => {
+    const target = repo({
+      labels: {
+        totalCount: 2,
+        nodes: [
+          { name: "00.check-user", color: "d73a4a", description: "ユーザーの確認・指示が必要" },
+          // 説明が無いラベルは GitHub が null を返す。
+          { name: "11.local", color: "0e8a16", description: null },
+        ],
+      },
+    });
+
+    const detailed = summarizeDev(raw({ repositories: [target] }), options({ repo: "aide" }), NOW);
+
+    assert.deepEqual(detailed.repos[0]?.detail?.labels, [
+      { name: "00.check-user", color: "#d73a4a", description: "ユーザーの確認・指示が必要" },
+      { name: "11.local", color: "#0e8a16", description: null },
+    ]);
+    // 起票に使う候補であることが読み取れること（aide_create_issue の labels に渡す名前）。
+    assert.match(detailed.note, /aide_create_issue/);
+  });
+
+  it("俯瞰ではラベルを返さない（26リポジトリぶんは要らない）", () => {
+    const overview = summarizeDev(
+      raw({ repositories: [repo({ labels: { totalCount: 1, nodes: [{ name: "bug", color: "d73a4a", description: null }] } })] }),
+      options(),
+      NOW,
+    );
+
+    assert.equal(overview.repos[0]?.detail, undefined);
+    assert.doesNotMatch(overview.note, /detail\.labels/);
+  });
+
+  it("ラベルを取り切れなかった場合は、省いた件数を note に書く", () => {
+    // **黙って切らない。** 100件で切れていることに気づかないと、実在するラベルを
+    // 無いものとして扱ってしまう。
+    const target = repo({
+      labels: { totalCount: 130, nodes: [{ name: "bug", color: "d73a4a", description: null }] },
+    });
+
+    const detailed = summarizeDev(raw({ repositories: [target] }), options({ repo: "aide" }), NOW);
+
+    assert.match(detailed.note, /129件は省いている/);
+  });
+
+  it("ラベルが1件も無いリポジトリでも detail は返る", () => {
+    const detailed = summarizeDev(raw(), options({ repo: "aide" }), NOW);
+    assert.deepEqual(detailed.repos[0]?.detail?.labels, []);
+  });
+
   it("取得に失敗したものがあれば complete を false にし、理由を残す", () => {
     const status = summarizeDev(
       raw({ failures: [{ source: "github", reason: "HTTP 401（トークンが無効）" }] }),

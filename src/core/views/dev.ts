@@ -2,12 +2,14 @@ import { fetchDevStatus, readGitHubConfig } from "../connectors/github/index.ts"
 import {
   CHECK_USER_LABEL,
   DETAIL_DEPTH,
+  LABEL_FETCH_LIMIT,
   OVERVIEW_DEPTH,
   RELEASE_BRANCH,
 } from "../connectors/github/query.ts";
 import type {
   GitHubDevRaw,
   GitHubRateLimit,
+  GitHubRepositoryLabel,
   GitHubRepositoryNode,
   GitHubSourceFailure,
 } from "../connectors/github/types.ts";
@@ -67,11 +69,29 @@ export interface DevPullRequestRef extends DevIssueRef {
   checkUser: boolean;
 }
 
+/**
+ * リポジトリに定義されているラベル1件。
+ *
+ * **`aide_create_issue` に渡す候補**として返す。GitHubのIssue作成APIは未知のラベル名を
+ * 渡すとラベルごと新規作成してしまうため（`src/core/connectors/github/write.ts`）、
+ * 起票の前に実在する名前を確かめられる口が要る（#122）。
+ */
+export interface DevLabel {
+  /** そのまま `aide_create_issue` の `labels` に渡せる表記。 */
+  name: string;
+  /** `#rrggbb`。GitHubは `#` 無しで返すので、ここで付けている。 */
+  color: string;
+  /** ラベルの説明。設定されていなければ null。 */
+  description: string | null;
+}
+
 export interface DevRepoDetail {
   recentCommits: DevCommit[];
   /** `00.check-user` が付いた open Issue。 */
   checkUserIssues: DevIssueRef[];
   openPullRequests: DevPullRequestRef[];
+  /** リポジトリに定義されているラベル（名前順）。 */
+  labels: DevLabel[];
 }
 
 export interface DevRepoSummary {
@@ -227,6 +247,22 @@ function toCommit(node: { messageHeadline: string; committedDate: string }): Dev
   return { message: node.messageHeadline, at: node.committedDate };
 }
 
+/**
+ * ラベル定義を候補として使える形へ畳む。
+ *
+ * 色は `#` を補うだけで、名前と説明はGitHubの表記をそのまま渡す
+ * （**加工すると `aide_create_issue` にそのまま渡せなくなる**）。
+ */
+function toLabels(nodes: (GitHubRepositoryLabel | null)[]): DevLabel[] {
+  return nodes
+    .filter((node): node is GitHubRepositoryLabel => node !== null)
+    .map((node) => ({
+      name: node.name,
+      color: node.color.startsWith("#") ? node.color : `#${node.color}`,
+      description: node.description ?? null,
+    }));
+}
+
 function summarizeRepo(repo: GitHubRepositoryNode, withDetail: boolean): DevRepoSummary {
   const branch = repo.defaultBranchRef ?? null;
   const commits = branch?.target?.history?.nodes ?? [];
@@ -268,6 +304,7 @@ function summarizeRepo(repo: GitHubRepositoryNode, withDetail: boolean): DevRepo
         draft: pr.isDraft,
         checkUser: (pr.labels?.nodes ?? []).some((label) => label.name === CHECK_USER_LABEL),
       })),
+      labels: toLabels(repo.labels?.nodes ?? []),
     };
   }
 
@@ -330,7 +367,24 @@ export function summarizeDev(raw: GitHubDevRaw, options: SummarizeDevOptions, no
     notes.push("対象のリポジトリが1件も無い。scope を見ること。");
   }
   if (!withDetail) {
-    notes.push("個別のIssue・PR・コミットの一覧が要るときは repo にリポジトリ名を指定して呼ぶ。");
+    notes.push(
+      "個別のIssue・PR・コミットの一覧と、起票に使えるラベルの候補が要るときは " +
+        "repo にリポジトリ名を指定して呼ぶ。",
+    );
+  } else {
+    notes.push(
+      "detail.labels はそのリポジトリに実在するラベル。" +
+        "aide_create_issue の labels にはここにある名前だけを渡すこと。",
+    );
+    // **省いたなら省いたと書く。** 100件で切れていることに気づかないまま
+    // 「候補はこれで全部」と読まれると、実在するラベルを無いものとして扱ってしまう。
+    const omittedLabels = selected.reduce((total, repo) => {
+      const fetched = repo.labels?.nodes?.length ?? 0;
+      return total + Math.max(0, (repo.labels?.totalCount ?? fetched) - fetched);
+    }, 0);
+    if (omittedLabels > 0) {
+      notes.push(`ラベルは${LABEL_FETCH_LIMIT}件までしか返しておらず、${omittedLabels}件は省いている。`);
+    }
   }
 
   return {

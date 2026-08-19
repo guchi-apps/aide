@@ -64,6 +64,14 @@ export interface CreateIssueOutcome {
   labels?: string[];
   /** 対象リポジトリに存在せず、落としたラベル。 */
   droppedLabels?: string[];
+  /**
+   * 対象リポジトリに実在するラベル名。**落としたものがあったときだけ入れる。**
+   *
+   * 落ちた事実だけを返すと、呼び出し側は正しい名前を知らないまま次の起票へ進むしかない
+   * （#122）。毎回載せると起票が成功したときのレスポンスまで長くなるので、直す材料が
+   * 要るときに限る。色や説明まで要るなら `aide_dev_status` に repo を指定して呼ぶ。
+   */
+  availableLabels?: string[];
 }
 
 /**
@@ -241,7 +249,8 @@ export async function createIssue(
   if (rejected) return { ok: false, reason: rejected };
 
   const requested = input.labels ?? DEFAULT_LABELS;
-  const { applied, dropped } = selectExistingLabels(requested, await fetchLabelNames(config, repo));
+  const existing = await fetchLabelNames(config, repo);
+  const { applied, dropped } = selectExistingLabels(requested, existing);
 
   let created: { number?: unknown; html_url?: unknown };
   try {
@@ -261,5 +270,6 @@ export async function createIssue(
     url: typeof created.html_url === "string" ? created.html_url : undefined,
     labels: applied,
     droppedLabels: dropped,
+    ...(dropped.length > 0 ? { availableLabels: existing } : {}),
   };
 }

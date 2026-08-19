@@ -50,7 +50,10 @@ export const createIssueTool: Tool = {
         items: { type: "string" },
         description:
           `付けるラベル名。省略時は ${DEFAULT_LABELS.join(" / ")}。` +
-          "対象リポジトリに実在するものだけが付く（存在しないラベルを勝手に作らないため）。",
+          "対象リポジトリに実在するものだけが付く（存在しないラベルを勝手に作らないため）。" +
+          "**どのラベルがあるか分からない場合は、先に aide_dev_status を repo 付きで呼び、" +
+          "detail.labels の名前から選ぶこと。** 落ちたラベルがあったときは、" +
+          "droppedLabels と実在するラベル名（availableLabels）を返す。",
       },
     },
     required: ["repo", "title"],

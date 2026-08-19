@@ -22,6 +22,9 @@ export const devStatusTool: Tool = {
     "「確認待ちは残っているか」「CIは通っているか」を尋ねられたときに呼ぶ。" +
     "repo を省くと対象リポジトリ全体の俯瞰を返す。特定のリポジトリについて" +
     "Issue・Pull Request・コミットの一覧まで見たいときだけ repo にリポジトリ名を指定する。" +
+    "**repo を指定したときは、そのリポジトリに定義されているラベルの一覧（名前・色・説明）を " +
+    "detail.labels に返す。** aide_create_issue でどのラベルを付けるか決めるときは、" +
+    "先にこのツールを repo 付きで呼んで候補を確かめること（実在しないラベル名は起票時に黙って落ちる）。" +
     "attention に注意すべきことが1行ずつ入るので、まずそこを見ること。" +
     "ok が true なら判定できた範囲で注意点なし。complete が false のときは取得できなかったものがあり、" +
     "判定範囲が限定的であることを意味する。" +
@@ -33,7 +36,8 @@ export const devStatusTool: Tool = {
         type: "string",
         description:
           "リポジトリ名（owner は含めない。例: aide, issue-deck, dayspan）。" +
-          "指定するとそのリポジトリだけを、Issue・Pull Request・直近コミットの一覧まで含めて返す。",
+          "指定するとそのリポジトリだけを、Issue・Pull Request・直近コミット・" +
+          "ラベルの一覧まで含めて返す。",
       },
     },
     additionalProperties: false,
