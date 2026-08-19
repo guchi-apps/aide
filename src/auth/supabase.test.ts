@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, it, mock } from "node:test";
 import {
   authorizeUrl,
+  callbackUrl,
   createPkce,
   exchangeCode,
   isAllowedEmail,
@@ -90,6 +91,18 @@ describe("画面を開いてよい人の判定", () => {
 });
 
 describe("認可の開始", () => {
+  it("戻り先は state をクエリに載せた形になる（許可リストの照合対象そのもの）", () => {
+    assert.equal(
+      callbackUrl("https://aide.example.com", "abc"),
+      "https://aide.example.com/status/auth/callback?state=abc",
+    );
+    // 末尾スラッシュの有無でパスが変わらないこと（一致しないとSite URLへ倒される・#93）。
+    assert.equal(
+      callbackUrl("https://aide.example.com/", "abc"),
+      "https://aide.example.com/status/auth/callback?state=abc",
+    );
+  });
+
   it("PKCEの challenge は verifier の SHA-256（S256）", () => {
     const { verifier, challenge } = createPkce();
     assert.equal(createHash("sha256").update(verifier).digest("base64url"), challenge);

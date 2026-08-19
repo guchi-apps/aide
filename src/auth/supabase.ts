@@ -36,8 +36,22 @@ const ENV_URL = "AIDE_SUPABASE_URL";
 const ENV_KEY = "AIDE_SUPABASE_PUBLISHABLE_KEY";
 const ENV_EMAILS = "AIDE_STATUS_ALLOWED_EMAILS";
 
-/** コールバックのパス。Supabaseダッシュボードの Redirect URLs にも同じものを登録する。 */
+/** コールバックのパス。Supabaseダッシュボードへ登録する形は `callbackUrl` の注意書きを見ること。 */
 export const CALLBACK_PATH = "/status/auth/callback";
+
+/**
+ * `redirect_to` としてSupabaseへ渡す戻り先。
+ *
+ * **Supabaseの許可リストと突き合わされるのは、この文字列そのもの**（フラグメントだけを
+ * 落とし、クエリは付いたまま照合される）。`state` を載せている以上、ダッシュボードへ
+ * `?` 無しのパスだけを完全一致で登録しても一致しない。検証（`src/auth/redirect-check.ts`）を
+ * 実際のログインと同じ形で行えるよう、組み立てはここに1か所だけ置く。
+ */
+export function callbackUrl(baseUrl: string, state: string): string {
+  const url = new URL(CALLBACK_PATH, baseUrl);
+  url.searchParams.set("state", state);
+  return url.toString();
+}
 
 /** 外部への問い合わせが返らないまま画面が固まらないようにする。 */
 const REQUEST_TIMEOUT_MS = 10_000;

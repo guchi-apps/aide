@@ -11,6 +11,7 @@ import {
   protectedResourceMetadata,
   requireBearer,
 } from "./auth/oauth.ts";
+import { logRedirectCheck } from "./auth/redirect-check.ts";
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
@@ -206,4 +207,20 @@ server.listen(PORT, HOST, () => {
         : "パスワード（Googleログインは未設定）"
     }`,
   );
+
+  // Googleログインの戻り先がSupabaseに登録されているかを起動時に一度だけ確かめる（#114）。
+  // **待たない・失敗させない。** 判定にはSupabaseへの1往復が要り、相手が落ちているだけで
+  // 起動が遅れたり止まったりしてよいものではない。壊れていた場合の唯一の気づき口が
+  // ログである理由は src/auth/redirect-check.ts に書いてある。
+  //
+  // 公開URLは `AIDE_BASE_URL` からしか分からない（起動時点ではリクエストのHostが無い）。
+  // 未設定＝ローカル開発なので、確認そのものを行わない。
+  const publicBaseUrl = process.env["AIDE_BASE_URL"];
+  if (supabaseAuthConfig && publicBaseUrl) {
+    void logRedirectCheck(supabaseAuthConfig, publicBaseUrl.replace(/\/$/, "")).catch(
+      (cause: unknown) => {
+        console.warn("[status] Googleログインの戻り先の確認に失敗", cause);
+      },
+    );
+  }
 });
