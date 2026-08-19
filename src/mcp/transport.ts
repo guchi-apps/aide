@@ -199,6 +199,12 @@ export class McpTransport {
               ? info.version.trim().slice(0, MAX_CLIENT_LENGTH)
               : null;
         }
+        // ネゴシエート結果を1行だけ残す。`serverInfo.icons` のような**新しい版で足された
+        // フィールドは、相手が古い版で繋いでいると読まれない**（#125）。アクセスの記録に
+        // プロトコル版は持たせていないため、出ない原因を切り分ける手掛かりがここしかない。
+        console.log(
+          `[mcp] initialize: protocol=${protocolVersion} client=${ctx.client ?? "(不明)"}`,
+        );
         ctx.issuedSessionId = randomUUID();
         this.#sessions.set(ctx.issuedSessionId, {
           client: ctx.client,
