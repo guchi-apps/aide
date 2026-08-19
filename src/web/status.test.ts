@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Health } from "../core/views/health.ts";
+import { summarizeMcpAccess, type McpAccessEntry } from "../mcp/access-log.ts";
 import { ToolRegistry } from "../mcp/registry.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
 import { renderLoginPage, renderStatusPage } from "./status.ts";
@@ -11,10 +12,46 @@ function registry(): ToolRegistry {
   return created;
 }
 
+const NOW = "2026-08-18T06:42:07.000Z";
+
+/** Claudeが1回繋いでツールを1つ呼んだ、という最小の記録。 */
+const ACCESS_ENTRIES: McpAccessEntry[] = [
+  {
+    at: "2026-08-18T06:20:00.000Z",
+    method: "initialize",
+    tool: null,
+    client: "Claude",
+    clientVersion: "1.4.2",
+    ok: true,
+    ms: 2,
+    detail: "",
+  },
+  {
+    at: "2026-08-18T06:20:01.000Z",
+    method: "tools/list",
+    tool: null,
+    client: "Claude",
+    clientVersion: "1.4.2",
+    ok: true,
+    ms: 1,
+    detail: "",
+  },
+  {
+    at: "2026-08-18T06:40:00.000Z",
+    method: "tools/call",
+    tool: "aide_ping",
+    client: "Claude",
+    clientVersion: "1.4.2",
+    ok: true,
+    ms: 12,
+    detail: "",
+  },
+];
+
 /** 何も問題が無い状態。個々のテストで必要な部分だけ差し替える。 */
 function health(overrides: Partial<Health> = {}): Health {
   return {
-    checkedAt: "2026-08-18T06:42:07.000Z",
+    checkedAt: NOW,
     severity: "ok",
     attention: [],
     server: {
@@ -73,6 +110,7 @@ function health(overrides: Partial<Health> = {}): Health {
       },
     ],
     mcp: { clients: 2, tokens: 2, nearestExpiryAt: "2026-09-11T00:00:00.000Z" },
+    mcpAccess: summarizeMcpAccess(ACCESS_ENTRIES, new Date(NOW)),
     ...overrides,
   };
 }
@@ -161,6 +199,84 @@ describe("動作状況ページ", () => {
     assert.ok(html.includes("認証が無効"));
     // 守るものが無い状態なのでログアウトは出さない。
     assert.ok(!html.includes("ログアウト"));
+  });
+
+  it("MCPへのアクセスを新しい順に並べ、誰が何を呼んだかを出す", () => {
+    const html = renderStatusPage(health(), registry());
+    assert.ok(html.includes("MCPアクセス"));
+    assert.ok(html.includes("aide_ping"));
+    assert.ok(html.includes("Claude 1.4.2"), "接続してきたクライアントが出ていない");
+    // 新しい記録（ツール呼び出し）が、古い記録（接続開始）より前に来る。
+    assert.ok(html.indexOf("15:40:00") < html.indexOf("接続開始"));
+  });
+
+  it("接続確認・一覧の取得は畳んでおき、開く手段を用意する", () => {
+    // Claudeが定期的に投げてくるぶんが表を埋めると、ツールの呼び出しが読めなくなる。
+    const html = renderStatusPage(health(), registry());
+    assert.ok(html.includes('class="quiet"'), "畳む行に印が付いていない");
+    assert.ok(html.includes("接続確認・一覧の取得も表示する"));
+  });
+
+  it("失敗した呼び出しは、その行に理由まで出す", () => {
+    const base = health();
+    const html = renderStatusPage(
+      {
+        ...base,
+        mcpAccess: summarizeMcpAccess(
+          [
+            {
+              at: "2026-08-18T06:41:00.000Z",
+              method: "tools/call",
+              tool: "aide_dev_status",
+              client: "Claude Code",
+              clientVersion: null,
+              ok: false,
+              ms: 1204,
+              detail: "ツール aide_dev_status が失敗しました: GitHub 401",
+            },
+          ],
+          new Date(NOW),
+        ),
+      },
+      registry(),
+    );
+    assert.ok(html.includes("失敗"));
+    assert.ok(html.includes("GitHub 401"));
+    assert.ok(html.includes("1,204ms"));
+  });
+
+  it("記録が1件も無ければ、異常ではなく「記録なし」と出す", () => {
+    const html = renderStatusPage(
+      health({ mcpAccess: summarizeMcpAccess([], new Date(NOW)) }),
+      registry(),
+    );
+    assert.ok(html.includes("まだ記録がありません"));
+    assert.ok(html.includes("記録なし"));
+  });
+
+  it("クライアントの名乗りもエスケープして出す", () => {
+    // 名前は相手の自己申告なので、そのまま埋め込まない。
+    const html = renderStatusPage(
+      health({
+        mcpAccess: summarizeMcpAccess(
+          [
+            {
+              at: "2026-08-18T06:41:00.000Z",
+              method: "ping",
+              tool: null,
+              client: "<img src=x onerror=1>",
+              clientVersion: null,
+              ok: true,
+              ms: 0,
+              detail: "",
+            },
+          ],
+          new Date(NOW),
+        ),
+      }),
+      registry(),
+    );
+    assert.ok(!html.includes("<img src=x"));
   });
 
   it("登録済みのMCPツールが出る", () => {

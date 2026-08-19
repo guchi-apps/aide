@@ -38,6 +38,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_GITHUB_REPOS: "未設定なら活動中のリポジトリを自動で拾う",
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
   AIDE_INGEST_URL: "送信側（サブPCのworker）の設定。受け側のVPSでは読まない",
+  AIDE_MCP_ACCESS_LOG_PATH: "MCPアクセスの記録の置き場。既定（data/mcp-access.json）で足りる",
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",
   AIDE_MYROOM_URL: "既定 http://127.0.0.1:8000 で足りる",
   AIDE_SIGNALY_WEBHOOK_URL: "workerジョブの通知用。workerはサブPCで動く",

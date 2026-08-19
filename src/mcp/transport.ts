@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { recordMcpAccess } from "./access-log.ts";
 import type { ToolRegistry } from "./registry.ts";
 import {
   DEFAULT_PROTOCOL,
@@ -7,6 +8,7 @@ import {
   SUPPORTED_PROTOCOLS,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type ToolResult,
 } from "./types.ts";
 
 /**
@@ -36,12 +38,24 @@ interface RpcContext {
   sessionId: string | null;
   /** initialize で新規発行したセッションID。レスポンスヘッダに載せる。 */
   issuedSessionId: string | null;
+  /**
+   * 接続してきた相手。`initialize` で名乗った名前をセッションに覚えておき、
+   * 以降のリクエストではそこから引く。名乗らない相手は User-Agent で代用する。
+   */
+  client: string | null;
+  clientVersion: string | null;
+}
+
+/** セッションごとに覚えておくこと。**アクセスの記録に出す名前だけ**で、資格情報は持たない。 */
+interface SessionInfo {
+  client: string | null;
+  clientVersion: string | null;
 }
 
 export class McpTransport {
   readonly #registry: ToolRegistry;
   readonly #serverInfo: McpServerInfo;
-  readonly #sessions = new Set<string>();
+  readonly #sessions = new Map<string, SessionInfo>();
 
   constructor(registry: ToolRegistry, serverInfo: McpServerInfo) {
     this.#registry = registry;
@@ -101,9 +115,15 @@ export class McpTransport {
     }
 
     const sessionHeader = req.headers["mcp-session-id"];
+    const sessionId = typeof sessionHeader === "string" ? sessionHeader : null;
+    const known = sessionId ? this.#sessions.get(sessionId) : undefined;
     const ctx: RpcContext = {
-      sessionId: typeof sessionHeader === "string" ? sessionHeader : null,
+      sessionId,
       issuedSessionId: null,
+      // 名乗りは initialize の1回だけ来る。以降のリクエストはセッションから引き、
+      // それも無ければ User-Agent（`Anthropic/ClaudeAI` など）で代用する。
+      client: known?.client ?? shortUserAgent(req.headers["user-agent"]),
+      clientVersion: known?.clientVersion ?? null,
     };
 
     // 2025-03-26 以前はバッチを許容していた。単体で来ても配列で来ても扱えるようにする。
@@ -111,7 +131,21 @@ export class McpTransport {
     const messages = (isBatch ? payload : [payload]) as JsonRpcRequest[];
     const responses: JsonRpcResponse[] = [];
     for (const message of messages) {
+      const startedAt = Date.now();
       const response = await this.#dispatch(message, ctx);
+      // 記録は待たない。ディスクへの書き込みでMCPの応答を遅らせる理由が無く、
+      // 失敗しても応答は変わらない（src/mcp/access-log.ts）。
+      void recordMcpAccess({
+        at: new Date().toISOString(),
+        method: typeof message?.method === "string" ? message.method : "(不明)",
+        tool: message?.method === "tools/call" && typeof message.params?.["name"] === "string"
+          ? (message.params["name"] as string)
+          : null,
+        client: ctx.client,
+        clientVersion: ctx.clientVersion,
+        ms: Date.now() - startedAt,
+        ...outcome(response),
+      });
       if (response) responses.push(response);
     }
 
@@ -147,8 +181,21 @@ export class McpTransport {
           (SUPPORTED_PROTOCOLS as readonly string[]).includes(requested)
             ? requested
             : DEFAULT_PROTOCOL;
+        // 名乗りは記録に出す名前としてだけ使う。`clientInfo` は相手の自己申告で、
+        // 権限の判断には使わない（それはアクセストークンの仕事）。
+        const info = params?.["clientInfo"] as { name?: unknown; version?: unknown } | undefined;
+        if (typeof info?.name === "string" && info.name.trim()) {
+          ctx.client = info.name.trim().slice(0, MAX_CLIENT_LENGTH);
+          ctx.clientVersion =
+            typeof info.version === "string" && info.version.trim()
+              ? info.version.trim().slice(0, MAX_CLIENT_LENGTH)
+              : null;
+        }
         ctx.issuedSessionId = randomUUID();
-        this.#sessions.add(ctx.issuedSessionId);
+        this.#sessions.set(ctx.issuedSessionId, {
+          client: ctx.client,
+          clientVersion: ctx.clientVersion,
+        });
         return ok({
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
@@ -210,6 +257,38 @@ export class McpTransport {
       .writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS, ...headers })
       .end(JSON.stringify(body));
   }
+}
+
+/** 名乗り・User-Agent の取り込み上限。相手の申告をそのまま画面へ流さない。 */
+const MAX_CLIENT_LENGTH = 40;
+
+/**
+ * User-Agent から名前だけを取る。`Anthropic/ClaudeAI 1.2.3` → `Anthropic/ClaudeAI`。
+ * バージョンやOSの並びまで記録しても、どのクライアントかの区別には足さない。
+ */
+function shortUserAgent(value: string | undefined): string | null {
+  const first = (value ?? "").trim().split(/[\s;]/)[0];
+  return first ? first.slice(0, MAX_CLIENT_LENGTH) : null;
+}
+
+/**
+ * 応答から成否と理由を取る。
+ *
+ * **ツールの失敗はプロトコルエラーにならない。** `#dispatch` が `isError` 付きの結果へ
+ * 畳んでいるため（そうしないとClaudeが復旧できない）、そこも見ないと失敗を見落とす。
+ * 記録に載せるのは失敗の1行だけで、成功した応答の中身は読まない。
+ */
+function outcome(response: JsonRpcResponse | null): { ok: boolean; detail: string } {
+  // 通知（応答を返さないもの）。受け取れた時点で成功とみなす。
+  if (!response) return { ok: true, detail: "" };
+  if (response.error) return { ok: false, detail: response.error.message };
+
+  const result = response.result as ToolResult | undefined;
+  if (result?.isError) {
+    const text = result.content?.find((item) => item.type === "text")?.text;
+    return { ok: false, detail: text || "ツールがエラーを返した" };
+  }
+  return { ok: true, detail: "" };
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

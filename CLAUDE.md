@@ -139,8 +139,11 @@ APIキー・トークン・パスワード等の実シークレットをコミ�
 サンプル（`.env.example`）と、1Passwordの `op://vault/item/field` 形式の参照だけを書いたテンプレートに
 限る。実値は `.gitignore` 済みの `.env*` と1Password側、およびGitHubのsecret/variableにのみ置く。
 
-**`data/` は Zaim のログイン状態（Cookieそのもの）** で、`.gitignore` 済み。中身を読み書きする変更や、
-ログ・Issueコメントへ内容を出す変更は行わない。
+**`data/` には Zaim のログイン状態（Cookieそのもの）が入っている。** `.gitignore` 済み。
+**その中身を読み書きする変更や、ログ・Issueコメントへ内容を出す変更は行わない。**
+`data/` 配下にはこのほかにOAuthの状態（`data/auth/`）とMCPアクセスの記録（`data/mcp-access.json`）も
+置くが、**ここへ新しいファイルを足すときは「シークレットも取得したデータ本体も書かない」ことを
+確かめる**（記録に残してよい粒度の判断は README「MCPへのアクセスの記録」に例がある）。
 
 **実行時の1Password呼び出しは行わない**（issue-deck#1307）。GitHub Actions は GitHubの
 secret/variable から値を取得する。
