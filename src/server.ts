@@ -18,6 +18,7 @@ import { createIssueTool } from "./mcp/tools/issue.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
+import { roomStatusTool } from "./mcp/tools/room.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
@@ -52,6 +53,7 @@ const registry = new ToolRegistry();
 registry.register(pingTool);
 registry.register(moneySummaryTool);
 registry.register(opsStatusTool);
+registry.register(roomStatusTool);
 registry.register(devStatusTool);
 registry.register(createIssueTool);
 

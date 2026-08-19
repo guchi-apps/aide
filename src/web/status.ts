@@ -22,6 +22,7 @@ import {
 } from "../core/views/health.ts";
 import { buildMoneySummary } from "../core/views/money.ts";
 import { buildOpsStatus } from "../core/views/ops.ts";
+import { buildRoomStatus } from "../core/views/room.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { formatJst } from "../worker/notify.ts";
 import { card, defList, escapeHtml, pill, renderPage, table, type Tone } from "./layout.ts";
@@ -616,6 +617,13 @@ export async function runProbes(): Promise<ProbeResult[]> {
     }),
     measure("github", async () => {
       const status = await buildDevStatus();
+      return {
+        ok: status.configured && status.complete,
+        detail: status.unavailable[0]?.reason ?? (status.configured ? "" : "未設定"),
+      };
+    }),
+    measure("myroom", async () => {
+      const status = await buildRoomStatus();
       return {
         ok: status.configured && status.complete,
         detail: status.unavailable[0]?.reason ?? (status.configured ? "" : "未設定"),
