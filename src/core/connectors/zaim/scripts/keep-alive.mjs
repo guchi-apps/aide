@@ -1,3 +1,4 @@
+import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
 import { assertLoggedIn } from "./session-check.mjs"
@@ -22,7 +23,7 @@ if (!balanceUrl) {
 
 const { chromium } = await loadPlaywright()
 const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ storageState: statePath })
+const context = await browser.newContext({ storageState: statePath, ...ZAIM_CONTEXT_OPTIONS })
 const page = await context.newPage()
 
 try {

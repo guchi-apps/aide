@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
+import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
 
@@ -48,7 +49,7 @@ const timeoutMs = Number(process.env.ZAIM_LOGIN_TIMEOUT_MS || DEFAULT_TIMEOUT_MS
 await mkdir(dirname(statePath), { recursive: true })
 
 const browser = await chromium.launch({ headless: false })
-const context = await browser.newContext()
+const context = await browser.newContext({ ...ZAIM_CONTEXT_OPTIONS })
 const page = await context.newPage()
 
 console.log(`Zaimを開きます: ${loginUrl}`)
