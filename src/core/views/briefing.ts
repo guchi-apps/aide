@@ -76,7 +76,13 @@ export type PendingSection = BriefingSection<never>;
 export interface BriefingWeather {
   /** 対象日（JSTの暦日）の予報。キャッシュに含まれていなければ null。 */
   today: WeatherDay | null;
-  /** 翌日の予報。含まれていなければ null。 */
+  /**
+   * 翌日の予報。含まれていなければ null。
+   *
+   * **深夜0時台は毎日 null になる。** 取得は今日・明日の2日ぶん固定（`FORECAST_DAYS`）なので、
+   * 日付が変わってから次の毎時同期が走るまでは、キャッシュの中身が「前日・当日」のままになる。
+   * この間もキャッシュ自体は新しいため `stale` にはならない。
+   */
   tomorrow: WeatherDay | null;
   /** CC BY 4.0 の帰属表示。データと一緒に持ち回る。 */
   attribution: string;
@@ -200,6 +206,14 @@ export function assembleBriefing(
   }
   if (entries.some((entry) => entry.section.state === "not_connected")) {
     notes.push("not_connected のセクションはコネクタ自体が未実装で、設定を直しても取得できない。");
+  }
+  if (sections.weather.state === "ok" && sections.weather.data?.tomorrow === null) {
+    // 深夜0時台は毎日ここへ来る（取得は2日ぶん固定で、日付が変わると「明日」が抜ける）。
+    // 黙って null を返すと「明日の予報が出ていない」と読まれるため、理由を添える。
+    notes.push(
+      "明日ぶんの予報はまだ取得済みのキャッシュに含まれていない（次の毎時同期で入る）。" +
+        "明日の天気が無いという意味ではない。",
+    );
   }
 
   return {

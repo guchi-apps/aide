@@ -138,6 +138,22 @@ describe("assembleBriefing", () => {
     assert.equal(briefing.weather.data?.today?.date, TODAY);
   });
 
+  it("明日ぶんが未取得なら断り書きを添える（深夜0時台に毎日起きる）", () => {
+    // 日付が変わってから次の毎時同期までは、キャッシュの中身が「前日・当日」のままになる。
+    // このときキャッシュ自体は新しいので stale にはならない。
+    const weather = summarizeWeatherSection(cached([day("2026-08-18"), day(TODAY)]), TODAY);
+    const briefing = assembleBriefing(NOW, TODAY, {
+      schedule: pending("予定のコネクタが未実装"),
+      transit: pending("交通のコネクタが未実装"),
+      weather,
+    });
+
+    assert.equal(briefing.weather.state, "ok");
+    assert.equal(briefing.weather.stale, false);
+    assert.equal(briefing.weather.data?.tomorrow, null);
+    assert.match(briefing.note, /明日ぶんの予報/);
+  });
+
   it("欠けたソースがあるときは読み違いを防ぐ断り書きを添える", () => {
     const briefing = assembleBriefing(NOW, TODAY, {
       schedule: pending("予定のコネクタが未実装"),
