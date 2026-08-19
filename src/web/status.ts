@@ -24,6 +24,13 @@ import {
 import { buildMoneySummary } from "../core/views/money.ts";
 import { buildOpsStatus } from "../core/views/ops.ts";
 import { buildRoomStatus } from "../core/views/room.ts";
+import {
+  AUTH_METHOD,
+  isQuietMethod,
+  MAX_ENTRIES,
+  type McpAccessEntry,
+  type McpAccessSummary,
+} from "../mcp/access-log.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { formatJst } from "../worker/notify.ts";
 import { card, defList, escapeHtml, pill, renderPage, table, type Tone } from "./layout.ts";
@@ -180,6 +187,9 @@ function serverCard(health: Health): string {
 
 function mcpCard(health: Health, registry: ToolRegistry): string {
   const tools = registry.list();
+  // 記録に残っている範囲での呼び出し回数。0回のツールには何も添えない
+  // （「一度も呼ばれていない」と「記録が流れて消えた」を見分けられないため）。
+  const counts = new Map(health.mcpAccess.toolCounts.map(({ tool, count }) => [tool, count]));
   return card({
     title: "MCP接続",
     meta: `ツール ${tools.length}`,
@@ -194,7 +204,107 @@ function mcpCard(health: Health, registry: ToolRegistry): string {
             : `${health.mcp.tokens} 件`,
         ],
       ]) +
-      `<ul class="chips">${tools.map((tool) => `<li>${escapeHtml(tool.name)}</li>`).join("")}</ul>`,
+      `<ul class="chips">${tools
+        .map((tool) => {
+          const count = counts.get(tool.name);
+          return `<li>${escapeHtml(tool.name)}${count ? `<span class="c">${count}</span>` : ""}</li>`;
+        })
+        .join("")}</ul>` +
+      `<p class="sub">数字は記録に残っている範囲での呼び出し回数です。</p>`,
+  });
+}
+
+/** メソッドの日本語。ツールの呼び出し以外は、何をしたのかが名前から読めないため置き換える。 */
+const METHOD_LABEL: Record<string, string> = {
+  [AUTH_METHOD]: "認証で拒否",
+  initialize: "接続開始",
+  ping: "接続確認",
+  "tools/list": "ツール一覧",
+  "resources/list": "リソース一覧",
+  "prompts/list": "プロンプト一覧",
+};
+
+/** 記録の時刻。今日のぶんは時刻だけにして、日付の繰り返しで表を太らせない。 */
+function logTime(at: string, now: Date): string {
+  const [date = "", time = ""] = formatJst(new Date(at)).replace(" JST", "").split(" ");
+  const today = formatJst(now).replace(" JST", "").split(" ")[0];
+  return date === today ? time : `${date.slice(5)} ${time.slice(0, 5)}`;
+}
+
+function operation(entry: McpAccessEntry): string {
+  const name = entry.tool
+    ? `<span class="mono">${escapeHtml(entry.tool)}</span>`
+    : entry.method.startsWith("notifications/")
+      ? `通知（<span class="mono">${escapeHtml(entry.method.slice("notifications/".length))}</span>）`
+      : escapeHtml(METHOD_LABEL[entry.method] ?? entry.method);
+  // 失敗の理由は列を増やさず、その行の下へ回す（定期ジョブの表と同じ扱い）。
+  return entry.ok || !entry.detail ? name : `${name}<span class="why">${escapeHtml(entry.detail)}</span>`;
+}
+
+/**
+ * MCPへのアクセスの記録（#116）。
+ *
+ * 呼ばれた事実だけを並べる。**引数と応答の中身は記録していない**ので、ここに出せるのは
+ * 「いつ・誰が・どのツールを・成功したか」まで。中身が要るときはClaudeに聞くことになる。
+ */
+function mcpAccessCard(access: McpAccessSummary, now: Date): string {
+  if (access.total === 0) {
+    return card({
+      title: "MCPアクセス",
+      status: pill("muted", "記録なし"),
+      wide: true,
+      body: `<p class="sub">まだ記録がありません。ClaudeアプリがMCPへ接続すると、ここに1件ずつ残ります。</p>`,
+    });
+  }
+
+  const rows = access.entries.map((entry) => [
+    `<span class="when">${escapeHtml(logTime(entry.at, now))}</span>`,
+    escapeHtml(entry.client ?? "不明"),
+    operation(entry),
+    pill(entry.ok ? "ok" : "danger", entry.ok ? "成功" : "失敗"),
+    `${entry.ms.toLocaleString("ja-JP")}ms`,
+  ]);
+  const rowClasses = access.entries.map((entry) =>
+    isQuietMethod(entry.method) ? "quiet" : undefined,
+  );
+
+  return card({
+    title: "MCPアクセス",
+    meta: `直近 ${access.total} 件`,
+    status: pill(TONE[access.severity], SEVERITY_LABEL[access.severity]),
+    wide: true,
+    body:
+      defList([
+        [
+          "最後のアクセス",
+          `${escapeHtml(formatJst(new Date(access.lastAt!)))}（${escapeHtml(formatDuration(access.lastAgeMinutes ?? 0))}前）`,
+        ],
+        [
+          "ツール呼び出し",
+          `${access.toolCalls} 件${access.failures > 0 ? `（失敗 ${access.failures} 件）` : ""}`,
+        ],
+        [
+          "接続クライアント",
+          access.clients.length === 0 ? "不明" : escapeHtml(access.clients.join(" ／ ")),
+        ],
+        // 0件のときは行ごと出さない。常時0が並ぶと、実際に弾いたときの1が目に入らない。
+        ...(access.authFailures > 0
+          ? ([["認証で拒否", `${access.authFailures} 件（同じ相手の連続は1分に1件だけ残します）`]] as [
+              string,
+              string,
+            ][])
+          : []),
+      ]) +
+      `<div class="log">` +
+      `<input type="checkbox" id="mcp-quiet" class="logtoggle">` +
+      `<label class="logfilter" for="mcp-quiet">接続確認・一覧の取得も表示する</label>` +
+      table(["時刻", "クライアント", "操作", "結果", "所要"], rows, rowClasses) +
+      `</div>` +
+      (access.visible === 0
+        ? `<p class="sub">直近の記録は接続確認だけです。上のチェックを入れると表示します。</p>`
+        : "") +
+      `<p class="sub">呼ばれた事実だけを残します（引数・応答の中身・アクセス元は記録しません）。
+       直近${MAX_ENTRIES}件を保ち、古いものから消えます。</p>`,
   });
 }
 
@@ -328,6 +438,7 @@ ${renderAttention(health)}
 <div class="grid">
 ${serverCard(health)}
 ${mcpCard(health, registry)}
+${mcpAccessCard(health.mcpAccess, new Date(health.checkedAt))}
 ${jobsCard(health)}
 ${cacheCard(health)}
 ${connectorsCard(health)}

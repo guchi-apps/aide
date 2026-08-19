@@ -144,9 +144,23 @@ td.key{font-family:${FONT_MONO};font-weight:500;white-space:nowrap}
 .chips{display:flex;flex-wrap:wrap;gap:.35rem;margin:0;padding:0;list-style:none}
 .chips li{font-family:${FONT_MONO};font-size:.76rem;padding:.15rem .5rem;
  background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
+.chips li .c{font-weight:700;margin-left:.4em;font-variant-numeric:tabular-nums}
 .connect{background:var(--accent-soft);border:1px solid var(--accent);padding:.7rem .9rem;
  display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .9rem;font-size:.84rem;align-items:baseline}
 .connect dt{color:var(--accent)}
+
+/* ---- MCPアクセスの記録（動作状況ページ）---- */
+/* 接続確認・一覧の取得は数が多く、ツールの呼び出しを押し流す。
+   既定では畳んでおき、チェックを入れたときだけ同じ表に混ぜて出す。
+   JavaScriptを使わないのは、この画面が素のfetch1か所しか持たない方針に合わせるため。 */
+.log{min-width:0}
+.log input.logtoggle{accent-color:var(--accent);vertical-align:middle;margin:0 .35rem 0 0}
+.log label.logfilter{font-size:.8rem;color:var(--muted);vertical-align:middle;cursor:pointer}
+.log .tblwrap{margin-top:.5rem}
+.log input.logtoggle:not(:checked) ~ .tblwrap tr.quiet{display:none}
+.when{font-family:${FONT_MONO};white-space:nowrap;color:var(--ink-2)}
+tr.quiet td{color:var(--muted)}
+.why{display:block;color:var(--bad);font-size:.78rem;font-variant-numeric:normal}
 
 /* ---- 操作 ---- */
 button.act{font:inherit;font-size:.82rem;padding:.35rem .85rem;background:var(--panel-2);
@@ -261,13 +275,26 @@ export function defList(rows: [label: string, valueHtml: string][]): string {
     .join("")}</dl>`;
 }
 
-/** 表。セルも `defList` と同じくHTMLとして扱う。 */
-export function table(headers: string[], rows: string[][]): string {
+/**
+ * 表。セルも `defList` と同じくHTMLとして扱う。
+ *
+ * `rowClasses` は行ごとのclass（同じ添字で対応させる）。CSSだけで一部の行を畳むために使う。
+ */
+export function table(
+  headers: string[],
+  rows: string[][],
+  rowClasses: (string | undefined)[] = [],
+): string {
   const head = headers.length
     ? `<thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>`
     : "";
   const body = rows
-    .map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`)
+    .map((cells, index) => {
+      const className = rowClasses[index];
+      return `<tr${className ? ` class="${escapeHtml(className)}"` : ""}>${cells
+        .map((cell) => `<td>${cell}</td>`)
+        .join("")}</tr>`;
+    })
     .join("");
   return `<div class="tblwrap"><table>${head}<tbody>${body}</tbody></table></div>`;
 }

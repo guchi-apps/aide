@@ -13,6 +13,7 @@ import {
 } from "./auth/oauth.ts";
 import { logRedirectCheck } from "./auth/redirect-check.ts";
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
+import { recordMcpAuthFailure } from "./mcp/access-log.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
 import { dailyBriefingTool } from "./mcp/tools/briefing.ts";
@@ -189,7 +190,17 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // ---- MCP ----
   if (path === "/mcp") {
     // プリフライトは認証前に通す。ここで401を返すとブラウザ経由の接続が始まらない。
-    if (req.method !== "OPTIONS" && !(await requireBearer(req, res, baseUrl))) return;
+    const startedAt = Date.now();
+    if (req.method !== "OPTIONS" && !(await requireBearer(req, res, baseUrl))) {
+      // **弾いたアクセスもここで記録する。** 401はこの行で終わり、transport まで届かない。
+      // 記録しないと、Claudeのトークンが切れて呼び出しが全部落ちている状態と、
+      // 誰も繋いでいない状態が動作状況ページで区別できない（#116）。
+      void recordMcpAuthFailure({
+        userAgent: req.headers["user-agent"],
+        ms: Date.now() - startedAt,
+      });
+      return;
+    }
     await mcp.handle(req, res);
     return;
   }
