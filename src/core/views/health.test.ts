@@ -199,6 +199,21 @@ describe("接続先の設定状況", () => {
     });
   });
 
+  it("Googleログインを使うときだけ戻り先の行を出す（未設定が正常な状態のため）", () => {
+    // 他の接続先と違い、Googleログインを使わない構成（パスワードでのログイン）が正常にありうる。
+    // 常に行を出すと「未設定」の警告が鳴りっぱなしになる。
+    assert.equal(
+      readConnectors().find((connector) => connector.key === "supabase-redirect"),
+      undefined,
+    );
+
+    const connector = readConnectors({
+      supabase: { url: "https://project.supabase.co", publishableKey: "k", allowedEmails: ["a@b.c"] },
+    }).find((item) => item.key === "supabase-redirect");
+    assert.equal(connector?.configured, true);
+    assert.equal(connector?.probeable, true);
+  });
+
   it("起票の疎通は画面から確認しない（確認そのものがIssueを1件立ててしまう）", () => {
     assert.equal(readConnectors().find((connector) => connector.key === "github-write")?.probeable, false);
   });
