@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readAuthSummary, type AuthSummary } from "../../auth/store.ts";
 import type { SupabaseAuthConfig } from "../../auth/supabase.ts";
+import { readMcpAccessSummary, type McpAccessSummary } from "../../mcp/access-log.ts";
 import { JOB_CATALOG, type JobInfo } from "../../worker/jobs/catalog.ts";
 import { jobRecordKey, type JobRecord } from "../../worker/record.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
@@ -105,6 +106,14 @@ export interface Health {
   cache: HealthCache;
   connectors: HealthConnector[];
   mcp: AuthSummary;
+  /**
+   * MCPへのアクセスの記録（#116）。
+   *
+   * **全体の状態（`severity`）には混ぜない。** ツールの失敗はAIDEの障害とは限らず
+   * （相手のサービスが落ちている・まだ設定していない）、混ぜるとページ全体が
+   * 「注意」のまま戻らなくなる。カード単体の状態としてだけ出す。
+   */
+  mcpAccess: McpAccessSummary;
 }
 
 /** 悪いほうを採る。`unknown`（材料が無い）は判定に影響させない。 */
@@ -334,11 +343,12 @@ export interface HealthInput {
 export async function buildHealth(input: HealthInput): Promise<Health> {
   const now = input.now ?? new Date();
 
-  const [version, jobRecords, zaimCache, mcp] = await Promise.all([
+  const [version, jobRecords, zaimCache, mcp, mcpAccess] = await Promise.all([
     readVersion(),
     Promise.all(JOB_CATALOG.map((job) => readCache<JobRecord>(jobRecordKey(job.name)))),
     readCache<ZaimSnapshot>(ZAIM_CACHE_KEY),
     readAuthSummary(),
+    readMcpAccessSummary(now),
   ]);
 
   const jobs = JOB_CATALOG.map((job, index) => summarizeJob(job, jobRecords[index] ?? null));
@@ -393,5 +403,6 @@ export async function buildHealth(input: HealthInput): Promise<Health> {
     cache,
     connectors,
     mcp,
+    mcpAccess,
   };
 }
