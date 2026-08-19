@@ -151,6 +151,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
 | `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
+| `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細 |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みを伴う唯一のツール**（作成のみ。編集・close・コメントは持たない） |
 
@@ -527,6 +528,60 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 通貨は `JPY` / `USD` の混在を許すため、**合計は通貨別**で返す。円換算値（`monthlyJpy`）は相手が
 Frankfurter のレートで計算した参考値で、取得できていなければ `null` になる。
+
+
+## コネクタ: myroom
+
+いまの部屋の状態（室温・湿度・気圧・CO2・照度とエアコンの運転状態）。**AIDEはセンサーの値を
+集めない。** [myroom](https://github.com/guchi-apps/myroom) が Raspberry Pi からの受信・保存・
+鮮度判定まで持っているため、サーバー間参照用の読み取りAPI（`GET /api/internal/room-state`）を
+叩いて `aide_room_status` に畳むだけにしている。ops-dashboard・subscription-lists と同じ
+「既にある集約を横断ビューへ畳む」ケース。
+
+```
+src/core/connectors/myroom/
+  types.ts   myroom のレスポンスのうち、AIDEが使うフィールドだけを再宣言
+  index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
+src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
+```
+
+### 経路
+
+両方とも同じVPS上で動くため **localhost で届き、myroom を外部公開する必要がない**。
+`fetch` しか使わないので実行時依存も増えない。
+
+| 環境変数 | 未設定のとき | 設定したとき |
+|---|---|---|
+| `AIDE_MYROOM_URL` | `http://127.0.0.1:8000` | そのURLへ問い合わせる |
+| `AIDE_MYROOM_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+
+トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
+止まる）。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
+
+**myroom の読み取りAPIは元々 Supabase のユーザーログイン必須**で、サーバー間から読める口が無い。
+内部APIは [myroom#161](https://github.com/guchi-apps/myroom/issues/161) で追加する。**未実装の
+バージョンに対しては 404 が返り、`unavailable` に「内部APIが未実装のバージョン」として出る。**
+
+### 鮮度と判定
+
+**センサーの鮮度判定・気圧オフセットの適用・デバイスの表示名は myroom 側が持っている。**
+こちらで再実装すれば必ずズレるため、判定済みの値を受け取る（しきい値は `staleThresholdMinutes`
+として一緒に返る）。
+
+**受信が止まっているセンサー（`stale`）の値は判定に使わない。** 数日前に止まったセンサーの32℃を
+「いまの室温」として報告してしまうため（ops ビューがオフラインのホストを評価しないのと同じ）。
+値そのものは残すので、後から見れば何度で止まったかは分かる。
+
+快適域のしきい値は `src/core/views/room.ts` の `THRESHOLDS` にまとめてある（CO2の1000ppmは
+建築物衛生法の管理基準）。
+
+### 返す粒度
+
+「いま部屋がどうなっているか」に答えられるところまで。**履歴・日別統計・記録の一覧は返さない。**
+生の時系列を渡してもコンテキストを食うだけで答えは良くならない（詳細は myroom の画面がある）。
+
+**キャッシュを挟まない。** 部屋の状態は鮮度そのものが価値であり、ジョブ間隔ぶん古くなると
+「いま暑いか」に答えられなくなる（README「どこまでを『重い取得』とみなすか」の右側）。
 
 
 ## コネクタ: GitHub
