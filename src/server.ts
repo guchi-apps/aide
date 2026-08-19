@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { handleIngest } from "./api/ingest.ts";
 import { handleMoneySummary } from "./api/read.ts";
+import { handleZaimMaster, handleZaimPayment } from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -167,6 +168,18 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 読み取り側に書き込み権限を渡さないよう、受け口とはシークレットを分けている。
   if (path === "/api/money/summary") {
     await handleMoneySummary(req, res);
+    return;
+  }
+
+  // ---- 個人アプリ向けのZaim登録API ----
+  // Zaimの資格情報をAIDEだけに持たせるための口（#37）。上の2つとはさらに別のシークレットで、
+  // 残高を読みたいだけのアプリへZaimへの書き込み権限を渡さない。
+  if (path === "/api/zaim/payment") {
+    await handleZaimPayment(req, res);
+    return;
+  }
+  if (path === "/api/zaim/master") {
+    await handleZaimMaster(req, res);
     return;
   }
 
