@@ -1,0 +1,136 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { DATA_DIR } from "../../paths.ts";
+
+/**
+ * 登録済みかどうかの記録。**同じ支出を二重にZaimへ登録しないためだけに持つ。**
+ *
+ * 呼び出し元（car-care・asset-manager）は `requestId` を自分のレコードから一意に決めて送る
+ * （例: `car-care:fuel-log:1234`）。応答が届かずに再送されても、ここに記録があれば
+ * Zaimへは送らず、前回の `money_id` をそのまま返す。
+ *
+ * **中身は `requestId`・`moneyId`・時刻の3つだけ。** 金額・店名・コメントは書かない。
+ * 二重登録を防ぐのに要らないうえ、支出の中身そのものを持つとAIDEの責務（取得・整形）から外れる。
+ *
+ * 置き場はJSONファイル。キャッシュ（`src/core/cache/store.ts`）とは別で、こちらは
+ * 消えると二重登録が起きるため「キャッシュ」ではなく記録として扱う。
+ * Zaimのログイン状態（`data/zaim/storage-state.json`）とも別のファイルにしている。
+ */
+
+/** 保持する件数。呼び出し元は登録後に自分で `money_id` を保存するため、AIDE側は再送の窓だけ持てばよい。 */
+const MAX_RECORDS = 500;
+
+/** テストが本番の記録を汚さないよう差し替えられるようにしている（`AIDE_CACHE_DIR` と同じ考え方）。 */
+export const PAYMENT_LOG_PATH = process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"]
+  ? resolve(process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"])
+  : resolve(DATA_DIR, "zaim-payments.json");
+
+export interface PaymentRecord {
+  requestId: string;
+  /**
+   * Zaim側のレコードID。**null は「送ったが結果が確定していない」。**
+   * 打ち切り・通信断のときにこの状態で残り、再送を機械的に止めるための印になる。
+   */
+  moneyId: number | null;
+  /** 記録した時刻（ISO8601）。 */
+  at: string;
+}
+
+export type BeginResult =
+  /** 未登録。Zaimへ送ってよい。 */
+  | { status: "new" }
+  /** 登録済み。Zaimへは送らず、この `moneyId` を返す。 */
+  | { status: "done"; moneyId: number }
+  /** 前回の結果が不明。**勝手に再送しない**（二重登録になりうるため人が確認する）。 */
+  | { status: "unresolved"; at: string };
+
+/**
+ * 読み書きを直列化する。
+ *
+ * 1プロセスだが、読み込み〜書き出しのあいだに `await` を挟むため、同時に2件届くと
+ * 片方の記録が消える。件数が少ないので、素直に直列化して済ませる。
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(task: () => Promise<T>): Promise<T> {
+  const next = queue.then(task, task);
+  // 失敗しても後続を止めない。
+  queue = next.catch(() => undefined);
+  return next;
+}
+
+async function readAll(): Promise<PaymentRecord[]> {
+  let raw: string;
+  try {
+    raw = await readFile(PAYMENT_LOG_PATH, "utf8");
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw cause;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as PaymentRecord[]) : [];
+  } catch {
+    // 壊れていたら空として扱う。ここで例外にすると登録そのものが通らなくなる。
+    console.warn("[zaim] 登録記録が読めないため、空として扱います");
+    return [];
+  }
+}
+
+async function writeAll(records: PaymentRecord[]): Promise<void> {
+  await mkdir(dirname(PAYMENT_LOG_PATH), { recursive: true });
+  // 一時ファイルへ書いてから rename する（キャッシュと同じ理由。書き込み中に読まれても壊れない）。
+  const tmp = `${PAYMENT_LOG_PATH}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(records.slice(-MAX_RECORDS), null, 2), "utf8");
+  await rename(tmp, PAYMENT_LOG_PATH);
+}
+
+/**
+ * 登録してよいかを判定し、通す場合は「結果不明」の記録を先に置く。
+ *
+ * **送る前に記録するのが要点。** 送った後に記録すると、打ち切られた場合に何も残らず、
+ * 再送で二重登録になる。先に置いておけば、結果が確定しなかったことが次回に伝わる。
+ */
+export function beginPayment(requestId: string, now: Date = new Date()): Promise<BeginResult> {
+  return serialize(async () => {
+    const records = await readAll();
+    const existing = records.find((record) => record.requestId === requestId);
+    if (existing) {
+      return existing.moneyId === null
+        ? ({ status: "unresolved", at: existing.at } as const)
+        : ({ status: "done", moneyId: existing.moneyId } as const);
+    }
+    records.push({ requestId, moneyId: null, at: now.toISOString() });
+    await writeAll(records);
+    return { status: "new" } as const;
+  });
+}
+
+/** 登録が確定したので `money_id` を書き込む。 */
+export function completePayment(requestId: string, moneyId: number, now: Date = new Date()): Promise<void> {
+  return serialize(async () => {
+    const records = await readAll();
+    const existing = records.find((record) => record.requestId === requestId);
+    if (existing) {
+      existing.moneyId = moneyId;
+      existing.at = now.toISOString();
+    } else {
+      records.push({ requestId, moneyId, at: now.toISOString() });
+    }
+    await writeAll(records);
+  });
+}
+
+/**
+ * 登録されなかったことが**確実な**場合に記録を消す。
+ *
+ * Zaimが内容を拒んだ（4xx）ときだけ呼ぶ。打ち切り・5xx では呼ばない——
+ * 登録された可能性が残るため、記録を消すと再送で二重登録になる。
+ */
+export function abandonPayment(requestId: string): Promise<void> {
+  return serialize(async () => {
+    const records = await readAll();
+    const remaining = records.filter((record) => record.requestId !== requestId);
+    if (remaining.length !== records.length) await writeAll(remaining);
+  });
+}
