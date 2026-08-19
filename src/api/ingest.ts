@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { writeCache } from "../core/cache/store.ts";
+import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
+import { jobRecordKey } from "../worker/record.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
 /**
@@ -14,8 +16,22 @@ import { bearerToken, secretMatches } from "./secret.ts";
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-/** キーは参照側と揃える必要があるため、受け入れるものを明示的に限定する。 */
-const ALLOWED_KEYS = new Set(["zaim-snapshot"]);
+/**
+ * キーは参照側と揃える必要があるため、受け入れるものを明示的に限定する。
+ *
+ * 巡回結果（`zaim-snapshot`）だけでなく、**ジョブの実行記録（`job-<ジョブ名>`）も受け入れる。**
+ * 記録は worker（サブPC）が巡回結果と同じ経路で送るため、ここで弾くと本番では届かず、
+ * 動作状況ページ（`/status`）のジョブ欄が永久に「記録なし」のままになる（#89）。
+ * 記録側は失敗しても例外を投げない作りなので、404で弾いてもログ1行しか残らず気づけない。
+ *
+ * 巡回結果のキーは `worker/jobs/zaim-sync.ts` が持つが、そちらを import すると
+ * Playwright を使う巡回本体まで読み込むため、受け口ではリテラルのまま持つ。
+ * 実行記録のキーはカタログから作り、ジョブを増やしたときの取りこぼしを防ぐ。
+ */
+const ALLOWED_KEYS = new Set<string>([
+  "zaim-snapshot",
+  ...JOB_CATALOG.map((job) => jobRecordKey(job.name)),
+]);
 
 export function ingestSecret(): string | null {
   return process.env["AIDE_INGEST_SECRET"] || null;
