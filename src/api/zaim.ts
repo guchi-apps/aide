@@ -20,9 +20,12 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * とは別の値**にする。残高を読みたいだけのアプリへ、Zaimへ書き込む権限まで渡さないため。
  *
  * 呼び出し元は同じVPS上で動くので `http://127.0.0.1:<port>` で届く。外向けURLは要らない。
- * ただし**`/api` を丸ごと外部から遮断することはできない**（workerがサブPCから
- * `POST /api/cache/:key` を外向けURLへ送るため）。Apacheで `/api/zaim` を落とすまでのあいだ、
- * シークレット1本だけが盾になるので、認可画面と同じ総当たり対策をここにも掛けている。
+ * 公開URL（`aide.gucchii.com`）からはApacheの `<LocationMatch>` で `/api/zaim` と `/api/money` を
+ * 落とす（guchi-apps/vps#101。`/api` を丸ごとは落とせない。workerがサブPCから
+ * `POST /api/cache/:key` を外向けURLへ送るため）。
+ *
+ * **遮断が入っても、この口のシークレットと総当たり対策は要る。** Apacheを通らない
+ * `127.0.0.1` 経由ではここが唯一の盾になるため、認可画面と同じ対策を掛けている。
  */
 
 /** ボディの上限。登録1件のJSONは数百バイトで、これを大きく超えるものは読み切らない。 */
