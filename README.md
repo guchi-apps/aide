@@ -1237,7 +1237,8 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 経由する必要はない。
 
 ただし `/api` を丸ごと外部から遮断することはできない。worker はサブPCから `POST /api/cache/:key` を
-外向けURLへ送るためで、Apacheで絞るなら `/api/money` と `/api/zaim` を対象にする。
+外向けURLへ送るためで、Apacheで絞る対象は `/api/money` と `/api/zaim` の2つに限る
+（[公開URLからの遮断](#公開urlからの遮断)）。
 
 
 ## 個人アプリ向けのZaim登録API
@@ -1297,17 +1298,40 @@ IDは `GET /api/zaim/master`（口座・カテゴリ・ジャンルの一覧）�
 | 502 | Zaimへ届かない・打ち切り。登録されたかは不明 |
 | 503 | `AIDE_ZAIM_*` が揃っておらず、口が開いていない |
 
-### 公開範囲と、遮断が入るまでの守り
+### 公開範囲と、アプリ側の守り
 
 呼び出し元は同じVPS上のアプリなので `http://127.0.0.1:3114` で叩く。ただし上記のとおり
-**`/api` を丸ごと外部から遮断できない**ため、この2本も公開URL上に出ている。晒されるのは
-「書き込む口」だけでなく、`GET /api/zaim/master` が返す**口座名の一覧**も含む。
+**`/api` を丸ごと外部から遮断できない**ため、遮断が入るまではこの2本も公開URL上に出ている。
+晒されるのは「書き込む口」だけでなく、`GET /api/zaim/master` が返す**口座名の一覧**も含む。
 
-- Apacheで `/api/zaim` を外部から落とす（vps側の設定。aide#103 の手作業に含めている）
-- 遮断が入るまでのあいだ、盾は `AIDE_ZAIM_WRITE_SECRET` 1本になるため、**認可画面と同じ
-  総当たり対策**（送信元ごとに15分あたり5回まで・失敗時に固定の待ち・超過で429）を掛けている
-  （`src/api/zaim.ts`）。回数の枠は画面のログインとは別に数える
+- 公開URLからの遮断はVPSのApache側で行う（[公開URLからの遮断](#公開urlからの遮断)）
+- **遮断が入った後も、シークレットと総当たり対策は外さない。** Apacheを通らない
+  `http://127.0.0.1:3114` を叩ける者（同じVPS上の他アプリ・別経路で入り込んだプロセス）には
+  シークレットだけが盾になる。**認可画面と同じ総当たり対策**（送信元ごとに15分あたり5回まで・
+  失敗時に固定の待ち・超過で429）を掛けている（`src/api/zaim.ts`）。回数の枠は画面のログインとは
+  別に数える
 - シークレットは `openssl rand -base64 32` 相当の長さにする（推測ではなく総当たりの対象になるため）
+
+### 公開URLからの遮断
+
+`/api/money` と `/api/zaim` は**同じVPS上のアプリが `127.0.0.1:3114` へ直接叩く口**で、公開URLを
+経由して使う必要がない。`aide.gucchii.com` のVirtualHost（`guchi-apps/vps` リポジトリの
+`apache/sites-available/aide.gucchii.com{,-le-ssl}.conf`）で、80番・443番の両方に次を置いて落とす。
+
+```apache
+<LocationMatch "^/api/(zaim|money)(/|$)">
+    Require all denied
+</LocationMatch>
+```
+
+- **`/api` を丸ごとは落とさない。** worker がサブPCから `POST /api/cache/:key` を公開URLへ送るため、
+  ここが403になると巡回結果の投入が止まる
+- `<Location>` の前方一致ではなく `<LocationMatch>` を使う。`/api/moneyfoo` のような隣接パスを
+  巻き込まないため
+- 403で落とす（404で存在を隠す案より、設定から意図が読み取れるほうを採った）
+
+設定の反映は vps 側のIssue（[guchi-apps/vps#101](https://github.com/guchi-apps/vps/issues/101)）で行う。
+**このリポジトリのデプロイでは反映されない。**
 
 ### アクセストークンの取得
 
