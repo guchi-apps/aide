@@ -285,8 +285,14 @@ function toItems(rows: unknown): Record<string, unknown>[] {
  * 口座・カテゴリ・ジャンルのIDを引く。
  *
  * 呼び出し元は `categoryId` / `genreId` / `fromAccountId` をIDで指定するため、
- * その対応表を引く口が要る。**キャッシュしない**——呼ぶのは連携先の設定時だけで、
- * 古い対応表を返すと存在しないIDで登録しようとして失敗するため。
+ * その対応表を引く口が要る。**ここは毎回Zaimを叩き、鮮度の扱いは呼び出し側に委ねる**
+ * （aide#135。もとは「連携先の設定時に一度だけ呼ぶ」前提でキャッシュしない、と決めていた）。
+ *
+ * **経路によって呼ぶ頻度が違う。** `GET /api/zaim/master`（`src/api/zaim.ts`）はアプリの
+ * 設定時に一度引くだけなので、このまま素で呼んでよい。一方MCP経由（`aide_zaim_master` /
+ * `aide_zaim_payment`）の呼び出し元はClaudeで、**状態を持たないため登録のたびに引く**。
+ * そちらは `src/core/views/zaim-master.ts` が24時間キャッシュを挟み、古い対応表を掴んだ場合は
+ * `refresh` と、登録前のID検査で見つからなかったときの引き直しで手当てする。
  */
 export async function fetchZaimMaster(credentials: ZaimOAuthCredentials): Promise<
   { ok: true; master: ZaimMaster } | { ok: false; reason: string }
