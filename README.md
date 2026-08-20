@@ -85,6 +85,11 @@ Playwright を使うZaim取得のような重い処理は **worker が定期実�
 都度叩く場合は**短いタイムアウトを必ず掛ける**（相手が落ちてもMCPツールが固まらないように）。
 到達できなかったことは握りつぶさず、状態として返す。
 
+**軽くても分離せざるを得ないものが1つある。** Claude Code のセッション台帳は取得自体が
+数ミリ秒だが、**サブPCのファイルシステムにしか無い**ためVPSのサーバーからは読めない
+（[コネクタ: Claude Code](#コネクタ-claude-codeサブpcのセッション)）。重さではなく置き場所が
+理由なので、鮮度が落ちる代償を承知のうえで収集時刻を併せて返している。
+
 ## 構成
 
 ```
@@ -155,6 +160,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細（起票に使えるラベルの候補を含む） |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みを伴う唯一のツール**（作成のみ。編集・close・コメントは持たない） |
+| `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・busy/idle・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 
 
 ## 機能一覧ページ
@@ -851,6 +857,63 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 種別まで丸める（`Open-Meteo が HTTP 429 を返しました（利用回数の上限）` など）。
 
 
+## コネクタ: Claude Code（サブPCのセッション）
+
+サブPCで動いている Claude Code のセッションと、その**リモートコントロールURL**（#123）。
+Claudeとの会話から `aide_claude_sessions` を呼べば、URLをタップしてそのセッションの画面へ
+移動できる。URLだけでは終了済みか判別できず、複数セッションのどれかも区別できないため、
+状態・プロジェクト・経過時間を併せて返す。
+
+```
+src/core/connectors/claude-code/
+  types.ts   ~/.claude/sessions/<pid>.json のうち、AIDEが使うフィールドだけを再宣言
+  index.ts   台帳を読み、生きているセッションだけを畳む（純粋関数はここ）
+src/worker/jobs/claude-sessions-sync.ts   収集して claude-sessions キーへ送る
+src/core/views/claude-sessions.ts         キャッシュを読み、経過時間と鮮度を添える
+```
+
+### 台帳の場所と読み方
+
+Claude Code はセッションごとに `~/.claude/sessions/<pid>.json` を書いており、作業ディレクトリ・
+tmuxセッション名・起動時刻・`busy`/`idle` と、リモートコントロールの接続先ID
+（`bridgeSessionId`）が入っている。URLは `https://claude.ai/code/<bridgeSessionId>` で組み立てる。
+
+**この台帳の形はAIDEが決められない。** Claude Code のバージョンが上がればフィールドは黙って
+増減するため、必須として扱うのは `pid` だけにし、他は常に「無いかもしれない」前提で読む。
+
+**同じディレクトリの `<pid>.<hash>.key` は認証情報。** 拡張子が `.json` のものだけを読み、
+`.key` は開かない。
+
+### 終了済みセッションの除き方
+
+台帳は終了時に消えるとは限らず、残骸のPIDが別のプロセスへ割り当て直されることもある。
+**PIDの存在確認だけでは足りない。** 台帳が持つ `procStart`（`/proc/<pid>/stat` の22番目の
+フィールド＝起動時刻）まで一致して初めて同じプロセスとみなす。
+
+`/proc/<pid>/stat` は前から数えて22番目を取ってはいけない。2番目のフィールドがプロセス名で、
+名前自体に空白や括弧を含められるため、**閉じ括弧の最後の出現より後ろだけを数える**。
+
+### 収集が worker 側にある理由と、その代償
+
+台帳は**サブPCのファイルシステムにしか無く**、MCPサーバーはVPSで動く。呼ばれたときに読みに
+行けないため、他の重い取得と同じ経路（`POST /api/cache/:key`）でサーバーへ送る
+（[worker とサーバーが別マシンである問題](#worker-とサーバーが別マシンである問題)）。
+
+代償として、返せるのは**スナップショット**になる。2分ごとに収集し、直前に始めた・終えた
+セッションは反映されないことがあるため、収集時刻（`collectedAt`）と経過分数
+（`snapshotAgeMinutes`）を必ず併せて返す。10分以上更新されていなければ `stale` を立て、
+「いま動いているもの」として扱わせない（**セッションが無いという意味ではない**）。
+
+**このジョブはサブPCの systemd timer が入っていて初めて動く。** 入っていなければツールは
+`stale` を返し続ける。ユニットは `deploy/systemd/` にあり、実行場所は
+[systemdユニット](#systemdユニット)のとおり手で反映する。
+
+### ログに出さないもの
+
+セッション名・作業ディレクトリ・リモートコントロールURLは**ジャーナルにも通知にも出さない**。
+URLは開けばそのセッションを操作できるもので、ログへ残す粒度ではない。ジョブが残すのは
+件数だけにしてある。
+
 ## 横断ビュー: 朝のブリーフィング
 
 Claudeアプリから「今日はどんな感じ？」と聞いたときに、**今日の予定・交通・天気**を1回の呼び出しで
@@ -949,6 +1012,7 @@ npm run worker zaim-refresh     # 連携口座を一括更新（押して完了�
 npm run worker zaim-sync        # 巡回してキャッシュ更新（重い、日次想定）
 npm run worker zaim-keep-alive  # セッション延長のみ（軽い、30分ごと想定）
 npm run worker weather-sync     # 天気予報を取得（軽い、1時間ごと想定）
+npm run worker claude-sessions-sync  # Claude Codeのセッションを収集（軽い、2分ごと想定）
 ```
 
 常駐させずワンショットで実行し、スケジューリングは外（cron / systemd timer / PM2）に任せる。常駐プロセスを増やさずに済み、失敗しても次回実行で自然に復旧する。失敗時は終了コード1を返すので、スケジューラ側から検知できる。
@@ -995,6 +1059,7 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 cp deploy/systemd/*.timer deploy/systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導入のユニット）
+systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
 systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
 systemctl --user list-timers 'aide-*'
 ```

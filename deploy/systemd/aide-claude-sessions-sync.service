@@ -1,0 +1,18 @@
+[Unit]
+# サブPCで動いている Claude Code のセッション台帳（~/.claude/sessions）を読み、
+# VPSのサーバーへ送る。台帳はこのホストのファイルにしか無く、VPS側からは読めない。
+Description=AIDE: Claude Code セッションの収集
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# 小さなJSONを数件読んでHTTPで1本送るだけ。2分ごとに走るので、
+# 次の実行に食い込む前に必ず諦めさせる。
+TimeoutStartSec=1min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+# 素の ExecStart=node ... で書くと手元では動くのに再起動後に動かない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts claude-sessions-sync'

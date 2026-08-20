@@ -22,7 +22,9 @@ export const opsStatusTool: Tool = {
     "problems に異常が1行ずつ入るので、まずそこを見ること。ok が true なら判定できた範囲で異常なし。" +
     "complete が false のときは取得できなかったソースがあり、判定範囲が限定的であることを意味する" +
     "（材料を1つも取得できなかった場合は ok も false になる。異常の有無は分からないという意味）。" +
-    "履歴・上位プロセス・tmuxセッションの詳細は返さない（必要なら ops-dashboard の画面を見る）。",
+    "履歴・上位プロセスは返さない（必要なら ops-dashboard の画面を見る）。" +
+    "tmuxセッションは件数だけで、サブPCで動いている Claude Code の内訳と" +
+    "リモートコントロールのURLは aide_claude_sessions が返す。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
     const status = await buildOpsStatus();

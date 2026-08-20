@@ -1,4 +1,5 @@
 import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
+import { runClaudeSessionsSync } from "./jobs/claude-sessions-sync.ts";
 import { runWeatherSync } from "./jobs/weather-sync.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
 import { runZaimRefresh } from "./jobs/zaim-refresh.ts";
@@ -22,6 +23,7 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   "zaim-sync": runZaimSync,
   "zaim-keep-alive": runZaimKeepAlive,
   "weather-sync": runWeatherSync,
+  "claude-sessions-sync": runClaudeSessionsSync,
 };
 
 const name = process.argv[2];
