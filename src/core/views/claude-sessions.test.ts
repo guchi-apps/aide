@@ -17,6 +17,7 @@ function session(overrides: Partial<ClaudeCodeSession> = {}): ClaudeCodeSession 
     tmuxSession: "aide-issue-123",
     startedAt: "2026-08-20T09:00:00.000Z",
     status: "busy",
+    waitingFor: null,
     statusUpdatedAt: "2026-08-20T11:30:00.000Z",
     remoteControlUrl: "https://claude.ai/code/session_0187aY8hAAiBSbnFubsRNa3i",
     version: "2.1.237",
@@ -33,7 +34,14 @@ function cached(
     source: "claude-code",
     fetchedAt: collectedAt,
     ageMinutes,
-    data: { hostname: "subpc", collectedAt, sessions: [session()], unreadable: 0, ...overrides },
+    data: {
+      hostname: "subpc",
+      collectedAt,
+      sessions: [session()],
+      unreadable: 0,
+      nonInteractive: 0,
+      ...overrides,
+    },
   };
 }
 
@@ -97,6 +105,26 @@ describe("summarizeClaudeSessions", () => {
 
     assert.equal(view.ok, true);
     assert.match(view.note, /セッションは無い/);
+  });
+
+  it("人の入力を待っているセッションを名指しする（放置の判断に使う値）", () => {
+    const view = summarizeClaudeSessions(
+      cached({
+        sessions: [session({ status: "waiting", waitingFor: "permission prompt" })],
+      }),
+      NOW,
+    );
+
+    assert.equal(view.sessions[0]?.waitingFor, "permission prompt");
+    // 待っている分数は statusUpdatedAt から出す（30分待たせている）。
+    assert.equal(view.sessions[0]?.statusForMinutes, 30);
+    assert.match(view.note, /1件が人の入力を待っている/);
+  });
+
+  it("一覧から除いた裏方プロセスの件数を隠さない", () => {
+    const view = summarizeClaudeSessions(cached({ nonInteractive: 3 }), NOW);
+
+    assert.match(view.note, /裏方プロセスが 3件/);
   });
 
   it("読めなかった台帳の件数を隠さない", () => {

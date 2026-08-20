@@ -140,6 +140,7 @@ export function toSession(file: ClaudeSessionFile, home: string): ClaudeCodeSess
     tmuxSession: tmuxSessionName(file.tmux),
     startedAt: toIso(file.startedAt),
     status: text(file.status),
+    waitingFor: text(file.waitingFor),
     statusUpdatedAt: toIso(file.statusUpdatedAt ?? file.updatedAt),
     remoteControlUrl: remoteControlUrl(file.bridgeSessionId),
     version: text(file.version),
@@ -165,6 +166,7 @@ export async function collectClaudeCodeSessions(): Promise<ClaudeCodeSessionsSna
 
   const sessions: ClaudeCodeSession[] = [];
   let unreadable = 0;
+  let nonInteractive = 0;
 
   await Promise.all(
     // `.key` は認証情報なので触らない（`types.ts` 参照）。
@@ -181,6 +183,14 @@ export async function collectClaudeCodeSessions(): Promise<ClaudeCodeSessionsSna
         }
         if (typeof file.pid !== "number") return;
         if (!(await isSessionAlive(file.pid, file.procStart))) return;
+        // SDK経由の裏方プロセス（`kind` が `interactive` でないもの）は、人が開いて操作する
+        // 対象ではない。台帳には並ぶが、リモートコントロールもtmuxでのattachもできず、
+        // 一覧に混ぜると「何件動いているか」がずれる。件数だけ数えて本体からは外す。
+        // **`kind` を書かない世代の台帳は落とさない**（欠けているだけで裏方とは限らない）。
+        if (file.kind !== undefined && file.kind !== "interactive") {
+          nonInteractive += 1;
+          return;
+        }
         sessions.push(toSession(file, home));
       }),
   );
@@ -193,5 +203,6 @@ export async function collectClaudeCodeSessions(): Promise<ClaudeCodeSessionsSna
     collectedAt: new Date().toISOString(),
     sessions,
     unreadable,
+    nonInteractive,
   };
 }

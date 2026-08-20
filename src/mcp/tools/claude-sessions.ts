@@ -18,8 +18,11 @@ export const claudeSessionsTool: Tool = {
     "サブPCで動作中の Claude Code セッションの一覧を返す。" +
     "セッションごとにリモートコントロールのURL（remoteControlUrl。開くとそのセッションを" +
     "操作できる）、プロジェクト名、作業ディレクトリ、tmuxセッション名、" +
-    "状態（status: busy=応答中 / idle=待機中）、起動からの経過分数（runningForMinutes）、" +
-    "その状態が続いている分数（statusForMinutes）を含む。" +
+    "状態（status: busy=応答中 / waiting=人の入力を待っている / idle=待機中）、" +
+    "待っている理由（waitingFor: permission prompt=承認待ち / input needed=入力待ち など）、" +
+    "起動からの経過分数（runningForMinutes）、その状態が続いている分数（statusForMinutes）を含む。" +
+    "**放置されているセッションを尋ねられたら status が waiting のものを見ること**" +
+    "（statusForMinutes が長いほど待たせている）。" +
     "「サブPCでいま何が動いているか」「Claude Codeのセッションを開きたい」" +
     "「リモートコントロールのURLを教えて」「放置しているセッションはないか」" +
     "を尋ねられたときに呼ぶ。" +
@@ -29,6 +32,7 @@ export const claudeSessionsTool: Tool = {
     "snapshotAgeMinutes が経過分数。stale が true のときは収集が止まっており、" +
     "載っているセッションが既に終了している可能性がある（動いていないという意味ではない）。" +
     "会話の中身・実行したツール・トークン使用量は返さない。" +
+    "SDK経由の裏方プロセスは一覧に含めない（人が開いて操作する対象ではないため。件数だけ note に出る）。" +
     "サーバーの稼働状況そのものは aide_ops_status を使う。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {

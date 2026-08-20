@@ -31,8 +31,10 @@ export interface ClaudeSessionFile {
   /** Claude Code が付けた表示名（例: `aide #123`）。 */
   name?: string;
   updatedAt?: number;
-  /** `busy` / `idle` など。 */
+  /** `busy`（応答中）/ `waiting`（人の入力待ち）/ `idle`（待機中）。 */
   status?: string;
+  /** `waiting` のときに何を待っているか（`permission prompt` / `input needed` など）。 */
+  waitingFor?: string;
   statusUpdatedAt?: number;
   /**
    * リモートコントロールの接続先ID（`session_...`）。
@@ -53,8 +55,16 @@ export interface ClaudeCodeSession {
   tmuxSession: string | null;
   /** 起動時刻（ISO8601）。 */
   startedAt: string | null;
-  /** `busy`（応答中）/ `idle`（待機中）など、Claude Code が書いた値そのまま。 */
+  /**
+   * `busy`（応答中）/ `waiting`（人の入力待ち）/ `idle`（待機中）。
+   * Claude Code が書いた値をそのまま通す（**2値ではない。知らない値も丸めない**）。
+   */
   status: string | null;
+  /**
+   * `waiting` のときに何を待っているか（`permission prompt` / `input needed` など）。
+   * **放置されているセッションを見分ける手掛かりはここ。** 待っていなければ null。
+   */
+  waitingFor: string | null;
   /** その状態になった時刻（ISO8601）。 */
   statusUpdatedAt: string | null;
   /**
@@ -78,4 +88,10 @@ export interface ClaudeCodeSessionsSnapshot {
    * 壊れたJSONや競合による読み落としは普通に起きるので、0件と混同しないよう別に持つ。
    */
   unreadable: number;
+  /**
+   * 一覧から除いた非対話セッション（`kind` が `interactive` でないもの）の件数。
+   * SDK経由の裏方プロセスがこれにあたり、人が開いて操作する対象ではない。
+   * **黙って落とすと「何件動いているか」がずれる**ため、件数だけは残す。
+   */
+  nonInteractive: number;
 }

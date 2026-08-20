@@ -104,7 +104,8 @@ describe("toSession", () => {
       startedAt: 1787217060223,
       tmux: "aide-issue-123:@85.%85",
       name: "aide #123",
-      status: "busy",
+      status: "waiting",
+      waitingFor: "permission prompt",
       statusUpdatedAt: 1787217060510,
       bridgeSessionId: "session_0187aY8hAAiBSbnFubsRNa3i",
       version: "2.1.237",
@@ -116,7 +117,8 @@ describe("toSession", () => {
       cwd: "~/apps/aide-worktrees/issue-123",
       tmuxSession: "aide-issue-123",
       startedAt: new Date(1787217060223).toISOString(),
-      status: "busy",
+      status: "waiting",
+      waitingFor: "permission prompt",
       statusUpdatedAt: new Date(1787217060510).toISOString(),
       remoteControlUrl: "https://claude.ai/code/session_0187aY8hAAiBSbnFubsRNa3i",
       version: "2.1.237",
@@ -159,6 +161,18 @@ describe("collectClaudeCodeSessions", () => {
       JSON.stringify({ pid: process.pid, procStart: "0", name: "dead" }),
     );
 
+    // SDK経由の裏方プロセス。生きているが一覧には出さず、件数だけ数える。
+    await writeFile(
+      join(dir, `${process.pid}.sdk.json`),
+      JSON.stringify({
+        pid: process.pid,
+        procStart: parseProcStartTicks(stat),
+        kind: "background",
+        entrypoint: "sdk-cli",
+        name: "sdk",
+      }),
+    );
+
     // 書き込みの途中を掴んだ台帳。1件の失敗で全体を落とさない。
     await writeFile(join(dir, "broken.json"), "{ not json");
 
@@ -182,6 +196,8 @@ describe("collectClaudeCodeSessions", () => {
     assert.equal(snapshot.sessions[0]?.remoteControlUrl, "https://claude.ai/code/session_alive");
     // 壊れた1件だけが数えられる（.key はそもそも読みに行かない）。
     assert.equal(snapshot.unreadable, 1);
+    // 裏方プロセスは一覧から外れるが、件数としては残る。
+    assert.equal(snapshot.nonInteractive, 1);
     assert.ok(snapshot.hostname.length > 0);
   });
 
@@ -191,6 +207,7 @@ describe("collectClaudeCodeSessions", () => {
       const snapshot = await collectClaudeCodeSessions();
       assert.deepEqual(snapshot.sessions, []);
       assert.equal(snapshot.unreadable, 0);
+      assert.equal(snapshot.nonInteractive, 0);
     } finally {
       process.env["AIDE_CLAUDE_SESSIONS_DIR"] = dir;
     }

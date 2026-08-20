@@ -108,8 +108,23 @@ export function summarizeClaudeSessions(
         "URLからは開けない（tmuxSession の名前で端末から attach する）。",
     );
   }
+  const waiting = sessions.filter((session) => session.status === "waiting");
+  if (waiting.length > 0) {
+    // **Issueが求めた「放置セッションの判断」に直接答えるのはここ。**
+    // busy/idle だけを見ると、人の返事を待って止まっているセッションが idle に紛れる。
+    notes.push(
+      `${waiting.length}件が人の入力を待っている（status が waiting。waitingFor に理由、` +
+        "statusForMinutes が待っている分数）。",
+    );
+  }
   if (snapshot.unreadable > 0) {
     notes.push(`読み取れなかった台帳が ${snapshot.unreadable}件あり、その分は一覧に含まれない。`);
+  }
+  if (snapshot.nonInteractive > 0) {
+    notes.push(
+      `SDK経由の裏方プロセスが ${snapshot.nonInteractive}件あり、一覧から除いてある` +
+        "（人が開いて操作する対象ではないため）。",
+    );
   }
 
   return {
