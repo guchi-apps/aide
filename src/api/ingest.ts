@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { writeCache } from "../core/cache/store.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
+import { CLAUDE_SESSIONS_CACHE_KEY } from "../worker/jobs/claude-sessions-sync.ts";
 import { WEATHER_CACHE_KEY } from "../worker/jobs/weather-sync.ts";
 import { jobRecordKey } from "../worker/record.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
@@ -35,6 +36,7 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const ALLOWED_KEYS = new Set<string>([
   "zaim-snapshot",
   WEATHER_CACHE_KEY,
+  CLAUDE_SESSIONS_CACHE_KEY,
   ...JOB_CATALOG.map((job) => jobRecordKey(job.name)),
 ]);
 

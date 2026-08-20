@@ -104,6 +104,23 @@ describe("worker からの取り込み", () => {
     assert.deepEqual(cached?.data, forecast);
   });
 
+  // 同じ取りこぼし（#108）を繰り返さないよう、キーを足したジョブごとにここへ1件足す。
+  it("Claude Code のセッション一覧を受け入れてキャッシュへ書く", async () => {
+    const { CLAUDE_SESSIONS_CACHE_KEY } = await import("../worker/jobs/claude-sessions-sync.ts");
+    const snapshot = {
+      hostname: "subpc",
+      collectedAt: "2026-08-20T12:00:00.000Z",
+      sessions: [],
+      unreadable: 0,
+    };
+
+    const captured = await post(CLAUDE_SESSIONS_CACHE_KEY, { source: "claude-code", data: snapshot });
+
+    assert.equal(captured.status, 200);
+    const cached = await readCache<typeof snapshot>(CLAUDE_SESSIONS_CACHE_KEY);
+    assert.deepEqual(cached?.data, snapshot);
+  });
+
   it("未知のキーは404で弾く", async () => {
     const captured = await post("unknown-key", { source: "worker", data: {} });
 

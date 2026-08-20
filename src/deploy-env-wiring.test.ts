@@ -34,6 +34,8 @@ const SRC_DIR = fileURLToPath(new URL("./", import.meta.url));
 const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_AUTH_DISABLED: "認証を切る開発用のスイッチ。本番では設定しない",
   AIDE_CACHE_DIR: "既定（リポジトリ基準の data/cache）で足りる",
+  AIDE_CLAUDE_SESSIONS_DIR:
+    "Claude Code のセッション台帳の置き場。読むのはサブPCのworkerだけで、既定（~/.claude/sessions）で足りる",
   AIDE_GITHUB_ORG: "既定 guchi-apps で足りる",
   AIDE_GITHUB_REPOS: "未設定なら活動中のリポジトリを自動で拾う",
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
