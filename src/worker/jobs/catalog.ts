@@ -60,6 +60,19 @@ export const JOB_CATALOG = [
     // 毎時なので、3回ぶん飛んだら気づけるように180分。
     staleAfterMinutes: 180,
   },
+  {
+    name: "claude-sessions-sync",
+    description:
+      "サブPCで動いている Claude Code のセッションを集めてキャッシュを更新する。" +
+      "台帳（~/.claude/sessions）はサブPCのファイルにしか無く、VPSのMCPサーバーからは" +
+      "呼ばれたときに読めないため、ここで定期的に送っておく。" +
+      "リモートコントロールのURLを返すツール（aide_claude_sessions）が読む。",
+    interval: "2分ごと",
+    // 2分間隔なので、5回ぶん飛んだら気づけるように10分。
+    // セッションの一覧は数分古いだけで「いま動いているもの」として使えなくなるため、
+    // 他のジョブより猶予を短く取っている。
+    staleAfterMinutes: 10,
+  },
 ] as const satisfies readonly JobInfo[];
 
 export type JobName = (typeof JOB_CATALOG)[number]["name"];

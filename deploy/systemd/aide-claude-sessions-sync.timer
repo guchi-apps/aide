@@ -1,0 +1,16 @@
+[Unit]
+Description=AIDE: Claude Code セッションの収集（2分ごと）
+
+[Timer]
+OnBootSec=1min
+# **セッションの一覧は数分古いだけで「いま動いているもの」として使えなくなる。**
+# 起動直後のセッションを尋ねられる場面が主な用途なので、他のジョブより短く回す。
+OnUnitActiveSec=2min
+# 既定（1分）のままだと実際の間隔が最大3分まで伸びる。ジョブ自体が軽いので締めておく。
+AccuracySec=10s
+# 止まっていた間の収集を後から走らせても意味が無い（欲しいのは「いまの一覧」だけ）。
+Persistent=false
+# 揺らぎは入れない。他のタイマーと重なっても、読むのは小さなJSONが数件だけ。
+
+[Install]
+WantedBy=timers.target

@@ -17,6 +17,7 @@ import { recordMcpAuthFailure } from "./mcp/access-log.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
 import { dailyBriefingTool } from "./mcp/tools/briefing.ts";
+import { claudeSessionsTool } from "./mcp/tools/claude-sessions.ts";
 import { devStatusTool } from "./mcp/tools/dev.ts";
 import { createIssueTool } from "./mcp/tools/issue.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
@@ -61,6 +62,7 @@ registry.register(roomStatusTool);
 registry.register(dailyBriefingTool);
 registry.register(devStatusTool);
 registry.register(createIssueTool);
+registry.register(claudeSessionsTool);
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
