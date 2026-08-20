@@ -67,9 +67,17 @@ function json(payload: unknown): ToolResult {
  * **Claudeには対応するレコードが無い。** 毎回新しい値を作らせると、同じ支出を2回言うだけで
  * 2件登録され、この経路からは取り消せない。だから内容そのものから決める。
  *
- * **ハッシュにするのは記録に中身を残さないため。** `idempotency.ts` は「`requestId`・
- * `moneyId`・時刻の3つだけ。金額・店名・コメントは書かない」という方針で、キーを平文に
- * すると `data/zaim-payments.json` に支出の中身が溜まることになる。
+ * **キーを平文にはしない。** `idempotency.ts` は「`requestId`・`moneyId`・時刻の3つだけ。
+ * 金額・店名・コメントは書かない」という方針で、`car-care:fuel-log:1234` のように内容を
+ * 表さない値が来る前提になっている。内容をそのまま並べた文字列を置くと、
+ * `data/zaim-payments.json` が支出の一覧そのものになる。
+ *
+ * **ただし「復元できないから安全」ではない。** 材料の取りうる範囲は狭く（金額は上限30万円、
+ * 日付は数十通り、カテゴリ・ジャンルはマスタから既知）、総当たりで元の値へ戻せる。
+ * 安全側の根拠は復元の難しさではなく、**この値を `data/` とサーバーログの外へ出さないこと**に置く。
+ * MCPの応答には `requestId` を載せていない（返すのは `moneyId` と登録内容だけ）。
+ * 固定のsaltを混ぜて復元を難しくする案は採らない——saltが変われば同じ支出が別の鍵になり、
+ * 二重登録の判定そのものが効かなくなる。設定項目を1つ増やす代償のほうが大きい。
  *
  * **`comment` は混ぜない。** コメントを書き換えただけで別の支出とみなされ、二重登録の
  * 判定をすり抜ける。日付・金額・分類・店名・品名が同じなら同じ支出として扱う。
@@ -225,7 +233,8 @@ export const zaimPaymentTool: Tool = {
         description:
           "同じ内容の登録が既にある場合でも、別の支出として登録する。" +
           "**利用者に確認せずに指定しないこと。** 同じ日に同じ店で同じ金額を2回払った、" +
-          "というように利用者が別件だと明言した場合にだけ true にする。",
+          "というように利用者が別件だと明言した場合にだけ true にする。" +
+          "前回の結果が確定していない（kind: conflict）場合は、これを付けても登録されない。",
       },
     },
     required: ["amount", "date", "categoryId", "genreId"],
@@ -286,6 +295,24 @@ export const zaimPaymentTool: Tool = {
     // ---- 二重登録を止める ----
     const base = paymentKey(input);
     const series = await findPaymentSeries(base);
+
+    // **結果が確定していない記録は `allowDuplicate` でも跨がせない。**
+    // `createZaimPayment()` の conflict 判定は `requestId` の完全一致なので、連番で別の鍵に
+    // すると `status: "new"` になってZaimへ送られてしまう。打ち切り・5xx の直後は登録された
+    // 可能性が残っており、ここが「取り消せない二重登録」の最後の砦になる（README「二重登録を止める」）。
+    const unresolved = series.find((record) => record.moneyId === null);
+    if (unresolved) {
+      return json({
+        ok: false,
+        kind: "conflict",
+        reason:
+          `同じ内容の登録を ${unresolved.at} に試みており、結果が確定していません。登録していません。`,
+        hint:
+          "**再送しないでください**（allowDuplicate を付けても通しません）。" +
+          "Zaimを確認してもらい、登録されていなければZaimの画面から登録してください。",
+      });
+    }
+
     if (series.length > 0 && args["allowDuplicate"] !== true) {
       return json({
         ok: false,

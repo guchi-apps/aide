@@ -12,6 +12,7 @@ process.env["AIDE_CACHE_DIR"] = join(dir, "cache");
 process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
 
 const { MCP_MAX_AMOUNT, paymentKey, resolveNames, zaimPaymentTool } = await import("./zaim.ts");
+const { nextRequestId } = await import("../../core/connectors/zaim/idempotency.ts");
 const { ZAIM_MASTER_CACHE_KEY } = await import("../../core/views/zaim-master.ts");
 const { writeCache } = await import("../../core/cache/store.ts");
 
@@ -174,6 +175,30 @@ describe("aide_zaim_payment", () => {
     assert.equal(body["ok"], false);
     assert.equal(body["kind"], "duplicate");
     assert.deepEqual(body["existing"], [{ moneyId: 555, at: "2026-08-19T10:00:00.000Z" }]);
+  });
+
+  it("結果が確定していない記録があれば、allowDuplicate でも跨がせない", async () => {
+    // ここが二重登録の最後の砦。連番で別の鍵にすると createZaimPayment() の conflict 判定
+    // （requestId の完全一致）をすり抜け、そのままZaimへ送られる。
+    const base = paymentKey(input({ fromAccountId: 1 }));
+    await writeFile(
+      process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"]!,
+      JSON.stringify([{ requestId: base, moneyId: null, at: "2026-08-19T10:00:00.000Z" }]),
+      "utf8",
+    );
+
+    for (const extra of [{}, { allowDuplicate: true }]) {
+      const body = parse(await zaimPaymentTool.handler({ ...VALID, ...extra }, CTX));
+      assert.equal(body["ok"], false);
+      assert.equal(body["kind"], "conflict", JSON.stringify(extra));
+    }
+  });
+
+  it("確定済みの記録だけなら allowDuplicate で別の鍵として通る", async () => {
+    // 通る側は Zaim を叩くのでここでは踏まない。重複判定を抜けた先の鍵だけ確かめる。
+    const base = paymentKey(input({ fromAccountId: 1 }));
+    const at = "2026-08-19T10:00:00.000Z";
+    assert.equal(nextRequestId(base, [{ requestId: base, moneyId: 555, at }]), `${base}#2`);
   });
 
   // マスタに無いIDを渡す経路はここでは踏まない。ハンドラはキャッシュに無いIDを見ると

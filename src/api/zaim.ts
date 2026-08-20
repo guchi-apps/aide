@@ -169,6 +169,10 @@ export async function handleZaimPayment(req: IncomingMessage, res: ServerRespons
  *
  * 口座・カテゴリ・ジャンルのID一覧。登録時に渡す `categoryId` / `genreId` / `fromAccountId` を
  * 呼び出し元が引くための口で、**連携先の設定時に使うことを想定している**（毎回は叩かない）。
+ *
+ * **この口はキャッシュを挟まない。** 設定時にしか呼ばれないので毎回Zaimを叩いてよい。
+ * MCP経由（`aide_zaim_master`）は登録のたびに引かれるため24時間キャッシュしており、
+ * **経路によって鮮度が違う**（aide#135）。
  */
 export async function handleZaimMaster(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD") {
