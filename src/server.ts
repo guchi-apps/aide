@@ -24,6 +24,7 @@ import { moneySummaryTool } from "./mcp/tools/money.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
 import { roomStatusTool } from "./mcp/tools/room.ts";
+import { zaimMasterTool, zaimPaymentTool } from "./mcp/tools/zaim.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
@@ -63,6 +64,10 @@ registry.register(dailyBriefingTool);
 registry.register(devStatusTool);
 registry.register(createIssueTool);
 registry.register(claudeSessionsTool);
+// Zaimへの支出登録（#135）。**読み取り（候補の一覧）と書き込み（登録）を分けている。**
+// 1本に畳むと、Claude Code側で「常に許可」にしたときに書き込みまで素通しになる。
+registry.register(zaimMasterTool);
+registry.register(zaimPaymentTool);
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
