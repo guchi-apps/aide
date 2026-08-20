@@ -20,9 +20,12 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * とは別の値**にする。残高を読みたいだけのアプリへ、Zaimへ書き込む権限まで渡さないため。
  *
  * 呼び出し元は同じVPS上で動くので `http://127.0.0.1:<port>` で届く。外向けURLは要らない。
- * ただし**`/api` を丸ごと外部から遮断することはできない**（workerがサブPCから
- * `POST /api/cache/:key` を外向けURLへ送るため）。Apacheで `/api/zaim` を落とすまでのあいだ、
- * シークレット1本だけが盾になるので、認可画面と同じ総当たり対策をここにも掛けている。
+ * 公開URL（`aide.gucchii.com`）からはApacheの `<LocationMatch>` で `/api/zaim` と `/api/money` を
+ * 落とす（guchi-apps/vps#101。`/api` を丸ごとは落とせない。workerがサブPCから
+ * `POST /api/cache/:key` を外向けURLへ送るため）。
+ *
+ * **遮断が入っても、この口のシークレットと総当たり対策は要る。** Apacheを通らない
+ * `127.0.0.1` 経由ではここが唯一の盾になるため、認可画面と同じ対策を掛けている。
  */
 
 /** ボディの上限。登録1件のJSONは数百バイトで、これを大きく超えるものは読み切らない。 */
@@ -166,6 +169,10 @@ export async function handleZaimPayment(req: IncomingMessage, res: ServerRespons
  *
  * 口座・カテゴリ・ジャンルのID一覧。登録時に渡す `categoryId` / `genreId` / `fromAccountId` を
  * 呼び出し元が引くための口で、**連携先の設定時に使うことを想定している**（毎回は叩かない）。
+ *
+ * **この口はキャッシュを挟まない。** 設定時にしか呼ばれないので毎回Zaimを叩いてよい。
+ * MCP経由（`aide_zaim_master`）は登録のたびに引かれるため24時間キャッシュしており、
+ * **経路によって鮮度が違う**（aide#135）。
  */
 export async function handleZaimMaster(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD") {

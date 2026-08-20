@@ -134,3 +134,43 @@ export function abandonPayment(requestId: string): Promise<void> {
     if (remaining.length !== records.length) await writeAll(remaining);
   });
 }
+
+/**
+ * 同じ内容から作られた記録をまとめて引く（aide#135）。
+ *
+ * MCP経由の登録には呼び出し元のレコードが無いため、`requestId` を**支出の内容から**作る
+ * （`src/mcp/tools/zaim.ts`）。同じ内容を2回頼まれたときに「前も登録した」と気づくには、
+ * 書き込む前に読むだけの口が要る。`beginPayment()` は判定と同時に記録を置いてしまうので使えない。
+ *
+ * 引くのは `base` そのものと `base#2` 以降。同じ日・同じ店・同じ金額の**正当な2件目**は
+ * `base#2` として通すため、系列としてまとめて見えるようにしてある。
+ */
+export function findPaymentSeries(base: string): Promise<PaymentRecord[]> {
+  return serialize(async () => {
+    const records = await readAll();
+    return records.filter(
+      (record) => record.requestId === base || record.requestId.startsWith(`${base}#`),
+    );
+  });
+}
+
+/**
+ * 系列の中でまだ使っていない `requestId` を決める。
+ *
+ * **件数ではなく空き番号で決める。** 古い記録は `MAX_RECORDS` で落ちるため、件数から作ると
+ * 残っている番号と衝突し、別の支出のはずが「登録済み」として素通りしてしまう。
+ */
+export function nextRequestId(base: string, series: readonly PaymentRecord[]): string {
+  const used = new Set<number>();
+  for (const record of series) {
+    if (record.requestId === base) {
+      used.add(1);
+      continue;
+    }
+    const suffix = Number(record.requestId.slice(base.length + 1));
+    if (Number.isInteger(suffix) && suffix > 0) used.add(suffix);
+  }
+  let n = 1;
+  while (used.has(n)) n += 1;
+  return n === 1 ? base : `${base}#${n}`;
+}

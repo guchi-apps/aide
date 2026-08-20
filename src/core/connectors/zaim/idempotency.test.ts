@@ -8,7 +8,8 @@ import { after, describe, it } from "node:test";
 // パスはモジュール読み込み時に確定するため、import より前に設定する必要がある。
 const dir = await mkdtemp(join(tmpdir(), "aide-zaim-idempotency-test-"));
 process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
-const { abandonPayment, beginPayment, completePayment, PAYMENT_LOG_PATH } = await import("./idempotency.ts");
+const { abandonPayment, beginPayment, completePayment, findPaymentSeries, nextRequestId, PAYMENT_LOG_PATH } =
+  await import("./idempotency.ts");
 
 interface PaymentRecord {
   requestId: string;
@@ -99,5 +100,71 @@ describe("同時に届いた場合", () => {
     await Promise.all([beginPayment("parallel-a"), beginPayment("parallel-b")]);
     const ids = (await readRecords()).map((record) => record.requestId).sort();
     assert.deepEqual(ids, ["parallel-a", "parallel-b"]);
+  });
+});
+
+/**
+ * MCP経由の登録は `requestId` を支出の内容から作る（`src/mcp/tools/zaim.ts`）。
+ * 同じ内容の2件目を扱うのがこの2つで、**ここが崩れると二重登録が素通りする**。
+ */
+describe("内容から作ったキーの系列", () => {
+  it("base とその連番だけを引く（別のキーは混ざらない）", async () => {
+    await writeFile(
+      PAYMENT_LOG_PATH,
+      JSON.stringify([
+        { requestId: "mcp:aaaa", moneyId: 1, at: "2026-08-19T00:00:00.000Z" },
+        { requestId: "mcp:aaaa#2", moneyId: 2, at: "2026-08-19T00:00:01.000Z" },
+        { requestId: "mcp:aaaabbbb", moneyId: 3, at: "2026-08-19T00:00:02.000Z" },
+        { requestId: "car-care:fuel-log:1", moneyId: 4, at: "2026-08-19T00:00:03.000Z" },
+      ]),
+      "utf8",
+    );
+
+    const series = await findPaymentSeries("mcp:aaaa");
+    assert.deepEqual(
+      series.map((record) => record.requestId),
+      ["mcp:aaaa", "mcp:aaaa#2"],
+    );
+  });
+
+  it("記録が無ければ空になる", async () => {
+    await writeFile(PAYMENT_LOG_PATH, "[]", "utf8");
+    assert.deepEqual(await findPaymentSeries("mcp:none"), []);
+  });
+
+  it("最初の1件は base そのもの", () => {
+    assert.equal(nextRequestId("mcp:aaaa", []), "mcp:aaaa");
+  });
+
+  it("2件目以降は空き番号を使う", () => {
+    const at = "2026-08-19T00:00:00.000Z";
+    assert.equal(
+      nextRequestId("mcp:aaaa", [{ requestId: "mcp:aaaa", moneyId: 1, at }]),
+      "mcp:aaaa#2",
+    );
+    assert.equal(
+      nextRequestId("mcp:aaaa", [
+        { requestId: "mcp:aaaa", moneyId: 1, at },
+        { requestId: "mcp:aaaa#2", moneyId: 2, at },
+      ]),
+      "mcp:aaaa#3",
+    );
+  });
+
+  it("古い記録が落ちて base が消えていても、残っている番号とは衝突しない", () => {
+    // MAX_RECORDS を超えると古い方から落ちる。件数から作ると #2 を作り直してしまい、
+    // 別の支出なのに「登録済み」として素通りする。
+    const at = "2026-08-19T00:00:00.000Z";
+    assert.equal(
+      nextRequestId("mcp:aaaa", [{ requestId: "mcp:aaaa#2", moneyId: 2, at }]),
+      "mcp:aaaa",
+    );
+    assert.equal(
+      nextRequestId("mcp:aaaa", [
+        { requestId: "mcp:aaaa", moneyId: 1, at },
+        { requestId: "mcp:aaaa#3", moneyId: 3, at },
+      ]),
+      "mcp:aaaa#2",
+    );
   });
 });
