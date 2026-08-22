@@ -131,7 +131,7 @@ const ENDPOINTS: FeatureItem[] = [
     name: "/api/money/summary",
     meta: "GET",
     description:
-      "個人アプリ向けの読み取りAPI。aide_money_summary と同じ内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数）をJSONで返す。読み取り専用の共有シークレットで認証する。",
+      "個人アプリ向けの読み取りAPI。aide_money_summary と同じ内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数・月額固定費）をJSONで返す。読み取り専用の共有シークレットで認証する。",
   },
   {
     name: "/api/zaim/payment",

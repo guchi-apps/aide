@@ -6,6 +6,7 @@ import {
   tokyoDate,
 } from "../connectors/subscriptions/index.ts";
 import type {
+  SubscriptionContractStatus,
   SubscriptionCurrency,
   SubscriptionsSnapshot,
 } from "../connectors/subscriptions/types.ts";
@@ -24,11 +25,26 @@ export interface FixedCostTotal {
   amount: number;
 }
 
+/** 支払方法ごとの月額合計。**通貨別に分ける**ため、支払方法1件につき通貨のぶんだけ行が出る。 */
+export interface FixedCostPaymentMethodTotal {
+  /** 支払方法の名称（例 `"楽天カード"`）。 */
+  paymentMethod: string;
+  currency: SubscriptionCurrency;
+  amount: number;
+}
+
 export interface FixedCostItem {
   name: string;
   /** 月額換算。年払い等も月あたりへ均してある。 */
   monthlyAmount: number;
   currency: SubscriptionCurrency;
+  /**
+   * 契約状況。`SCHEDULED_TO_END` は解約予定（期限まで使えるが自動更新しない）。
+   * 解約済み（`ENDED`）は既定でAPIから返らないため、実質2値になる。
+   */
+  contractStatus: SubscriptionContractStatus;
+  /** 引き落とし元（例 `"楽天カード"`）。 */
+  paymentMethod: string;
   /** 次回の支払日（`YYYY-MM-DD`）。見つからなければ null。 */
   nextPaymentDate: string | null;
 }
@@ -52,6 +68,11 @@ export interface FixedCostsView {
   configured: boolean;
   /** 月額合計。**通貨別。通貨をまたいで加算しない。** */
   monthlyByCurrency: FixedCostTotal[];
+  /**
+   * 支払方法別の月額合計。**通貨別に分けてあり、通貨をまたいで加算しない。**
+   * 並びは通貨ごとにまとめたうえで金額の大きい順（同額なら支払方法名の昇順）。
+   */
+  monthlyByPaymentMethod: FixedCostPaymentMethodTotal[];
   /** 円換算した月額合計の参考値。換算できないものがあれば null。 */
   monthlyJpy: number | null;
   /** 円換算に使ったレート。取得できていなければ null。 */
@@ -102,6 +123,7 @@ const sum = (items: { amount: number }[]): number =>
 /** 取得できなかったときの空の中身。呼び出しごとに別の配列を返す。 */
 const emptyFixedCosts = (): Omit<FixedCostsView, "configured" | "unavailable" | "note"> => ({
   monthlyByCurrency: [],
+  monthlyByPaymentMethod: [],
   monthlyJpy: null,
   usdJpyRate: null,
   count: 0,
@@ -169,6 +191,48 @@ export function summarizeAccountFreshness(
   };
 }
 
+/**
+ * 浮動小数の誤差を落とす。`25.98 + 0` の類で `25.980000000000004` になるのを避けるだけで、
+ * 丸めそのものが目的ではない（月額は小数2桁より細かくならない）。
+ */
+const roundAmount = (amount: number): number => Math.round(amount * 100) / 100;
+
+/**
+ * 支払方法別の月額合計。**通貨をまたいで加算しない**ため、支払方法と通貨の組で束ねる。
+ *
+ * 相手（subscription-lists）の `totals` にはこの内訳が無いので、ここで明細から積み上げる。
+ * 並びは通貨ごとにまとめたうえで金額の大きい順。**通貨をまたいで大小を比べない**ため、
+ * 額の小さいUSDが下へ流れて「少ない」ように見えることを避けている。
+ */
+function summarizeByPaymentMethod(
+  subscriptions: SubscriptionsSnapshot["subscriptions"],
+): FixedCostPaymentMethodTotal[] {
+  const totals = new Map<string, FixedCostPaymentMethodTotal>();
+  for (const subscription of subscriptions) {
+    const currency = subscription.currentPrice.currency;
+    const key = `${subscription.paymentMethod}\u0000${currency}`;
+    const found = totals.get(key);
+    if (found) {
+      found.amount += subscription.monthlyAmount;
+    } else {
+      totals.set(key, {
+        paymentMethod: subscription.paymentMethod,
+        currency,
+        amount: subscription.monthlyAmount,
+      });
+    }
+  }
+
+  return [...totals.values()]
+    .map((total) => ({ ...total, amount: roundAmount(total.amount) }))
+    .sort(
+      (a, b) =>
+        a.currency.localeCompare(b.currency) ||
+        b.amount - a.amount ||
+        a.paymentMethod.localeCompare(b.paymentMethod),
+    );
+}
+
 /** `YYYY-MM-DD` に日数を足す。ISO形式なので文字列のまま大小比較できる。 */
 function addDays(date: string, days: number): string {
   const at = new Date(`${date}T00:00:00Z`);
@@ -187,6 +251,8 @@ export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCosts
     name: subscription.name,
     monthlyAmount: subscription.monthlyAmount,
     currency: subscription.currentPrice.currency,
+    contractStatus: subscription.contractStatus,
+    paymentMethod: subscription.paymentMethod,
     nextPaymentDate: subscription.nextPayment?.date ?? null,
   }));
 
@@ -204,12 +270,22 @@ export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCosts
     .filter((entry): entry is [SubscriptionCurrency, number] => typeof entry[1] === "number")
     .map(([currency, amount]) => ({ currency, amount }));
 
+  const monthlyByPaymentMethod = summarizeByPaymentMethod(snapshot.subscriptions);
+
   const notes = [
     `${snapshot.referenceDate} 時点の月額固定費。年払い等も月あたりへ均してある。`,
     "残高・保有銘柄（ストック）とは性質が違うため、totals には足していない。",
   ];
   if (monthlyByCurrency.length > 1) {
     notes.push("通貨別に分けてある。為替が絡むため、通貨をまたいで加算しないこと。");
+  }
+  if (items.length > 0) {
+    notes.push(
+      "items の contractStatus が SCHEDULED_TO_END のものは解約予定。解約済み（ENDED）は取得対象から外れているため、ここには現れない。",
+    );
+    notes.push(
+      "monthlyByPaymentMethod は明細から積み上げた支払方法別の月額で、通貨別に分けてある。",
+    );
   }
   if (snapshot.totals.monthlyJpy !== null) {
     notes.push("monthlyJpy は日次更新のレートによる概算で、参考値にすぎない。");
@@ -220,6 +296,7 @@ export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCosts
   return {
     configured: true,
     monthlyByCurrency,
+    monthlyByPaymentMethod,
     monthlyJpy: snapshot.totals.monthlyJpy,
     usdJpyRate: snapshot.usdJpyRate,
     count: items.length,
