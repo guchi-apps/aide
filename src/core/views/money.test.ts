@@ -16,6 +16,7 @@ function subscription(overrides: Partial<Subscription> = {}): Subscription {
   return {
     id: "sub-1",
     name: "Netflix",
+    paymentMethod: "楽天カード",
     contractStatus: "AUTO_RENEWING",
     currentPrice: { amount: 1490, currency: "JPY", billingCycle: "MONTHLY", billingInterval: 1 },
     monthlyAmount: 1490,
@@ -44,7 +45,17 @@ describe("summarizeFixedCosts", () => {
     assert.equal(view.count, 1);
     assert.deepEqual(view.monthlyByCurrency, [{ currency: "JPY", amount: 1490 }]);
     assert.deepEqual(view.items, [
-      { name: "Netflix", monthlyAmount: 1490, currency: "JPY", nextPaymentDate: "2026-09-05" },
+      {
+        name: "Netflix",
+        monthlyAmount: 1490,
+        currency: "JPY",
+        contractStatus: "AUTO_RENEWING",
+        paymentMethod: "楽天カード",
+        nextPaymentDate: "2026-09-05",
+      },
+    ]);
+    assert.deepEqual(view.monthlyByPaymentMethod, [
+      { paymentMethod: "楽天カード", currency: "JPY", amount: 1490 },
     ]);
     assert.deepEqual(view.upcoming, [
       { name: "Netflix", date: "2026-09-05", amount: 1490, currency: "JPY" },
@@ -137,7 +148,127 @@ describe("summarizeFixedCosts", () => {
     assert.equal(view.configured, true);
     assert.equal(view.count, 0);
     assert.deepEqual(view.monthlyByCurrency, []);
+    assert.deepEqual(view.monthlyByPaymentMethod, []);
     assert.deepEqual(view.upcoming, []);
+  });
+
+  it("契約状況と支払方法を明細へそのまま通す", () => {
+    const view = summarizeFixedCosts(
+      snapshot({
+        totals: { monthlyByCurrency: { JPY: 2470 }, monthlyJpy: 2470 },
+        subscriptions: [
+          subscription(),
+          subscription({
+            id: "sub-2",
+            name: "解約予定のサービス",
+            paymentMethod: "三菱UFJ銀行",
+            contractStatus: "SCHEDULED_TO_END",
+            currentPrice: {
+              amount: 980,
+              currency: "JPY",
+              billingCycle: "MONTHLY",
+              billingInterval: 1,
+            },
+            monthlyAmount: 980,
+            monthlyAmountJpy: 980,
+          }),
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      view.items.map((item) => [item.name, item.contractStatus, item.paymentMethod]),
+      [
+        ["Netflix", "AUTO_RENEWING", "楽天カード"],
+        ["解約予定のサービス", "SCHEDULED_TO_END", "三菱UFJ銀行"],
+      ],
+    );
+    // 解約済みが既定で返らないことは、読み手が誤解しないよう note で断る。
+    assert.match(view.note, /SCHEDULED_TO_END/);
+    assert.match(view.note, /ENDED/);
+  });
+
+  it("支払方法別の月額を通貨ごとに金額の大きい順でまとめる", () => {
+    const view = summarizeFixedCosts(
+      snapshot({
+        totals: { monthlyByCurrency: { JPY: 3450 }, monthlyJpy: 3450 },
+        subscriptions: [
+          subscription(),
+          subscription({
+            id: "sub-2",
+            name: "Spotify",
+            paymentMethod: "楽天カード",
+            currentPrice: {
+              amount: 980,
+              currency: "JPY",
+              billingCycle: "MONTHLY",
+              billingInterval: 1,
+            },
+            monthlyAmount: 980,
+            monthlyAmountJpy: 980,
+          }),
+          subscription({
+            id: "sub-3",
+            name: "電気",
+            paymentMethod: "三菱UFJ銀行",
+            currentPrice: {
+              amount: 980,
+              currency: "JPY",
+              billingCycle: "MONTHLY",
+              billingInterval: 1,
+            },
+            monthlyAmount: 980,
+            monthlyAmountJpy: 980,
+          }),
+        ],
+      }),
+    );
+
+    assert.deepEqual(view.monthlyByPaymentMethod, [
+      { paymentMethod: "楽天カード", currency: "JPY", amount: 2470 },
+      { paymentMethod: "三菱UFJ銀行", currency: "JPY", amount: 980 },
+    ]);
+  });
+
+  it("同じ支払方法でも通貨をまたいで加算しない", () => {
+    const view = summarizeFixedCosts(
+      snapshot({
+        totals: { monthlyByCurrency: { JPY: 1490, USD: 25.98 }, monthlyJpy: 5447 },
+        subscriptions: [
+          subscription(),
+          subscription({
+            id: "sub-2",
+            name: "GitHub Copilot",
+            currentPrice: {
+              amount: 12.99,
+              currency: "USD",
+              billingCycle: "MONTHLY",
+              billingInterval: 1,
+            },
+            monthlyAmount: 12.99,
+            monthlyAmountJpy: 1978,
+          }),
+          subscription({
+            id: "sub-3",
+            name: "ChatGPT Plus",
+            currentPrice: {
+              amount: 12.99,
+              currency: "USD",
+              billingCycle: "MONTHLY",
+              billingInterval: 1,
+            },
+            monthlyAmount: 12.99,
+            monthlyAmountJpy: 1978,
+          }),
+        ],
+      }),
+    );
+
+    // 同じ「楽天カード」でも JPY と USD は別の行になる。合算すると意味が壊れるため。
+    assert.deepEqual(view.monthlyByPaymentMethod, [
+      { paymentMethod: "楽天カード", currency: "JPY", amount: 1490 },
+      { paymentMethod: "楽天カード", currency: "USD", amount: 25.98 },
+    ]);
   });
 });
 
