@@ -626,8 +626,16 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 ### 返す粒度と、totals へ足さない理由
 
-通貨別の月額合計・契約ごとの明細・**31日以内の支払予定**まで。契約IDや支払方法・ラベルは返さない
-（詳細は subscription-lists の画面がある）。
+通貨別の月額合計・**支払方法別の月額合計**・契約ごとの明細（契約状況と支払方法つき）・
+**31日以内の支払予定**まで。契約IDやラベルは返さない（詳細は subscription-lists の画面がある）。
+
+支払方法別の合計は相手の `totals` に無いため、**AIDE側で明細から積み上げている**（`summarizeByPaymentMethod`）。
+通貨別合計と同じく**通貨をまたいで加算せず**、支払方法と通貨の組で束ねる。積み上げの都合で
+浮動小数の誤差が出るため小数2桁へ丸めており、相手が計算した `monthlyByCurrency` とは末尾が
+一致しないことがある。
+
+契約状況（`contractStatus`）は既定で解約済み（`ENDED`）が取得対象から外れるため、実質
+`AUTO_RENEWING` / `SCHEDULED_TO_END` の2値になる。その旨は `note` に添えている。
 
 `MoneySummary.totals`（残高・保有銘柄）へは**足さない**。あちらは「いま持っている額」（ストック）で
 固定費は「毎月出ていく額」（フロー）にあたり、同じ合計に混ぜると意味が壊れる。
@@ -1227,9 +1235,23 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
                  "lastUpdatedAt": "2026-08-16T23:21:00+09:00" }],
   "onlineAccounts": [{ "name": "〇〇銀行", "lastUpdatedAt": "2026-08-16T23:20:11+09:00" }],
   "staleAccounts": [{ "name": "△△銀行", "lastUpdatedAt": "2024-12-18T10:00:00+09:00" }],
+  "fixedCosts": {
+    "configured": true,
+    "monthlyByCurrency": [{ "currency": "JPY", "amount": 2470 }],
+    "monthlyByPaymentMethod": [{ "paymentMethod": "〇〇カード", "currency": "JPY", "amount": 2470 }],
+    "monthlyJpy": 2470, "usdJpyRate": 152.3, "count": 2,
+    "items": [{ "name": "〇〇", "monthlyAmount": 1490, "currency": "JPY",
+                "contractStatus": "AUTO_RENEWING", "paymentMethod": "〇〇カード",
+                "nextPaymentDate": "2026-09-05" }],
+    "upcoming": [{ "name": "〇〇", "date": "2026-09-05", "amount": 1490, "currency": "JPY" }],
+    "unavailable": null, "note": "..."
+  },
   "note": "..."
 }
 ```
+
+**`fixedCosts` も同じ器で出ている。** `buildMoneySummary()` の戻り値をそのまま返しているため、
+月額固定費に項目が増えるとこのAPIの応答にも同時に出る（追加のみなので既存の読み手は壊れない）。
 
 **取得時刻と経過分数を必ず併せて返し、鮮度の判断は呼び出し側に委ねる。** MCP層と同じ方針で、AIDEは
 「古いから返さない」という判断をしない。キャッシュが空でも200を返す（`empty: true`）。まだ一度も巡回して

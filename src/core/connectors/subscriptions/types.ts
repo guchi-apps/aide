@@ -31,6 +31,8 @@ export interface SubscriptionPayment {
 export interface Subscription {
   id: string;
   name: string;
+  /** 支払方法の名称（例 `"楽天カード"`）。相手側では必須の関連なので null にならない。 */
+  paymentMethod: string;
   contractStatus: SubscriptionContractStatus;
   currentPrice: SubscriptionPrice;
   /** `currentPrice` の通貨のままの月額換算。 */
