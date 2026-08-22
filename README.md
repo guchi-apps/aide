@@ -1235,9 +1235,23 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
                  "lastUpdatedAt": "2026-08-16T23:21:00+09:00" }],
   "onlineAccounts": [{ "name": "〇〇銀行", "lastUpdatedAt": "2026-08-16T23:20:11+09:00" }],
   "staleAccounts": [{ "name": "△△銀行", "lastUpdatedAt": "2024-12-18T10:00:00+09:00" }],
+  "fixedCosts": {
+    "configured": true,
+    "monthlyByCurrency": [{ "currency": "JPY", "amount": 2470 }],
+    "monthlyByPaymentMethod": [{ "paymentMethod": "〇〇カード", "currency": "JPY", "amount": 2470 }],
+    "monthlyJpy": 2470, "usdJpyRate": 152.3, "count": 2,
+    "items": [{ "name": "〇〇", "monthlyAmount": 1490, "currency": "JPY",
+                "contractStatus": "AUTO_RENEWING", "paymentMethod": "〇〇カード",
+                "nextPaymentDate": "2026-09-05" }],
+    "upcoming": [{ "name": "〇〇", "date": "2026-09-05", "amount": 1490, "currency": "JPY" }],
+    "unavailable": null, "note": "..."
+  },
   "note": "..."
 }
 ```
+
+**`fixedCosts` も同じ器で出ている。** `buildMoneySummary()` の戻り値をそのまま返しているため、
+月額固定費に項目が増えるとこのAPIの応答にも同時に出る（追加のみなので既存の読み手は壊れない）。
 
 **取得時刻と経過分数を必ず併せて返し、鮮度の判断は呼び出し側に委ねる。** MCP層と同じ方針で、AIDEは
 「古いから返さない」という判断をしない。キャッシュが空でも200を返す（`empty: true`）。まだ一度も巡回して
