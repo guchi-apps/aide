@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AIDE">
+  <!--
+    AIDEのアイコンの正はこの1枚。まわりの情報源が線を伝って中央のひとつへ集まる形で、
+    各サービスからデータを集めて1か所に束ねるという役割をそのまま図にしている。
+    AIDE-bot（ねこの顔／ティール）と取り違えないよう、顔を持たせず、色も紫にしている。
+
+    同じ絵をPNGへ書き出したものが icon-512.png / icon-192.png / apple-touch-icon.png /
+    favicon-32.png で、書き出しは scripts/build-icons.sh が行う。**PNGを直接編集しないこと**
+    （次にスクリプトを流した時点で戻る）。
+
+    描くときの制約は2つ。
+    - 背景は角を丸めず512x512いっぱいに塗る。maskable（Androidのアダプティブアイコン）として
+      名乗っており、角を透明にすると端末側の切り抜き形によっては地が透ける。
+    - 絵は中心から半径204.8px以内に収める。maskableの安全領域がそこまでで、外は
+      切り落とされうる。この絵の最も外側はノード（中心から165px＋半径28px＝193px）。
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9d5cf0"/>
+      <stop offset="1" stop-color="#3b1078"/>
+    </linearGradient>
+    <!-- スポークは中心へ近いほど明るくする。情報が流れ込む向きを線の明るさで示すため。 -->
+    <radialGradient id="spoke" gradientUnits="userSpaceOnUse" cx="256" cy="256" r="200">
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.3"/>
+    </radialGradient>
+    <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="256" cy="256" r="160">
+      <stop offset="0" stop-color="#ffc24b" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffc24b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="160" fill="url(#glow)"/>
+
+  <!-- 中心へ向かう6本の線。角度は上から60度おき、長さは中心から165px。 -->
+  <g stroke="url(#spoke)" stroke-width="22" stroke-linecap="round">
+    <line x1="256" y1="256" x2="256" y2="91"/>
+    <line x1="256" y1="256" x2="398.9" y2="173.5"/>
+    <line x1="256" y1="256" x2="398.9" y2="338.5"/>
+    <line x1="256" y1="256" x2="256" y2="421"/>
+    <line x1="256" y1="256" x2="113.1" y2="338.5"/>
+    <line x1="256" y1="256" x2="113.1" y2="173.5"/>
+  </g>
+
+  <!-- 集めてくる先。大きさを揃えず振ってあるのは、情報源の重みが一定でないため。 -->
+  <g fill="#ffffff">
+    <circle cx="256" cy="91" r="28"/>
+    <circle cx="398.9" cy="173.5" r="22"/>
+    <circle cx="398.9" cy="338.5" r="26"/>
+    <circle cx="256" cy="421" r="20"/>
+    <circle cx="113.1" cy="338.5" r="28"/>
+    <circle cx="113.1" cy="173.5" r="22"/>
+  </g>
+
+  <circle cx="256" cy="256" r="132" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="10"/>
+  <circle cx="256" cy="256" r="96" fill="none" stroke="#ffffff" stroke-opacity="0.38" stroke-width="14"/>
+  <!-- 集まった先。32pxまで縮めてもここだけは残るように、他の要素より大きく取っている。 -->
+  <circle cx="256" cy="256" r="66" fill="#ffc24b"/>
+</svg>
