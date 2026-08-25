@@ -9,7 +9,7 @@ Wants=network-online.target
 Type=oneshot
 
 # 巡回本体のタイムアウトは300秒。最悪の経路は (300秒 × 3) + 40秒の待ち +
-# 自動再ログイン180秒 + 再実行300秒 ≒ 24分。日次なので30分を上限にしておけば足りる。
+# 自動再ログイン180秒 + 再実行300秒 ≒ 24分。次の実行まで12時間空くので30分を上限にしておけば足りる。
 TimeoutStartSec=30min
 
 ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts zaim-sync'

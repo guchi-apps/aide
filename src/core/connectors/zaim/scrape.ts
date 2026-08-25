@@ -21,7 +21,7 @@ const SCRAPE_SCRIPT = zaimScriptPath("scrape.mjs");
  * （`npm install -g playwright && playwright install chromium`）。
  *
  * 一時的な失敗の再試行と、セッション失効時の自動再ログインは `runZaimScript` が担う。
- * 日次で1回しか走らないぶん、ここで落ちると翌日まで残高が古いままになるため、
+ * 1日2回しか走らないぶん、ここで落ちると次の巡回まで残高が古いままになるため、
  * セッション延長（`keepZaimSessionAlive`）と同じ回復経路を通している。
  */
 export async function scrapeZaimSnapshot(deps?: ZaimScriptDeps): Promise<ZaimSnapshot> {
