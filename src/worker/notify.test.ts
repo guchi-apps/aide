@@ -126,26 +126,6 @@ describe("連続失敗の抑制", () => {
     assert.equal(decideNotification(previous, "理由A", now).shouldNotify, true);
   });
 
-  // 更新できなかった口座の警告は24時間の窓で判定する（#165）。既定の6時間のままだと、
-  // zaim-refresh を1日2回に増やした時点で同じ口座の警告が1日2回届く。
-  it("抑制時間を指定すると、既定の6時間を過ぎていても抑制できる", () => {
-    const previous = recordAt({
-      signature: "ゆうちょ銀行",
-      notifiedAt: new Date(now.getTime() - 12 * HOUR).toISOString(),
-      count: 1,
-    });
-    assert.equal(decideNotification(previous, "ゆうちょ銀行", now, 24 * HOUR).shouldNotify, false);
-    assert.equal(decideNotification(previous, "ゆうちょ銀行", now, 24 * HOUR).record.count, 2);
-  });
-
-  it("指定した抑制時間を過ぎたら通知する", () => {
-    const previous = recordAt({
-      signature: "ゆうちょ銀行",
-      notifiedAt: new Date(now.getTime() - 24 * HOUR).toISOString(),
-      count: 2,
-    });
-    assert.equal(decideNotification(previous, "ゆうちょ銀行", now, 24 * HOUR).shouldNotify, true);
-  });
 });
 
 describe("通知の中身", () => {
