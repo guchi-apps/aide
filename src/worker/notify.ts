@@ -25,6 +25,16 @@ import { DATA_DIR } from "../core/paths.ts";
 /** 同じ理由で失敗し続けている間、次の通知までに空ける時間。 */
 const SUPPRESSION_WINDOW_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * 更新できなかった口座（一部失敗）だけに使う、長めの抑制時間。
+ *
+ * ジョブの失敗と違い、こちらは**実行するたびに必ず再判定される**。`zaim-refresh` を
+ * 1日2回に増やした時点（#165）で、6時間の窓では同じ口座の警告が1日2回届くようになる。
+ * 直すのはZaim側の連携設定で、日に何度知らせても取れる行動は変わらないため、
+ * 実行回数を増やしても1日1回までに保つ。
+ */
+const STALE_ACCOUNTS_SUPPRESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** 通知の送信タイムアウト。ジョブの終了を長く引き止めない。 */
 const SEND_TIMEOUT_MS = 10_000;
 
@@ -117,6 +127,7 @@ export function decideNotification(
   previous: FailureRecord | undefined,
   signature: string,
   now: Date,
+  windowMs: number = SUPPRESSION_WINDOW_MS,
 ): { shouldNotify: boolean; record: FailureRecord } {
   const continued = previous?.signature === signature;
   const record: FailureRecord = {
@@ -127,7 +138,7 @@ export function decideNotification(
   };
 
   const elapsed = record.notifiedAt ? now.getTime() - new Date(record.notifiedAt).getTime() : null;
-  const shouldNotify = elapsed === null || elapsed >= SUPPRESSION_WINDOW_MS;
+  const shouldNotify = elapsed === null || elapsed >= windowMs;
   return { shouldNotify, record };
 }
 
@@ -413,7 +424,7 @@ export function buildStaleAccountsRecoveryPayload(input: {
  *
  * ジョブ全体の失敗（`notifyJobFailure`）では拾えない。更新ボタンは押せているのに
  * 特定の口座だけ古い残高が残る状態は、Zaim側の連携設定を直すまで続くため、
- * 抑制の仕組みはそのまま流用する（同じ顔ぶれなら6時間に1回、直ったら1回だけ復旧を送る）。
+ * 抑制の仕組みはそのまま流用する（同じ顔ぶれなら24時間に1回、直ったら1回だけ復旧を送る）。
  *
  * 呼び出し側は失敗させない（例外を投げない）。
  */
@@ -440,7 +451,12 @@ export async function notifyStaleAccounts(
       return;
     }
 
-    const { shouldNotify, record } = decideNotification(previous, staleAccountsSignature(accounts), now);
+    const { shouldNotify, record } = decideNotification(
+      previous,
+      staleAccountsSignature(accounts),
+      now,
+      STALE_ACCOUNTS_SUPPRESSION_WINDOW_MS,
+    );
     if (shouldNotify) {
       const sent = await send(url, buildStaleAccountsPayload({ job, accounts, occurredAt: now, record }));
       // 送れなかったときは notifiedAt を進めない。次の実行で送り直す。
