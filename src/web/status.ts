@@ -24,6 +24,7 @@ import {
 import { buildMoneySummary } from "../core/views/money.ts";
 import { buildOpsStatus } from "../core/views/ops.ts";
 import { buildRoomStatus } from "../core/views/room.ts";
+import { buildSchedule } from "../core/views/schedule.ts";
 import {
   AUTH_METHOD,
   isQuietMethod,
@@ -803,6 +804,14 @@ export async function runProbes(options: ProbeOptions = {}): Promise<ProbeResult
       return {
         ok: status.configured && status.complete,
         detail: status.unavailable[0]?.reason ?? (status.configured ? "" : "未設定"),
+      };
+    }),
+    measure("dayspan", async () => {
+      // 期限切れタスクは取りにいかない（Notionへの往復が1回減る）。疎通の確認に要らない。
+      const summary = await buildSchedule({ days: 1, overdueDays: 0 });
+      return {
+        ok: summary.configured && summary.complete,
+        detail: summary.unavailable[0]?.reason ?? (summary.configured ? "" : "未設定"),
       };
     }),
     measure("subscription-lists", async () => {

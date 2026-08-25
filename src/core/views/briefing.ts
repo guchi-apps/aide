@@ -2,6 +2,7 @@ import { readCache } from "../cache/store.ts";
 import type { CachedValue } from "../cache/store.ts";
 import { tokyoDate } from "../connectors/subscriptions/index.ts";
 import type { WeatherDay, WeatherForecast } from "../connectors/weather/types.ts";
+import { buildSchedule, type ScheduleDay, type ScheduleSummary } from "./schedule.ts";
 import { WEATHER_CACHE_KEY } from "../../worker/jobs/weather-sync.ts";
 
 /**
@@ -18,9 +19,8 @@ import { WEATHER_CACHE_KEY } from "../../worker/jobs/weather-sync.ts";
  * **鮮度はビュー全体で揃えず、ソースごとに持つ。** 天気は毎時更新のキャッシュ、交通は分単位、
  * 予定は都度と性質が違うため、1つの `stale` に潰すと意味が壊れる。
  *
- * 現時点で実データを返せるのは天気だけで、予定（dayspan#236 ＋ AIDE側コネクタ）と
- * 交通（aide#33）は**未接続として返す**。コネクタが揃った順に、該当セクションを
- * 差し替えるだけで足せる形にしてある。
+ * 予定（DaySpan・aide#173）と天気は実データを返し、交通（aide#33）はまだ**未接続として返す**。
+ * コネクタが揃った順に、該当セクションを差し替えるだけで足せる形にしてある。
  */
 
 /**
@@ -98,8 +98,8 @@ export interface DailyBriefing {
   complete: boolean;
   /** 中身を返せなかったソースと理由。 */
   unavailable: { source: string; reason: string }[];
-  /** 今日の予定（DaySpan）。 */
-  schedule: PendingSection;
+  /** 今日の予定・移動・タスク・日付リマインドと空き時間（DaySpan）。 */
+  schedule: BriefingSection<ScheduleDay>;
   /** 交通（trainroute）。 */
   transit: PendingSection;
   /** 今日・明日の天気（Open-Meteo）。 */
@@ -117,6 +117,51 @@ function nextDate(date: string): string {
 /** まだコネクタが無いソースの答え。 */
 function pendingSection(reason: string): PendingSection {
   return { state: "not_connected", fetchedAt: null, ageMinutes: null, stale: false, reason, data: null };
+}
+
+/**
+ * 予定ビューの結果を、対象日ぶんのセクションへ畳む。**純粋関数。テストはここに集中する。**
+ *
+ * **鮮度は持つが `stale` にはしない。** 予定は都度取得（キャッシュを挟まない）なので、
+ * 天気のように「取得が止まっている」状態が起きない。`fetchedAt` は DaySpan が応答を
+ * 組み立てた時刻で、経過分数は往復にかかった時間ぶんしかずれない。
+ */
+export function summarizeScheduleSection(
+  summary: ScheduleSummary,
+  date: string,
+  now: Date,
+): BriefingSection<ScheduleDay> {
+  const generatedAt = summary.generatedAt;
+  const ageMinutes =
+    generatedAt === null ? null : Math.max(0, Math.round((now.getTime() - Date.parse(generatedAt)) / 60_000));
+  const base = { fetchedAt: generatedAt, ageMinutes: Number.isNaN(ageMinutes) ? null : ageMinutes, stale: false };
+
+  if (!summary.configured) {
+    return {
+      ...base,
+      state: "not_configured",
+      reason: summary.unavailable[0]?.reason ?? "DaySpanへの接続が設定されていない",
+      data: null,
+    };
+  }
+
+  const day = summary.days.find((entry) => entry.date === date) ?? null;
+  if (!day) {
+    return {
+      ...base,
+      state: "unavailable",
+      reason: summary.unavailable[0]?.reason ?? `取得した範囲に ${date} が含まれていない`,
+      data: null,
+    };
+  }
+
+  // 部分的な失敗（Google だけ落ちている等）は取れたぶんを返しつつ理由を残す。
+  // 中身が入っている以上 ok にはできないが、捨てると天気だけの答えになってしまう。
+  if (summary.unavailable.length > 0) {
+    return { ...base, state: "unavailable", reason: summary.unavailable[0]!.reason, data: day };
+  }
+
+  return { ...base, state: "ok", reason: null, data: day };
 }
 
 /**
@@ -177,7 +222,7 @@ export function assembleBriefing(
   now: Date,
   date: string,
   sections: {
-    schedule: PendingSection;
+    schedule: BriefingSection<ScheduleDay>;
     transit: PendingSection;
     weather: BriefingSection<BriefingWeather>;
   },
@@ -232,19 +277,25 @@ export function assembleBriefing(
 /**
  * MCPツールから呼ばれる入口。
  *
- * **キャッシュを読むだけで、外部への取得は行わない**（README「取得と提供の分離」）。
- * 天気は weather-sync が毎時書いたものを読む。交通・予定のコネクタが入ったら、
- * localhost への軽いHTTP GETを**短いタイムアウト付きで**ここへ足す。
+ * 天気は weather-sync が毎時書いたキャッシュを読むだけ。予定は localhost の DaySpan へ
+ * **短いタイムアウト付きで**都度取りにいく（README「どこまでを『重い取得』とみなすか」）。
+ * 交通のコネクタが入ったら、同じ形でここへ足す。
+ *
+ * **ソースごとに独立して失敗させる。** 予定の取得で例外を投げると、天気だけは返せたはずの
+ * 問いまで答えられなくなるため、`buildSchedule()` 側で状態に落としてある。
  */
 export async function buildDailyBriefing(now: Date = new Date()): Promise<DailyBriefing> {
   const date = tokyoDate(now);
-  const weather = summarizeWeatherSection(await readCache<WeatherForecast>(WEATHER_CACHE_KEY), date);
+  // 日付は明示して渡す。省略するとDaySpan側の設定タイムゾーンでの「今日」になり、
+  // こちらがJSTで切った対象日とずれうる（ずれると schedule だけ別の日を返す）。
+  const [weatherCache, schedule] = await Promise.all([
+    readCache<WeatherForecast>(WEATHER_CACHE_KEY),
+    buildSchedule({ date, days: 1, overdueDays: 0 }),
+  ]);
 
   return assembleBriefing(now, date, {
-    schedule: pendingSection(
-      "予定のコネクタが未実装（DaySpan側のGET API: guchi-apps/dayspan#236 待ち）",
-    ),
+    schedule: summarizeScheduleSection(schedule, date, now),
     transit: pendingSection("交通のコネクタが未実装（guchi-apps/aide#33 待ち）"),
-    weather,
+    weather: summarizeWeatherSection(weatherCache, date),
   });
 }
