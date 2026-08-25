@@ -415,6 +415,9 @@ export function buildStaleAccountsRecoveryPayload(input: {
  * 特定の口座だけ古い残高が残る状態は、Zaim側の連携設定を直すまで続くため、
  * 抑制の仕組みはそのまま流用する（同じ顔ぶれなら6時間に1回、直ったら1回だけ復旧を送る）。
  *
+ * **呼ぶかどうかは呼び出し側が決める。** `zaim-refresh` はその日の最後の押下でしか呼ばない
+ * （#165。理由は `jobs/zaim-refresh.ts` の `isFinalRefreshOfDay`）。
+ *
  * 呼び出し側は失敗させない（例外を投げない）。
  */
 export async function notifyStaleAccounts(

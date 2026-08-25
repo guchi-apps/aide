@@ -87,15 +87,15 @@ describe("キャッシュの判定", () => {
     assert.equal(cache.stale, false);
   });
 
-  it("24時間以内なら正常", () => {
-    const cache = summarizeCache(snapshot(60), now);
+  it("18時間以内なら正常", () => {
+    const cache = summarizeCache(snapshot(60 * 18), now);
     assert.equal(cache.stale, false);
     assert.equal(cache.severity, "ok");
     assert.equal(cache.balances, 1);
   });
 
-  it("24時間を超えたら注意", () => {
-    const cache = summarizeCache(snapshot(60 * 24 + 1), now);
+  it("18時間を超えたら注意", () => {
+    const cache = summarizeCache(snapshot(60 * 18 + 1), now);
     assert.equal(cache.stale, true);
     assert.equal(cache.severity, "warn");
   });

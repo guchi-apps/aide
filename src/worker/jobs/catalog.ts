@@ -28,17 +28,17 @@ export const JOB_CATALOG = [
       "Zaimの連携口座を一括更新する（「データを更新する」を押す）。押すまで各金融機関から" +
       "再取得されないため、これを先に走らせないと巡回しても古い残高が記録される。" +
       "反映まで5〜15分かかるので、巡回より前に置く。",
-    interval: "日次（23:15 JST）",
-    // 日次なので24時間＋実行のずれと再試行のぶんを見て36時間。
-    staleAfterMinutes: 36 * 60,
+    interval: "1日2回（11:15 / 23:15 JST）",
+    // 12時間ごとなので、1回飛んだ時点で気づけるよう12時間＋実行のずれと再試行のぶんを見て18時間。
+    staleAfterMinutes: 18 * 60,
   },
   {
     name: "zaim-sync",
     description:
       "Zaimを巡回して残高・保有銘柄を取得し、キャッシュを更新する。Playwrightを使うため重い。" +
       "その日の最終データを確定させるため、zaim-refresh の完了を見込んだ時刻に置く。",
-    interval: "日次（23:35 JST）",
-    staleAfterMinutes: 36 * 60,
+    interval: "1日2回（11:35 / 23:35 JST）",
+    staleAfterMinutes: 18 * 60,
   },
   {
     name: "zaim-keep-alive",

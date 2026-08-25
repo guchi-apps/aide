@@ -125,6 +125,7 @@ describe("連続失敗の抑制", () => {
     const previous = recordAt({ signature: "理由A", notifiedAt: null, count: 2 });
     assert.equal(decideNotification(previous, "理由A", now).shouldNotify, true);
   });
+
 });
 
 describe("通知の中身", () => {
