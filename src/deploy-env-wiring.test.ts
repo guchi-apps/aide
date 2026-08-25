@@ -36,6 +36,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_CACHE_DIR: "既定（リポジトリ基準の data/cache）で足りる",
   AIDE_CLAUDE_SESSIONS_DIR:
     "Claude Code のセッション台帳の置き場。読むのはサブPCのworkerだけで、既定（~/.claude/sessions）で足りる",
+  AIDE_DAYSPAN_URL: "既定 http://127.0.0.1:3113 で足りる",
   AIDE_GITHUB_ORG: "既定 guchi-apps で足りる",
   AIDE_GITHUB_REPOS: "未設定なら活動中のリポジトリを自動で拾う",
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
@@ -149,6 +150,8 @@ describe("本番の.envへの配線（deploy.yml）", () => {
       "AIDE_READ_SECRET",
       "AIDE_OPS_DASHBOARD_TOKEN",
       "AIDE_SUBSCRIPTIONS_TOKEN",
+      "AIDE_MYROOM_TOKEN",
+      "AIDE_DAYSPAN_TOKEN",
       "AIDE_GITHUB_TOKEN",
       "AIDE_GITHUB_ISSUE_TOKEN",
     ]) {
