@@ -33,7 +33,7 @@ import {
 } from "../mcp/access-log.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { formatJst } from "../worker/notify.ts";
-import { card, defList, escapeHtml, pill, renderPage, table, type Tone } from "./layout.ts";
+import { card, defList, escapeHtml, pill, renderPage, siteNav, table, type Tone } from "./layout.ts";
 import {
   clearHandshakeCookie,
   handshakeCookie,
@@ -120,8 +120,11 @@ function isSecure(req: IncomingMessage): boolean {
  *
  * **許可リストはCookieを出すときだけでなく、開くたびに照合する。** リストから外した
  * アドレスが、発行済みのCookieの有効期間（7日）だけ入れ続けられるのを避ける。
+ *
+ * 共通知識ページ（`src/web/knowledge.ts`）も同じ関門を通す。**画面ごとに判定を書かない。**
+ * 片方だけ条件が古くなると、そこが素通しの入口になる。
  */
-async function currentSession(
+export async function currentSession(
   req: IncomingMessage,
   options: StatusOptions,
 ): Promise<StatusSession | null> {
@@ -446,10 +449,7 @@ ${connectorsCard(health)}
 
   return renderPage({
     title: TITLE,
-    nav: [
-      { href: "/status", label: "動作状況", current: true },
-      { href: "/features", label: "機能一覧", current: false },
-    ],
+    nav: siteNav("status"),
     headerAction: health.server.authEnabled
       ? `${session?.email ? `<span class="who">${escapeHtml(session.email)}</span>` : ""}<form method="post" action="/status/logout"><button class="linkish" type="submit">ログアウト</button></form>`
       : "",

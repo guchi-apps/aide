@@ -162,6 +162,28 @@ td.key{font-family:${FONT_MONO};font-weight:500;white-space:nowrap}
 tr.quiet td{color:var(--muted)}
 .why{display:block;color:var(--bad);font-size:.78rem;font-variant-numeric:normal}
 
+/* ---- ファイル別の折りたたみ（共通知識ページ）---- */
+/* JavaScriptを使わず <details> だけで開閉する。この画面はGitHubから取った内容を
+   並べるだけで、押した先で通信するものが無い。 */
+.files{display:flex;flex-direction:column;margin:0;padding:0;list-style:none;min-width:0}
+.files > li{border-bottom:1px solid var(--line-2)}
+.files > li:last-child{border-bottom:0}
+.files summary{cursor:pointer;padding:.5rem 0;display:flex;align-items:baseline;gap:.5rem;
+ flex-wrap:wrap;font-size:.84rem;list-style:none}
+.files summary::-webkit-details-marker{display:none}
+.files summary::before{content:"▸";color:var(--muted);font-size:.7rem;line-height:1.6}
+.files details[open] > summary::before{content:"▾"}
+.files summary .fname{font-family:${FONT_MONO};color:var(--accent);font-weight:500;
+ margin-right:auto;overflow-wrap:anywhere}
+.files summary .fcount{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);
+ font-variant-numeric:tabular-nums}
+.sections{list-style:none;margin:0 0 .6rem;padding:0 0 0 1.1rem;
+ display:flex;flex-direction:column;gap:.45rem}
+.sections li{display:flex;flex-direction:column;gap:.1rem;min-width:0}
+.sections .t{font-size:.84rem;color:var(--ink);line-height:1.5;overflow-wrap:anywhere}
+.sections .m{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);
+ display:flex;gap:.15rem .8rem;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+
 /* ---- 操作 ---- */
 button.act{font:inherit;font-size:.82rem;padding:.35rem .85rem;background:var(--panel-2);
  color:var(--ink);border:1px solid var(--line);cursor:pointer;align-self:flex-start}
@@ -193,6 +215,23 @@ export interface NavItem {
   href: string;
   label: string;
   current: boolean;
+}
+
+/** ヘッダーのナビに並べる画面。ページを増やしたらここへ足す。 */
+export type NavKey = "status" | "knowledge" | "features";
+
+const NAV: { key: NavKey; href: string; label: string }[] = [
+  { key: "status", href: "/status", label: "動作状況" },
+  { key: "knowledge", href: "/knowledge", label: "共通知識" },
+  { key: "features", href: "/features", label: "機能一覧" },
+];
+
+/**
+ * ヘッダーのナビ。**3つの画面が同じ並びを持つよう、定義はここ1か所にする。**
+ * 各ページが自前で配列を書いていたときは、画面を足すたびに書き漏らしが出ていた。
+ */
+export function siteNav(current: NavKey): NavItem[] {
+  return NAV.map((item) => ({ href: item.href, label: item.label, current: item.key === current }));
 }
 
 export interface PageOptions {

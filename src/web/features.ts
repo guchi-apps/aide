@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
-import { card, escapeHtml, renderPage } from "./layout.ts";
+import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 
 /**
  * 機能一覧ページ（`GET /features`）。
@@ -65,6 +65,12 @@ const ENDPOINTS: FeatureItem[] = [
     meta: "GET",
     description:
       "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定・MCPへのアクセスの記録を人間向けに表示する。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+  },
+  {
+    name: "/knowledge",
+    meta: "GET",
+    description:
+      "共通知識の画面。guchi-apps/docs に入っている共有知識と、各リポジトリの知見メモがどう採用・却下されたかを一覧する。動作状況の画面と同じログインが要る。",
   },
   {
     name: "/status/auth/start",
@@ -209,10 +215,7 @@ ${sections.map(renderSection).join("\n")}
 
   return renderPage({
     title: "AIDE の機能一覧",
-    nav: [
-      { href: "/status", label: "動作状況", current: false },
-      { href: "/features", label: "機能一覧", current: true },
-    ],
+    nav: siteNav("features"),
     body,
     footer: `このページには機能の一覧だけを載せています（実データ・設定値は含みません）。稼働状況は /status で確認できます。<br>${ATTRIBUTION_HTML}`,
   });

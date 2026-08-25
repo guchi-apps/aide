@@ -27,6 +27,7 @@ import { roomStatusTool } from "./mcp/tools/room.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./mcp/tools/zaim.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
+import { handleKnowledgePage } from "./web/knowledge.ts";
 import {
   handleStatusAuthCallback,
   handleStatusAuthStart,
@@ -128,6 +129,13 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
   if (path === "/status/logout" && req.method === "POST") {
     handleStatusLogout(req, res);
+    return;
+  }
+  // 共通知識の画面（#161）。動作状況と同じログインの内側に置く。
+  // **こちらは開くとGitHubへ問い合わせる。** 取得結果そのものが中身なので避けようがなく、
+  // 代わりに数分キャッシュしている（src/web/knowledge.ts）。
+  if (path === "/knowledge" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleKnowledgePage(req, res, url, statusOptions);
     return;
   }
   // 疎通確認。押したときだけ外部のコネクタへ問い合わせる。
