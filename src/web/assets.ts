@@ -6,9 +6,10 @@ import type { McpIcon } from "../mcp/types.ts";
  * アイコンとPWAマニフェストの配信（`src/web/icons/`）。
  *
  * ブラウザのタブ・ホーム画面へ追加したときのアイコンを、AIDE自身が返せるようにする層。
- * 実行時依存を増やさない方針のため画像処理は行わず、**あらかじめ縮小して置いた PNG を
- * そのまま返すだけ**にしている。サイズを増やす場合も同じで、生成した PNG を
- * `src/web/icons/` へ置き、`ICONS` に足す（元画像は Issue #80 の添付）。
+ * 実行時依存を増やさない方針のため画像処理は行わず、**あらかじめ書き出して置いた PNG を
+ * そのまま返すだけ**にしている。絵の正は `src/web/icons/icon.svg` の1枚で、PNGは
+ * `scripts/build-icons.sh` がそこから書き出したもの。サイズを増やす場合は、そのスクリプトへ
+ * 1行足して流し、生成された PNG を `ICONS` にも足す。
  *
  * 中身は公開してよい静的な画像とメタデータだけなので、認証は通さない。
  */
@@ -33,9 +34,9 @@ export const ICONS: IconAsset[] = [
 /** マニフェストの配信パス。 */
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
-/** アイコンの背景（赤）に合わせた色。ブラウザのUIとPWAの起動画面に出る。 */
-export const THEME_COLOR = "#c9514a";
-const BACKGROUND_COLOR = "#b94944";
+/** アイコンの背景（紫）に合わせた色。ブラウザのUIとPWAの起動画面に出る。 */
+export const THEME_COLOR = "#6b34b4";
+const BACKGROUND_COLOR = "#3b1078";
 
 const ICON_DIR = new URL("./icons/", import.meta.url);
 
@@ -73,8 +74,8 @@ export function manifest(): unknown {
     background_color: BACKGROUND_COLOR,
     icons: [
       ...icons,
-      // 端末側で好きな形に切り抜いてよい版。ロボットが中央60%に収まっており、
-      // 円形に切り抜かれても欠けない。
+      // 端末側で好きな形に切り抜いてよい版。絵が中心から半径193pxに収まっており
+      // （maskableの安全領域は204.8px）、円形に切り抜かれても欠けない。
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
