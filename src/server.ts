@@ -116,7 +116,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
   if (path === "/status/auth/start" && (req.method === "GET" || req.method === "HEAD")) {
-    await handleStatusAuthStart(req, res, statusOptions);
+    await handleStatusAuthStart(req, res, url, statusOptions);
     return;
   }
   if (path === CALLBACK_PATH && (req.method === "GET" || req.method === "HEAD")) {

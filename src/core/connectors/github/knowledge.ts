@@ -173,6 +173,19 @@ interface FetchResult<T> {
 }
 
 /**
+ * GraphQLの `errors` を、外へ出してよい粒度まで丸める。
+ *
+ * **`message` はそのまま載せない**（権限エラーで内部の構成を含むことがある）。種別だけを残す。
+ * `index.ts` の `describeGraphQlErrors` と同じ考え方だが、あちらはリポジトリ名の割り出しまで
+ * するのに対し、ここは対象が1つなので種別だけで足りる。
+ */
+function firstErrorType(errors: unknown): string | null {
+  if (!Array.isArray(errors) || errors.length === 0) return null;
+  const record = (errors[0] ?? {}) as { type?: unknown };
+  return typeof record.type === "string" ? record.type : "ERROR";
+}
+
+/**
  * GraphQLを1回叩く。**失敗しても例外にせず、呼び出し側が部分成功を組み立てられる形で返す。**
  * 共有知識とIssue検索は独立していて、片方が落ちてももう片方は出せるため。
  */
@@ -196,7 +209,13 @@ async function post<T>(
     });
     if (!res.ok) throw res;
     const body = (await res.json()) as GraphQlBody<T>;
-    return { data: body.data ?? null, failure: null };
+    // **HTTP 200 でも `errors` が返る。** `data` が部分的に埋まることもあるので、
+    // データは捨てずに理由だけ添える（判断は呼び出し側）。
+    const type = firstErrorType(body.errors);
+    return {
+      data: body.data ?? null,
+      failure: type ? { source: "", reason: `GraphQL ${type}` } : null,
+    };
   } catch (cause) {
     // 理由は外へ出してよい粒度まで丸めてある（HTTPステータスと例外名まで）。
     // どこの失敗かは呼び出し側が知っているので、`source` は呼び出し側で埋める。
@@ -256,17 +275,19 @@ async function fetchSharedFiles(
   });
 
   if (!data?.repository) {
+    // **「トークンが無い」と「トークンはあるが読めない」を混ぜない。** ここへ来るのは後者で、
+    // fine-grained PAT の対象リポジトリに `docs` が入っていないと NOT_FOUND になる
+    // （権限不足は存在しないリポジトリと同じ応答になる、というGitHubの仕様）。
+    const reason = failure?.reason ?? "応答にリポジトリが含まれていなかった";
+    const hint = reason.includes("NOT_FOUND")
+      ? "。トークンの対象リポジトリに含まれていない可能性があります"
+      : "";
     return {
       repoUrl: null,
       branch: null,
       directories: [],
       rateLimit: data?.rateLimit ?? null,
-      failures: [
-        {
-          source: `${config.org}/${DOCS_REPO}`,
-          reason: failure?.reason ?? "共有知識リポジトリを読めなかった",
-        },
-      ],
+      failures: [{ source: `${config.org}/${DOCS_REPO}`, reason: `${reason}${hint}` }],
     };
   }
 
@@ -297,7 +318,8 @@ async function fetchSharedFiles(
     branch: repository.defaultBranchRef?.name ?? null,
     directories,
     rateLimit: data.rateLimit ?? null,
-    failures: [],
+    // 一部だけ落ちた場合（あるディレクトリだけ読めない等）も握りつぶさない。
+    failures: failure ? [{ source: `${config.org}/${DOCS_REPO}`, reason: failure.reason }] : [],
   };
 }
 
@@ -312,6 +334,7 @@ async function fetchMemoIssues(
   failures: GitHubSourceFailure[];
 }> {
   const issues: KnowledgeIssueNode[] = [];
+  const failures: GitHubSourceFailure[] = [];
   let issueCount = 0;
   let truncated = false;
   let rateLimit: GitHubRateLimit | null = null;
@@ -366,14 +389,15 @@ async function fetchMemoIssues(
       });
     }
 
+    if (failure) failures.push({ source: "search", reason: failure.reason });
     if (!data.search.pageInfo.hasNextPage) {
-      return { issues, issueCount, truncated, rateLimit, failures: [] };
+      return { issues, issueCount, truncated, rateLimit, failures };
     }
     after = data.search.pageInfo.endCursor;
   }
 
   // ループを抜けた＝上限に達した。全部は読めていない。
-  return { issues, issueCount, truncated: true, rateLimit, failures: [] };
+  return { issues, issueCount, truncated: true, rateLimit, failures };
 }
 
 /**

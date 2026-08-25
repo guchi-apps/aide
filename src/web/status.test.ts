@@ -4,7 +4,7 @@ import type { Health } from "../core/views/health.ts";
 import { summarizeMcpAccess, type McpAccessEntry } from "../mcp/access-log.ts";
 import { ToolRegistry } from "../mcp/registry.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
-import { renderLoginPage, renderStatusPage } from "./status.ts";
+import { renderLoginPage, renderStatusPage, safeLanding } from "./status.ts";
 
 function registry(): ToolRegistry {
   const created = new ToolRegistry();
@@ -341,16 +341,34 @@ describe("ログイン画面", () => {
     const html = renderLoginPage({ google: false });
     assert.ok(html.includes('type="password"'));
     assert.ok(html.includes('action="/status/login"'));
-    assert.ok(!html.includes("value="));
+    // パスワード欄に値を入れて返さない（戻り先の hidden は除く）。
+    assert.doesNotMatch(html, /type="password"[^>]*value=/);
   });
 
   it("Googleログインが有効なら、パスワード欄を出さない", () => {
     // 残すと「許可したメールアドレスの人しか開けない」制限がパスワード1本で迂回できる。
     const html = renderLoginPage({ google: true });
-    assert.ok(html.includes('href="/status/auth/start"'));
+    assert.ok(html.includes('href="/status/auth/start?next='));
     assert.ok(html.includes("Googleでログイン"));
     assert.ok(!html.includes('type="password"'));
     assert.ok(!html.includes('action="/status/login"'));
+  });
+
+  it("開こうとした画面を戻り先として持ち回る", () => {
+    // 指定しないと、共通知識ページを直接開いた人がログイン後に動作状況へ落ちて戻ってこない。
+    assert.ok(renderLoginPage({ google: false, next: "/knowledge" }).includes('name="next" value="/knowledge"'));
+    assert.ok(renderLoginPage({ google: true, next: "/knowledge" }).includes("next=%2Fknowledge"));
+    assert.ok(renderLoginPage({ google: false, next: "/knowledge" }).includes("共通知識を見る"));
+  });
+
+  it("知らない戻り先は既定へ落とす", () => {
+    // 外部URLをそのまま Location に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
+    const html = renderLoginPage({ google: false, next: "https://example.com/" });
+    assert.ok(html.includes('name="next" value="/status"'));
+    assert.ok(!html.includes("example.com"));
+    assert.equal(safeLanding("//example.com"), "/status");
+    assert.equal(safeLanding(null), "/status");
+    assert.equal(safeLanding("/knowledge"), "/knowledge");
   });
 
   it("失敗の理由を出す", () => {

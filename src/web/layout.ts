@@ -3,7 +3,7 @@ import { headTags } from "./assets.ts";
 /**
  * 人間向けHTMLページの共通レイアウト。
  *
- * AIDEがブラウザへ出す画面は3つある（機能一覧・動作状況・パスワードの入力）。
+ * AIDEがブラウザへ出す画面は4つある（機能一覧・動作状況・共通知識・パスワードの入力）。
  * それぞれが自前のCSSを持っていたため、同じ「カード」「見出し」でも余白も色も違っていた。
  * **配色・書体・部品はここだけが持ち**、各ページは中身の組み立てに専念する。
  *
@@ -232,6 +232,17 @@ const NAV: { key: NavKey; href: string; label: string }[] = [
  */
 export function siteNav(current: NavKey): NavItem[] {
   return NAV.map((item) => ({ href: item.href, label: item.label, current: item.key === current }));
+}
+
+/**
+ * ログイン後の戻り先として許す画面か。
+ *
+ * **ここに無いものは受け付けない。** 戻り先は署名付きCookieやフォームで運ぶが、署名が保証
+ * するのは「AIDEが書いた値であること」だけで、行き先が妥当かは別に確かめる必要がある
+ * （外部URLを入れられると、ログイン直後に別サイトへ送り出す踏み台になる）。
+ */
+export function isSiteNavPath(path: string | null | undefined): boolean {
+  return NAV.some((item) => item.href === path);
 }
 
 export interface PageOptions {

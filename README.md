@@ -390,6 +390,22 @@ rm data/auth/status-session-key   # 画面のログインを全部失効させ�
 知見メモを審査して共有知識へのPull Requestを作り、結果を出典Issueへコメントする。
 **AIDEはその材料と結果を読んで並べるだけ**で、README冒頭の「高コストなAI推論はやらない」に従う。
 
+### ログインの関門は動作状況ページと共有する
+
+判定は `currentSession()`（`src/web/status.ts`）1か所だけが持ち、この画面へ書き写さない。
+片方だけ条件が古くなると（例: 許可メールを開くたびに再照合する、という扱いが欠ける）、
+そこが素通しの入口になる。
+
+**開こうとした画面は戻り先として持ち回る。** ログインの受け口は `/status/login` と
+`/status/auth/callback` の1組しかないため、指定が無いと `/knowledge` を直接開いた人が
+ログイン後に動作状況へ落ちて戻ってこない。パスワードならフォームの hidden、Googleなら
+往復用の署名付きCookie（`src/web/session.ts` の `Handshake.next`）で運ぶ。
+
+**戻り先は受け取り側で必ず検証する**（`safeLanding()`）。署名やフォームが保証するのは
+「AIDEが出した画面から来たこと」までで、値そのものは利用者の手を通る。ナビに載っている
+画面（`src/web/layout.ts` の `NAV`）以外は既定（`/status`）へ落とす。外部URLをそのまま
+`Location` に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
+
 ### 判定の記録が空でも「まだ運用が始まっていない」とは限らない
 
 このページを入れた時点で、判定の記録は**フリート全体で1件も存在しなかった**。
@@ -881,7 +897,7 @@ JWT署名→インストールトークン交換の実装が重い）。**取得
 
 | トークン | 権限 | 使うところ |
 |---|---|---|
-| `AIDE_GITHUB_TOKEN` | Metadata / Contents / Issues / Pull requests / Actions の **read のみ** | `aide_dev_status`・共通知識ページ（`/knowledge`） |
+| `AIDE_GITHUB_TOKEN` | Metadata / Contents / Issues / Pull requests / Actions の **read のみ**。**対象リポジトリに `guchi-apps/docs` を含める** | `aide_dev_status`・共通知識ページ（`/knowledge`） |
 | `AIDE_GITHUB_ISSUE_TOKEN` | Metadata: read と **Issues: read and write** のみ | `aide_create_issue` |
 
 1本にまとめて取得側にも書き込み権限を持たせると、26リポジトリを横断する取得の経路が
@@ -891,6 +907,11 @@ JWT署名→インストールトークン交換の実装が重い）。**取得
 
 キャッシュは挟まず**都度叩く**。1リクエストで済み、レート制限にも余裕があり、
 「いまどうなっているか」という問いに対してキャッシュの古さは害にしかならない。
+
+`guchi-apps/docs` は private なので、**fine-grained PAT の対象リポジトリに入っていないと
+`/knowledge` だけが失敗する**（`aide_dev_status` は他のリポジトリで動いてしまうため気づけない）。
+権限不足と存在しないリポジトリはGitHubでは同じ `NOT_FOUND` になるので、画面では
+「未設定」（トークンが無い）と「取得できなかった」（トークンはあるが読めない）を別の表示にしている。
 
 **共通知識ページだけは例外で、5分だけ持ち回る**（[共通知識ページ](#共通知識ページ)）。
 あちらは1回の表示にGraphQLを2本・8〜10秒使い、材料も日単位でしか変わらないため、

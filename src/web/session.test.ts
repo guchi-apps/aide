@@ -98,13 +98,26 @@ describe("動作状況ページのログイン状態", () => {
 describe("Googleログインの往復", () => {
   it("発行した state と verifier を取り出せる", () => {
     const value = issueHandshake(KEY, { state: "abc", verifier: "xyz" });
-    assert.deepEqual(readHandshake(value, KEY), { state: "abc", verifier: "xyz" });
+    assert.deepEqual(readHandshake(value, KEY), { state: "abc", verifier: "xyz", next: "" });
+  });
+
+  it("ログイン後の戻り先を持ち回れる", () => {
+    // `/` を含むパスをそのまま並べると区切りと混ざるため、base64url にしてから載せている。
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/knowledge" });
+    assert.equal(readHandshake(value, KEY)?.next, "/knowledge");
   });
 
   it("書き換えた値は通らない", () => {
     const value = issueHandshake(KEY, { state: "abc", verifier: "xyz" });
-    const [expiresAt, , verifier, signature] = value.split(".");
-    assert.equal(readHandshake([expiresAt, "zzz", verifier, signature].join("."), KEY), null);
+    const [expiresAt, , verifier, next, signature] = value.split(".");
+    assert.equal(readHandshake([expiresAt, "zzz", verifier, next, signature].join("."), KEY), null);
+  });
+
+  it("戻り先だけを書き換えた値も通らない", () => {
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/knowledge" });
+    const [expiresAt, state, verifier, , signature] = value.split(".");
+    const forged = Buffer.from("https://example.com", "utf8").toString("base64url");
+    assert.equal(readHandshake([expiresAt, state, verifier, forged, signature].join("."), KEY), null);
   });
 
   it("10分で切れる", () => {

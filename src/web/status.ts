@@ -33,7 +33,17 @@ import {
 } from "../mcp/access-log.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { formatJst } from "../worker/notify.ts";
-import { card, defList, escapeHtml, pill, renderPage, siteNav, table, type Tone } from "./layout.ts";
+import {
+  card,
+  defList,
+  escapeHtml,
+  isSiteNavPath,
+  pill,
+  renderPage,
+  siteNav,
+  table,
+  type Tone,
+} from "./layout.ts";
 import {
   clearHandshakeCookie,
   handshakeCookie,
@@ -466,21 +476,32 @@ ${connectorsCard(health)}
  * **Googleログインが有効なときにパスワード欄を残さない。** 残すと、許可した
  * メールアドレスに絞った意味がパスワード1本で消える。
  */
-export function renderLoginPage(options: { google: boolean; error?: string }): string {
+export function renderLoginPage(options: {
+  google: boolean;
+  error?: string;
+  /**
+   * ログイン後に戻る画面。**開こうとした画面をここへ入れる。**
+   * 入れないと、共通知識ページを直接開いた人がログイン後に動作状況へ落ちて戻ってこない。
+   */
+  next?: string;
+}): string {
   const error = options.error ? `<p class="err">${escapeHtml(options.error)}</p>` : "";
+  const next = safeLanding(options.next);
+  const heading = next === "/knowledge" ? "共通知識を見る" : "動作状況を見る";
 
   const body = options.google
     ? `<div class="box">
 <span class="brand">AIDE</span>
-<h1>動作状況を見る</h1>
+<h1>${escapeHtml(heading)}</h1>
 <p>許可されたGoogleアカウントだけが開けます。</p>
 ${error}
-<a class="signin" href="/status/auth/start">Googleでログイン</a>
+<a class="signin" href="/status/auth/start?next=${encodeURIComponent(next)}">Googleでログイン</a>
 </div>`
     : `<form class="box" method="post" action="/status/login">
 <span class="brand">AIDE</span>
-<h1>動作状況を見る</h1>
+<h1>${escapeHtml(heading)}</h1>
 <p>Claudeアプリの接続に使うパスワードと同じです。</p>
+<input type="hidden" name="next" value="${escapeHtml(next)}">
 <label>パスワード<input type="password" name="password" autofocus required autocomplete="current-password"></label>
 ${error}
 <button type="submit">開く</button>
@@ -501,6 +522,20 @@ function html(
   res
     .writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...headers })
     .end(body);
+}
+
+/** ログイン後の既定の戻り先。 */
+const DEFAULT_LANDING = "/status";
+
+/**
+ * ログイン後に戻る画面。**既知の画面でなければ既定へ落とす。**
+ *
+ * 戻り先はフォームの hidden とCookieで運ぶ。署名やフォームが保証するのは「AIDEが出した
+ * 画面から来たこと」までで、値そのものは利用者の手を通る。外部URLをそのまま `Location`
+ * に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
+ */
+export function safeLanding(value: string | null | undefined): string {
+  return isSiteNavPath(value) ? value! : DEFAULT_LANDING;
 }
 
 /** 設定上そのエンドポイントが存在しない場合。サーバーの既定の404と同じ見た目にする。 */
@@ -537,6 +572,7 @@ export async function handleStatusPage(
 export async function handleStatusAuthStart(
   req: IncomingMessage,
   res: ServerResponse,
+  url: URL,
   options: StatusOptions,
 ): Promise<void> {
   const config = options.supabase;
@@ -547,6 +583,8 @@ export async function handleStatusAuthStart(
 
   const { verifier, challenge } = createPkce();
   const state = randomBytes(16).toString("base64url");
+  // 開こうとした画面を往復のあいだ持ち回る。値の検証は戻ってきたときにも行う。
+  const next = safeLanding(url.searchParams.get("next"));
 
   // 戻り先に state を載せる。Supabaseは redirect_to のクエリをそのまま残して戻す。
   // 組み立ては callbackUrl() に寄せてある（検証と同じ形にするため。src/auth/redirect-check.ts）。
@@ -555,7 +593,7 @@ export async function handleStatusAuthStart(
   res
     .writeHead(302, {
       Location: authorizeUrl(config, { redirectUri: redirect, challenge }),
-      "Set-Cookie": handshakeCookie(await loadSessionKey(), { state, verifier }, isSecure(req)),
+      "Set-Cookie": handshakeCookie(await loadSessionKey(), { state, verifier, next }, isSecure(req)),
       "Cache-Control": "no-store",
     })
     .end();
@@ -584,9 +622,12 @@ export async function handleStatusAuthCallback(
   const handshake = readHandshake(readCookie(req, HANDSHAKE_COOKIE), key);
   const cookies = [clearHandshakeCookie(secure)];
 
+  // 戻り先はCookieが読めたときだけ分かる。読めなければ既定へ落ちる。
+  const next = safeLanding(handshake?.next);
+
   const deny = (reason: string, message: string): void => {
     console.warn(`[status] Googleログイン失敗: ${reason}`);
-    html(res, 401, renderLoginPage({ google: true, error: message }), { "Set-Cookie": cookies });
+    html(res, 401, renderLoginPage({ google: true, error: message, next }), { "Set-Cookie": cookies });
   };
 
   const failed = url.searchParams.get("error_description") ?? url.searchParams.get("error");
@@ -616,7 +657,7 @@ export async function handleStatusAuthCallback(
 
   if (!isAllowedEmail(user.email, config)) {
     console.warn(`[status] 許可されていないアカウントのログイン試行: ${user.email}`);
-    html(res, 403, renderLoginPage({ google: true, error: "このアカウントでは開けません。" }), {
+    html(res, 403, renderLoginPage({ google: true, error: "このアカウントでは開けません。", next }), {
       "Set-Cookie": cookies,
     });
     return;
@@ -624,7 +665,7 @@ export async function handleStatusAuthCallback(
 
   console.log(`[status] Googleログイン成功: ${user.email}`);
   cookies.push(loginCookie(key, { secure, email: user.email }));
-  res.writeHead(303, { Location: "/status", "Cache-Control": "no-store", "Set-Cookie": cookies }).end();
+  res.writeHead(303, { Location: next, "Cache-Control": "no-store", "Set-Cookie": cookies }).end();
 }
 
 // ---- パスワードでのログイン（Google未設定の環境）----
@@ -641,7 +682,7 @@ export async function handleStatusLogin(
     return;
   }
   if (!config.enabled) {
-    res.writeHead(303, { Location: "/status" }).end();
+    res.writeHead(303, { Location: DEFAULT_LANDING }).end();
     return;
   }
 
@@ -663,25 +704,26 @@ export async function handleStatusLogin(
   }
 
   const form = await readForm(req);
+  const next = safeLanding(form.get("next"));
   if (!verifyPassword(form.get("password") ?? "", config.password!)) {
     recordFailure(key);
     console.warn(`[status] ログイン失敗: from=${key}`);
     await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
-    html(res, 401, renderLoginPage({ google: false, error: "パスワードが違います。" }));
+    html(res, 401, renderLoginPage({ google: false, error: "パスワードが違います。", next }));
     return;
   }
   recordSuccess(key);
 
   res
     .writeHead(303, {
-      Location: "/status",
+      Location: next,
       "Set-Cookie": loginCookie(await loadSessionKey(), { secure: isSecure(req), email: null }),
     })
     .end();
 }
 
 export function handleStatusLogout(req: IncomingMessage, res: ServerResponse): void {
-  res.writeHead(303, { Location: "/status", "Set-Cookie": logoutCookie(isSecure(req)) }).end();
+  res.writeHead(303, { Location: DEFAULT_LANDING, "Set-Cookie": logoutCookie(isSecure(req)) }).end();
 }
 
 export interface ProbeResult {

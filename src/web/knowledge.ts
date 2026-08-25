@@ -349,9 +349,10 @@ export async function handleKnowledgePage(
   const session = await currentSession(req, options);
   if (!session) {
     // 動作状況ページと同じログイン画面を出す。**入口を別に作らない。**
+    // 戻り先にこの画面を指定する（指定しないと、ログイン後に動作状況へ落ちて戻ってこない）。
     res
       .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(renderLoginPage({ google: options.supabase !== null }));
+      .end(renderLoginPage({ google: options.supabase !== null, next: "/knowledge" }));
     return;
   }
 

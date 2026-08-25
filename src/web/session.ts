@@ -170,11 +170,21 @@ const HANDSHAKE_TTL_MS = 10 * 60 * 1000;
 export interface Handshake {
   state: string;
   verifier: string;
+  /**
+   * ログイン後に戻る画面のパス。空なら既定（`/status`）へ戻る。
+   *
+   * **往復のあいだサーバー側に何も置かない方針は変えない**ので、戻り先も署名付きCookieへ
+   * 載せる。行き先の検証は受け取り側（`src/web/status.ts`）が行う。署名が通っても、
+   * 既知の画面でなければ既定へ落とす（署名は「AIDEが書いた」ことしか保証しない）。
+   */
+  next?: string;
 }
 
 export function issueHandshake(key: Buffer, handshake: Handshake, now: Date = new Date()): string {
   const expiresAt = now.getTime() + HANDSHAKE_TTL_MS;
-  const parts = [String(expiresAt), handshake.state, handshake.verifier];
+  // パスは `.`（区切り）や `/` を含みうるので、メールアドレスと同じく base64url にしてから並べる。
+  const next = Buffer.from(handshake.next ?? "", "utf8").toString("base64url");
+  const parts = [String(expiresAt), handshake.state, handshake.verifier, next];
   return `${parts.join(".")}.${sign(HANDSHAKE_PURPOSE, parts, key)}`;
 }
 
@@ -183,9 +193,13 @@ export function readHandshake(
   key: Buffer,
   now: Date = new Date(),
 ): Handshake | null {
-  const body = readSigned(value, key, HANDSHAKE_PURPOSE, 2, now);
+  const body = readSigned(value, key, HANDSHAKE_PURPOSE, 3, now);
   if (!body) return null;
-  return { state: body[0]!, verifier: body[1]! };
+  return {
+    state: body[0]!,
+    verifier: body[1]!,
+    next: Buffer.from(body[2]!, "base64url").toString("utf8"),
+  };
 }
 
 /** 戻ってきた `state` が、こちらが始めたログインのものか。 */
