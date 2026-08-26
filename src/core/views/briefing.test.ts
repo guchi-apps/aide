@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { assembleBriefing, summarizeWeatherSection } from "./briefing.ts";
+import { assembleBriefing, summarizeScheduleSection, summarizeWeatherSection } from "./briefing.ts";
 import type { BriefingSection, BriefingWeather, PendingSection } from "./briefing.ts";
 import type { CachedValue } from "../cache/store.ts";
 import type { WeatherDay, WeatherForecast } from "../connectors/weather/types.ts";
+import type { ScheduleSummary } from "./schedule.ts";
 
 /**
  * 畳み込みは純粋関数（`summarizeWeatherSection` / `assembleBriefing`）に寄せてあるので、
@@ -98,6 +99,93 @@ describe("summarizeWeatherSection", () => {
 });
 
 const NOW = new Date("2026-08-19T00:00:00.000Z");
+
+function scheduleSummary(overrides: Partial<ScheduleSummary> = {}): ScheduleSummary {
+  return {
+    checkedAt: NOW.toISOString(),
+    configured: true,
+    complete: true,
+    timezone: "Asia/Tokyo",
+    generatedAt: "2026-08-18T23:58:00.000Z",
+    range: { from: TODAY, to: TODAY },
+    freeWindow: { from: "08:00", to: "22:00" },
+    sources: { googleConnected: true, notionReady: true, reminderReady: true },
+    days: [
+      {
+        date: TODAY,
+        weekday: "水",
+        events: [],
+        travels: [],
+        tasks: [],
+        reminders: [],
+        freeSlots: [{ from: "08:00", to: "22:00", minutes: 840 }],
+        busyMinutes: 0,
+        allDayCount: 0,
+      },
+    ],
+    overdueTasks: [],
+    unavailable: [],
+    note: "",
+    ...overrides,
+  };
+}
+
+describe("summarizeScheduleSection", () => {
+  it("対象日ぶんを ok として返す", () => {
+    const section = summarizeScheduleSection(scheduleSummary(), TODAY, NOW);
+
+    assert.equal(section.state, "ok");
+    assert.equal(section.reason, null);
+    assert.equal(section.data?.date, TODAY);
+    assert.equal(section.fetchedAt, "2026-08-18T23:58:00.000Z");
+    assert.equal(section.ageMinutes, 2);
+    // 都度取得なので「取得が止まっている」状態が起きない。
+    assert.equal(section.stale, false);
+  });
+
+  it("未設定は not_configured にする（unavailable と区別する）", () => {
+    const section = summarizeScheduleSection(
+      scheduleSummary({
+        configured: false,
+        complete: false,
+        generatedAt: null,
+        days: [],
+        unavailable: [{ source: "dayspan", reason: "接続が設定されていない" }],
+      }),
+      TODAY,
+      NOW,
+    );
+
+    assert.equal(section.state, "not_configured");
+    assert.equal(section.data, null);
+    assert.match(section.reason ?? "", /設定されていない/);
+  });
+
+  it("対象日が含まれていなければ unavailable にする", () => {
+    const section = summarizeScheduleSection(scheduleSummary(), TOMORROW, NOW);
+
+    assert.equal(section.state, "unavailable");
+    assert.equal(section.data, null);
+    assert.match(section.reason ?? "", new RegExp(TOMORROW));
+  });
+
+  it("部分的な失敗でも取れたぶんは返す", () => {
+    const section = summarizeScheduleSection(
+      scheduleSummary({
+        complete: false,
+        unavailable: [{ source: "notion", reason: "取得できませんでした。" }],
+      }),
+      TODAY,
+      NOW,
+    );
+
+    // 中身はあるが ok にはしない。天気だけの答えへ落とさないために data は残す。
+    assert.equal(section.state, "unavailable");
+    assert.equal(section.data?.date, TODAY);
+    assert.match(section.reason ?? "", /取得できませんでした/);
+  });
+});
+
 
 function pending(reason: string): PendingSection {
   return { state: "not_connected", fetchedAt: null, ageMinutes: null, stale: false, reason, data: null };

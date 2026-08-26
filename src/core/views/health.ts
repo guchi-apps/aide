@@ -8,6 +8,7 @@ import { jobRecordKey, type JobRecord } from "../../worker/record.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 import { readCache, type CachedValue } from "../cache/store.ts";
 import { REPO_ROOT } from "../paths.ts";
+import { readDaySpanConfig } from "../connectors/dayspan/index.ts";
 import { readGitHubConfig, readGitHubWriteConfig } from "../connectors/github/index.ts";
 import { readMyRoomConfig } from "../connectors/myroom/index.ts";
 import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
@@ -274,6 +275,14 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       configured: readMyRoomConfig() !== null,
       probeable: true,
       note: "部屋の状態（室温・湿度・CO2・エアコン）の取得元（aide_room_status）。",
+    },
+    {
+      key: "dayspan",
+      label: "DaySpan",
+      side: "server",
+      configured: readDaySpanConfig() !== null,
+      probeable: true,
+      note: "予定・タスク・日付リマインド・移動の取得元（aide_schedule と aide_daily_briefing の予定）。",
     },
     {
       key: "subscription-lists",
