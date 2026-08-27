@@ -1,5 +1,6 @@
 import { scrapeZaimSnapshot } from "../../core/connectors/zaim/index.ts";
 import { findStaleZaimAccounts } from "../../core/connectors/zaim/parse.ts";
+import type { ZaimOnlineAccount } from "../../core/connectors/zaim/types.ts";
 import { notifyStaleAccounts } from "../notify.ts";
 import { publish } from "../sink.ts";
 import type { JobName } from "./catalog.ts";
@@ -39,6 +40,37 @@ export function isFinalSyncOfDay(now: Date): boolean {
 }
 
 /**
+ * 更新漏れを判定するかどうかと、そのときの記録用の一文を決める。
+ *
+ * `stale` が `null` なら**判定していない**——通知へ渡してはいけない。
+ * 「警告が出ていない」と「判定していない」は別で、混ぜると
+ * `notifyStaleAccounts` が未解決の記録を消して「復旧しました」を誤って送る。
+ *
+ * 判定しないのは次の2つ。
+ *
+ * 1. **連携口座を1件も読めなかったとき。** 巡回は連携口座一覧の取得に失敗しても残高・
+ *    保有銘柄を返すため、ここは空配列になりうる（`scripts/scrape.mjs` が例外を握って
+ *    `onlineAccounts = []` のまま返す）。これを「更新漏れ0件」と読むと誤った復旧通知になる
+ * 2. **その日の最後の巡回でないとき**（`isFinalSyncOfDay`）
+ */
+export function decideStaleAccountCheck(
+  accounts: readonly ZaimOnlineAccount[],
+  now: Date,
+): { stale: ZaimOnlineAccount[] | null; note: string } {
+  if (accounts.length === 0) {
+    return { stale: null, note: "（連携口座の最終更新を読めなかったため、更新漏れは判定していない）" };
+  }
+  if (!isFinalSyncOfDay(now)) {
+    return { stale: null, note: "（更新漏れの判定はその日の最後の巡回で行う）" };
+  }
+
+  // 更新ボタンを押しても進まなかった口座だけでなく、ゆうちょ銀行のように何ヶ月も前で
+  // 止まっている口座も含む。
+  const stale = findStaleZaimAccounts(accounts, now);
+  return { stale, note: stale.length > 0 ? `（当日になっていない口座 ${stale.length} 件）` : "" };
+}
+
+/**
  * Zaimを巡回してキャッシュを更新する。
  *
  * ヘッドレスChromiumを起動し証券詳細ページを巡回するため十数秒かかる。
@@ -56,17 +88,10 @@ export async function runZaimSync(): Promise<string> {
     `残高 ${snapshot.balances.length} 件 / 保有銘柄 ${snapshot.holdings.length} 件を取得し、${destination}`,
   ];
 
-  const now = new Date();
-  if (isFinalSyncOfDay(now)) {
-    // 「当日（JST）に更新されていない口座」を一部失敗とみなす。更新ボタンを押しても
-    // 進まなかった口座だけでなく、ゆうちょ銀行のように何ヶ月も前で止まっている口座も含む。
-    const stale = findStaleZaimAccounts(snapshot.onlineAccounts, now);
-    await notifyStaleAccounts(JOB_NAME, stale);
-    if (stale.length > 0) parts.push(`（当日になっていない口座 ${stale.length} 件）`);
-  } else {
-    // 判定しなかったことを記録に残す。「警告が出ていない」と「判定していない」は別。
-    parts.push("（更新漏れの判定はその日の最後の巡回で行う）");
-  }
+  const { stale, note } = decideStaleAccountCheck(snapshot.onlineAccounts, new Date());
+  // stale が null なら判定していない。通知へ渡すと誤った復旧通知になる。
+  if (stale) await notifyStaleAccounts(JOB_NAME, stale);
+  if (note) parts.push(note);
 
   return parts.join("");
 }
