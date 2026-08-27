@@ -39,7 +39,7 @@
 
 `@claude` コメントを起点に、計画提示〜実装〜develop向けPR作成までを GitHub Actions 上で無人実行する。
 ワークフローの実体は `guchi-apps/issue-deck` にあり、このリポジトリの `.github/workflows/` には
-`uses:` で参照する薄い caller だけを置いている（`@workflows/v23`）。
+`uses:` で参照する薄い caller だけを置いている（`@workflows/v27`）。
 
 develop向けPRが `develop` とコンフリクトした場合は、`claude-conflict-resolve.yml`（caller）が
 無人でClaude Codeによる解消を試みる。人が `@claude コンフリクトを解消して` と依頼する必要はない。
@@ -52,6 +52,18 @@ develop向けPRが `develop` とコンフリクトした場合は、`claude-conf
 - 進捗管理の設計: [progress-status-architecture.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/progress-status-architecture.md)
 - 無人実行の挙動: [multi-agent/dispatch.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/multi-agent/dispatch.md)
 - 自動修復の挙動: [multi-agent/auto-repair.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/multi-agent/auto-repair.md)
+
+### リリース・デプロイ通知
+
+`deploy.yml` の `notify`（デプロイ）と `notify-release`（リリース）が
+`.github/scripts/signaly-notify.sh` を呼ぶ。宛先は `NOTIFY_KIND` で分かれ、`リリース` のときだけ
+`SIGNALY_RELEASE_WEBHOOK_URL` へ送る。未登録なら従来のCI・デプロイ用チャンネルへフォールバック
+するため、secretの登録順は気にしなくてよい（guchi-apps/issue-deck#2391）。
+
+**`NOTIFY_KIND: リリース` の行を消さない。** issue-deck の共有ファイル配布
+（`propagate-shared-files.sh`）はこの行をアンカーにして通知まわりの追記を各リポジトリへ配るため、
+行が無いリポジトリには以後の更新が黙って届かない。実際に aide だけリリース通知のジョブが無く、
+リリースがどのチャンネルにも通知されない状態が続いていた（#184）。
 
 ### ブランチ
 
