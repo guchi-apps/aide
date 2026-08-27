@@ -9,10 +9,11 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 
-# スクリプト側の待ちは最大15分で、呼び出し側（refresh.ts）は20分で打ち切る。
-# ページ読み込みぶんの余裕を足して25分を上限にする。20分後に走る aide-zaim-sync とは
-# 重なりうるが、どちらもZaimを1タブ開くだけなので支障はない。
-TimeoutStartSec=25min
+# スクリプト側の待ちは最大45分で、呼び出し側（refresh.ts）は50分で打ち切る。
+# ページ読み込みぶんの余裕を足して55分を上限にする。反映が約35分かかる口座を待ち切る
+# ための時間で、短くすると待っている最中に systemd から殺されて結果を受け取れない（#178）。
+# 65分後に走る aide-zaim-sync とは重なりうるが、どちらもZaimを1タブ開くだけなので支障はない。
+TimeoutStartSec=55min
 
 # node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
 # 素の ExecStart=node ... で書くと手元では動くのに再起動後に動かない。

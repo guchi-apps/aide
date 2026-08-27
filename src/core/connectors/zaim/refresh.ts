@@ -7,18 +7,18 @@ import type { ZaimRawRefreshResult, ZaimRefreshResult } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 
-// スクリプト側の最大待ち（既定15分）に、押下前後のページ読み込みぶんの余裕を足す。
+// スクリプト側の最大待ち（既定45分）に、押下前後のページ読み込みぶんの余裕を足す。
 // ここが短いと、待っている最中に execFile 側から殺されて結果を受け取れない。
-const REFRESH_TIMEOUT_MS = 20 * 60_000;
+const REFRESH_TIMEOUT_MS = 50 * 60_000;
 
 const REFRESH_SCRIPT = fileURLToPath(new URL("./scripts/refresh.mjs", import.meta.url));
 
 /**
  * Zaimの連携口座を一括更新する（「データを更新する」を押し、完了を待つ）。
  *
- * **押してから反映まで5〜15分かかるため、数十秒で終わる巡回よりさらに重い。**
+ * **押してから反映まで最大45分待つため、数十秒で終わる巡回よりさらに重い。**
  * MCPやAPIの同期リクエストから呼んではいけない。worker の `zaim-refresh` から
- * 巡回（`zaim-sync`）の前に定期実行する。
+ * 巡回（`zaim-sync`）の65分前に定期実行する。
  */
 export async function refreshZaimOnlineAccounts(): Promise<ZaimRefreshResult> {
   try {
