@@ -1,4 +1,4 @@
-import { ZAIM_SESSION_EXPIRED, isZaimSessionExpired } from "./errors.ts";
+import { isZaimAutoReloginFailed, isZaimSessionExpired, zaimSessionExpiredMessage } from "./errors.ts";
 import { buildZaimRefreshResult } from "./parse.ts";
 import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
 import type { ZaimRawRefreshResult, ZaimRefreshResult } from "./types.ts";
@@ -44,12 +44,9 @@ export async function refreshZaimOnlineAccounts(deps?: ZaimScriptDeps): Promise<
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     if (isZaimSessionExpired(message)) {
-      // 巡回（scrape.ts）と同じ言い換え。マーカーを残さないと、通知側が
-      // 「手動ログインをやり直すまで直らない失敗」だと判別できなくなる。
-      throw new Error(
-        `Zaimのログインセッションが失効しています（${ZAIM_SESSION_EXPIRED}）。` +
-          "scripts/login.mjs を実行し直してください。",
-      );
+      // マーカーを残したまま日本語へ言い換える。落とすと、この失敗がセッション失効であることも、
+      // 自動再ログインで直らなかったのかも、通知側（src/worker/notify.ts）が判別できなくなる。
+      throw new Error(zaimSessionExpiredMessage(isZaimAutoReloginFailed(message)));
     }
     throw cause;
   }
