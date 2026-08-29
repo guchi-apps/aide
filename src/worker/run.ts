@@ -4,7 +4,12 @@ import { runWeatherSync } from "./jobs/weather-sync.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
 import { runZaimRefresh } from "./jobs/zaim-refresh.ts";
 import { runZaimSync } from "./jobs/zaim-sync.ts";
-import { notifyJobFailure, notifyJobRecovered, summarizeFailure } from "./notify.ts";
+import {
+  notifyJobFailure,
+  notifyJobRecovered,
+  notifyZaimSessionRecovered,
+  summarizeFailure,
+} from "./notify.ts";
 import { recordJobRun } from "./record.ts";
 
 /**
@@ -26,6 +31,15 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   "claude-sessions-sync": runClaudeSessionsSync,
 };
 
+/**
+ * Zaimのログインセッションを使うジョブ。
+ *
+ * **成功はセッションが有効であることの証拠**なので、他のZaimジョブに残っている失効の失敗は
+ * その時点で解消している。ジョブ単位の復旧通知（`notifyJobRecovered`）では、12時間ごとの
+ * `zaim-refresh` の失敗が30分ごとの `zaim-keep-alive` に直された場合を伝えられない（#191）。
+ */
+const ZAIM_JOBS: readonly JobName[] = ["zaim-refresh", "zaim-sync", "zaim-keep-alive"];
+
 const name = process.argv[2];
 if (!name || !(name in RUNNERS)) {
   console.error(`使い方: node src/worker/run.ts <${JOB_CATALOG.map((job) => job.name).join(" | ")}>`);
@@ -41,6 +55,8 @@ try {
   console.log(`[${name}] ${message}（${elapsed()}秒）`);
   // 直前まで失敗していた場合だけ復旧を通知する。通常の成功では何も送らない。
   await notifyJobRecovered(name);
+  // Zaimのジョブが成功したなら、他のZaimジョブの失効も直っている（#191）。
+  if (ZAIM_JOBS.includes(name as JobName)) await notifyZaimSessionRecovered(name);
   // 通知が流れて消えるのに対し、記録は残る。動作状況ページ（/status）はこちらを読む。
   await recordJobRun({ job: name, ok: true, startedAt, seconds: elapsed(), message });
 } catch (cause) {

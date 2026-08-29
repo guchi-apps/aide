@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { basename } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { ZAIM_SESSION_EXPIRED } from "./errors.ts";
+import { ZAIM_AUTO_RELOGIN_FAILED, ZAIM_SESSION_EXPIRED } from "./errors.ts";
 import { MAX_ATTEMPTS } from "./retry.ts";
 import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
 
@@ -86,6 +86,16 @@ describe("runZaimScript: セッション失効", () => {
     assert.deepEqual(deps.calls, ["keep-alive.mjs"]);
   });
 
+  it("自動再ログインを試していない失敗には、自動失敗のマーカーを付けない", async () => {
+    // #191: 付けると、資格情報が無いだけの環境の失敗まで「自動でも直らない」と通知される。
+    setCredentials(false);
+    const deps = stubDeps([new Error(EXPIRED)]);
+    await assert.rejects(
+      () => runZaimScript(TARGET, { timeout: 1 }, deps),
+      (cause: Error) => !cause.message.includes(ZAIM_AUTO_RELOGIN_FAILED),
+    );
+  });
+
   it("資格情報があれば自動再ログインを挟んでやり直す", async () => {
     setCredentials(true);
     const deps = stubDeps([new Error(EXPIRED), "logged-in", "ok"]);
@@ -99,18 +109,23 @@ describe("runZaimScript: セッション失効", () => {
     const deps = stubDeps([new Error(EXPIRED), "logged-in", new Error(EXPIRED)]);
     await assert.rejects(
       () => runZaimScript(TARGET, { timeout: 1 }, deps),
-      new RegExp(ZAIM_SESSION_EXPIRED),
+      // 自動では直らなかったので、両方のマーカーが載る。
+      (cause: Error) =>
+        cause.message.includes(ZAIM_SESSION_EXPIRED) &&
+        cause.message.includes(ZAIM_AUTO_RELOGIN_FAILED),
     );
     assert.deepEqual(deps.calls, ["keep-alive.mjs", "auto-login.mjs", "keep-alive.mjs"]);
   });
 
-  it("自動再ログイン自体が失敗したら、元の失効エラーを投げる", async () => {
+  it("自動再ログイン自体が失敗したら、元の失効エラーにマーカーを足して投げる", async () => {
     // 通知の分類は「セッション失効」のままであるべき。ログイン失敗に差し替えない。
+    // そのうえで #191 のため「自動でも直らなかった」ことを伝えられるようにする。
     setCredentials(true);
     const deps = stubDeps([new Error(EXPIRED), new Error("追加認証が要求されました")]);
     await assert.rejects(
       () => runZaimScript(TARGET, { timeout: 1 }, deps),
-      new RegExp(ZAIM_SESSION_EXPIRED),
+      (cause: Error) =>
+        cause.message.includes(EXPIRED) && cause.message.includes(ZAIM_AUTO_RELOGIN_FAILED),
     );
     assert.deepEqual(deps.calls, ["keep-alive.mjs", "auto-login.mjs"]);
   });

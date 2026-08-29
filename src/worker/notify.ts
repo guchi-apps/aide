@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
-import { isZaimSessionExpired } from "../core/connectors/zaim/errors.ts";
+import { isZaimAutoReloginFailed, isZaimSessionExpired } from "../core/connectors/zaim/errors.ts";
+import { readZaimCredentials } from "../core/connectors/zaim/retry.ts";
 import type { ZaimOnlineAccount } from "../core/connectors/zaim/types.ts";
 import { DATA_DIR } from "../core/paths.ts";
 
@@ -20,6 +21,11 @@ import { DATA_DIR } from "../core/paths.ts";
  *    「復旧」を1回送り、静かになった理由が復旧なのか抑制なのかを分かるようにする。
  * 3. **通知の失敗でジョブを二重に失敗させない。** ここでの例外はすべて握りつぶし、
  *    ログに一行残すだけにする。Webhook URL は `channel_id` を含む認証情報なのでログに出さない。
+ * 4. **通知に書く対応は、受け取った時点の実態と一致させる。** セッション失効はかつて手動
+ *    ログインでしか直らなかったが、いまは自動再ログイン（#63）があり、多くは30分ごとの
+ *    `zaim-keep-alive` が勝手に直す。それでも「手動でログインし直すまで失敗し続けます」と
+ *    送っていたため、受け取った側が手動対応の要否を判断できなかった（#191）。
+ *    いまは失敗の中身から3通りに書き分け、他のジョブが直したときは横断で回復を伝える。
  */
 
 /** 同じ理由で失敗し続けている間、次の通知までに空ける時間。 */
@@ -33,6 +39,20 @@ const REASON_MAX_LENGTH = 500;
 
 /** 失敗理由が変わったかの判定に使う署名。セッション失効はURL等が混ざっても同一とみなす。 */
 const SESSION_EXPIRED_SIGNATURE = "ZAIM_SESSION_EXPIRED";
+
+/**
+ * セッション失効の行き先。**通知の文面と署名はこれで決まる。**
+ *
+ * - `auto-pending`: 資格情報が設定されており、自動再ログインでまだ直る見込みがある。
+ *   `zaim-refresh` / `zaim-sync` の失効はここに落ちるのが普通で、30分ごとの
+ *   `zaim-keep-alive` が直す（実際 2026-08-29 の失敗は4秒後の keep-alive で復旧している）。
+ * - `auto-failed`: 自動再ログインを試したうえで直らなかった（`ZAIM_AUTO_RELOGIN_FAILED`）。
+ * - `manual-only`: 資格情報が無く、自動再ログインを試す経路自体が無い。
+ *
+ * **`auto-pending` と他は署名を分ける。** 同じ署名にすると「自動で直る見込み」を送った直後に
+ * 自動再ログインが失敗しても、6時間の抑制で「手動が要る」が届かなくなる。
+ */
+export type SessionExpiryKind = "auto-pending" | "auto-failed" | "manual-only";
 
 // Signalyの色指定は10進整数（Discord形式）。docs/webhook.md 参照。
 const COLOR_FAILURE = 15548997; // #ed4245
@@ -75,10 +95,24 @@ interface SignalyPayload {
 export interface FailureSummary {
   /** 通知に載せる失敗理由（1行・切り詰め済み）。 */
   reason: string;
-  /** 手動ログインのやり直しが要る失敗か。 */
-  sessionExpired: boolean;
+  /** セッション失効ならその行き先。失効でなければ null。 */
+  sessionExpiry: SessionExpiryKind | null;
   /** 抑制判定に使う署名。 */
   signature: string;
+}
+
+/**
+ * この失効が自動再ログインで直る見込みがあるか。
+ *
+ * 資格情報の**値は読まない**（設定の有無だけを見る）。値は自動再ログインの子プロセスへ
+ * 環境変数として渡るもので、通知にもログにも出さない。
+ */
+function classifySessionExpiry(
+  raw: string,
+  env: Record<string, string | undefined>,
+): SessionExpiryKind {
+  if (isZaimAutoReloginFailed(raw)) return "auto-failed";
+  return readZaimCredentials(env) ? "auto-pending" : "manual-only";
 }
 
 /**
@@ -87,9 +121,12 @@ export interface FailureSummary {
  * `zaim-keep-alive` は `execFile` の失敗としてスクリプトのstderr全文がメッセージに載る。
  * そのまま送るとスタックトレースで通知が埋まるため、1行目だけを使う。
  */
-export function summarizeFailure(cause: unknown): FailureSummary {
+export function summarizeFailure(
+  cause: unknown,
+  env: Record<string, string | undefined> = process.env,
+): FailureSummary {
   const raw = cause instanceof Error ? cause.message : String(cause);
-  const sessionExpired = isZaimSessionExpired(raw);
+  const sessionExpiry = isZaimSessionExpired(raw) ? classifySessionExpiry(raw, env) : null;
 
   const lines = raw
     .split("\n")
@@ -104,7 +141,18 @@ export function summarizeFailure(cause: unknown): FailureSummary {
       : line
     : "（失敗理由を取得できませんでした）";
 
-  return { reason, sessionExpired, signature: sessionExpired ? SESSION_EXPIRED_SIGNATURE : reason };
+  return {
+    reason,
+    sessionExpiry,
+    // 失効は文面（URLや行番号が混ざる）ではなく行き先で束ねる。行き先が変われば署名も変わり、
+    // 「自動で直る見込み」から「手動が要る」へ悪化したときは抑制されずに届く。
+    signature: sessionExpiry ? `${SESSION_EXPIRED_SIGNATURE}:${sessionExpiry}` : reason,
+  };
+}
+
+/** 失効の記録か（ジョブ横断の回復通知が拾う対象）。 */
+function isSessionExpirySignature(signature: string): boolean {
+  return signature.startsWith(`${SESSION_EXPIRED_SIGNATURE}:`);
 }
 
 /**
@@ -150,6 +198,42 @@ function formatDuration(ms: number): string {
   return `${Math.floor(hours / 24)}日${hours % 24}時間`;
 }
 
+/** 手動ログインのやり直し方。文面を1か所に持つ。 */
+const MANUAL_LOGIN_ACTION =
+  "サブPCの `~/apps/aide` で `node src/core/connectors/zaim/scripts/login.mjs` を実行し、手動でログインし直す";
+
+/** 失効の行き先ごとの、タイトル・本文・対応欄。 */
+const SESSION_EXPIRY_TEXT: Record<
+  SessionExpiryKind,
+  { titleSuffix: string; description: string; action: string }
+> = {
+  "auto-pending": {
+    titleSuffix: "Zaimのセッションが失効（自動再ログイン待ち）",
+    description:
+      "Zaimのログインセッションが失効しています。**30分ごとの `zaim-keep-alive` が自動で" +
+      "再ログインを試みます。**直れば「Zaimのセッションが回復しました」が届くので、" +
+      "それまで手動の対応は要りません。",
+    action:
+      "まず待つ（次の `zaim-keep-alive` まで最大32分）。" +
+      `回復の通知が届かない、または再ログインの失敗が通知されたら、${MANUAL_LOGIN_ACTION}`,
+  },
+  "auto-failed": {
+    titleSuffix: "Zaimの再ログインが必要",
+    description:
+      "Zaimのログインセッションが失効しており、**自動再ログインも失敗しました。**" +
+      "手動でログインし直すまで、次回以降も失敗し続けます。",
+    action: MANUAL_LOGIN_ACTION,
+  },
+  "manual-only": {
+    titleSuffix: "Zaimの再ログインが必要",
+    description:
+      "Zaimのログインセッションが失効しています。**このホストには自動再ログインの資格情報" +
+      "（`ZAIM_EMAIL` / `ZAIM_PASSWORD`）が設定されていません。**" +
+      "手動でログインし直すまで、次回以降も失敗し続けます。",
+    action: MANUAL_LOGIN_ACTION,
+  },
+};
+
 export function buildFailurePayload(input: {
   job: string;
   summary: FailureSummary;
@@ -170,13 +254,10 @@ export function buildFailurePayload(input: {
       inline: false,
     });
   }
-  if (summary.sessionExpired) {
+  const expiry = summary.sessionExpiry ? SESSION_EXPIRY_TEXT[summary.sessionExpiry] : null;
+  if (expiry) {
     // 何をすれば直るかまで書く。通知を見た時点で対応が決まるようにするため。
-    fields.push({
-      name: "対応",
-      value: "サブPCの `~/apps/aide` で `node src/core/connectors/zaim/scripts/login.mjs` を実行し、手動でログインし直す",
-      inline: false,
-    });
+    fields.push({ name: "対応", value: expiry.action, inline: false });
     // keep-alive 経由だと理由が英語のスタックのままになる。本文は日本語の説明に差し替え、
     // 元のメッセージはこちらへ回す。
     fields.push({ name: "エラー", value: summary.reason, inline: false });
@@ -185,13 +266,11 @@ export function buildFailurePayload(input: {
   return {
     embeds: [
       {
-        title: summary.sessionExpired
-          ? `🔑 [AIDE] ${job}: Zaimの再ログインが必要`
-          : `❌ [AIDE] ${job} 失敗`,
-        description: summary.sessionExpired
-          ? "Zaimのログインセッションが失効しています。手動でログインし直すまで、次回以降も失敗し続けます。"
-          : summary.reason,
-        color: COLOR_FAILURE,
+        title: expiry ? `🔑 [AIDE] ${job}: ${expiry.titleSuffix}` : `❌ [AIDE] ${job} 失敗`,
+        description: expiry ? expiry.description : summary.reason,
+        // 自動で直る見込みがあるものは赤で出さない。手動対応が要るものと同じ色にすると、
+        // どちらも「いま動くべき失敗」に見えてしまう。
+        color: summary.sessionExpiry === "auto-pending" ? COLOR_WARNING : COLOR_FAILURE,
         fields,
       },
     ],
@@ -459,6 +538,88 @@ export async function notifyStaleAccounts(
   } catch (cause) {
     console.error(
       `[notify] 一部失敗の通知でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
+    );
+  }
+}
+
+export function buildZaimSessionRecoveryPayload(input: {
+  succeededJob: string;
+  recovered: readonly { job: string; record: FailureRecord }[];
+  recoveredAt: Date;
+}): SignalyPayload {
+  const { succeededJob, recovered, recoveredAt } = input;
+
+  return {
+    embeds: [
+      {
+        title: "✅ [AIDE] Zaimのセッションが回復しました",
+        description:
+          `\`${succeededJob}\` が成功したため、失効していたZaimのログインセッションは回復しています。` +
+          "**手動でのログインし直しは要りません。**",
+        color: COLOR_RECOVERY,
+        fields: [
+          { name: "回復を確認したジョブ", value: `\`${succeededJob}\``, inline: true },
+          { name: "確認時刻", value: formatJst(recoveredAt), inline: true },
+          { name: "実行ホスト", value: hostname(), inline: true },
+          {
+            name: "失効で失敗していたジョブ",
+            value: recovered
+              .map(
+                ({ job, record }) =>
+                  `\`${job}\`: ${formatJst(new Date(record.firstFailedAt))} から${record.count}回`,
+              )
+              .join("\n"),
+            inline: false,
+          },
+          {
+            // 「回復した」だけだと、失敗していたジョブの結果まで取り戻せたように読める。
+            name: "補足",
+            value: "上のジョブ自体は次回の定期実行でやり直される（その回の結果は取得できていない）。",
+            inline: false,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * **ジョブをまたいでZaimのセッション回復を伝える。**
+ *
+ * 復旧通知（`notifyJobRecovered`）はジョブ単位なので、`zaim-refresh`（12時間ごと）が失効で
+ * 失敗し、その直後に `zaim-keep-alive`（30分ごと）が自動再ログインで直しても、`zaim-refresh`
+ * の復旧は12時間後まで出ない。その間、通知を見た側には失敗だけが残る（#191）。
+ *
+ * Zaimのジョブが成功した時点でセッションは有効なので、**他のジョブに残っている失効の失敗は
+ * 原因が解消済み**とみなして1回だけ回復を送り、記録を消す。消すのは失効の記録だけで、
+ * 別の理由で失敗しているジョブの記録は残す。
+ *
+ * 呼び出し側は失敗させない（例外を投げない）。
+ */
+export async function notifyZaimSessionRecovered(succeededJob: string): Promise<void> {
+  const url = webhookUrl();
+  if (!url) return;
+
+  try {
+    const state = await readState();
+    const recovered = Object.entries(state)
+      .filter(([job]) => job !== succeededJob && !job.endsWith(PARTIAL_STATE_SUFFIX))
+      .filter(([, record]) => isSessionExpirySignature(record.signature))
+      .map(([job, record]) => ({ job, record }));
+    if (recovered.length === 0) return;
+
+    // 送れなかったら記録を残す。次にZaimのジョブが成功したときに送り直せる。
+    const sent = await send(
+      url,
+      buildZaimSessionRecoveryPayload({ succeededJob, recovered, recoveredAt: new Date() }),
+    );
+    if (!sent) return;
+
+    for (const { job } of recovered) delete state[job];
+    await writeState(state);
+  } catch (cause) {
+    console.error(
+      `[notify] セッション回復の通知でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
     );
   }
 }

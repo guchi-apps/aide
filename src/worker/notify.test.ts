@@ -13,10 +13,12 @@ const {
   buildFailurePayload,
   buildRecoveryPayload,
   buildStaleAccountsPayload,
+  buildZaimSessionRecoveryPayload,
   decideNotification,
   notifyJobFailure,
   notifyJobRecovered,
   notifyStaleAccounts,
+  notifyZaimSessionRecovered,
   readState,
   staleAccountsSignature,
   summarizeFailure,
@@ -25,6 +27,12 @@ const {
 type FailureRecord = import("./notify.ts").FailureRecord;
 
 const HOUR = 60 * 60 * 1000;
+
+/** 自動再ログインの資格情報が設定されている環境。値そのものは通知に出ない。 */
+const WITH_CREDENTIALS = { ZAIM_EMAIL: "someone@example.com", ZAIM_PASSWORD: "dummy" };
+
+/** 資格情報が無い環境（開発機・CI）。 */
+const WITHOUT_CREDENTIALS = {};
 
 function recordAt(overrides: Partial<FailureRecord> = {}): FailureRecord {
   return {
@@ -69,14 +77,47 @@ describe("失敗理由の整形", () => {
   it("セッション失効を判別し、署名を理由の文面から独立させる", () => {
     const viaSync = summarizeFailure(
       new Error("Zaimのログインセッションが失効しています（ZAIM_SESSION_EXPIRED）。"),
+      WITH_CREDENTIALS,
     );
     const viaKeepAlive = summarizeFailure(
       new Error("Command failed: node keep-alive.mjs ZAIM_SESSION_EXPIRED:https://zaim.net/"),
+      WITH_CREDENTIALS,
     );
-    assert.equal(viaSync.sessionExpired, true);
-    assert.equal(viaKeepAlive.sessionExpired, true);
+    assert.equal(viaSync.sessionExpiry, "auto-pending");
+    assert.equal(viaKeepAlive.sessionExpiry, "auto-pending");
     // 文面は違うが、同じ障害として抑制されてほしい。
     assert.equal(viaSync.signature, viaKeepAlive.signature);
+  });
+
+  it("資格情報があれば自動再ログイン待ち、無ければ手動のみとして分類する", () => {
+    const raw = new Error("Zaimのログインセッションが失効しています（ZAIM_SESSION_EXPIRED）。");
+    assert.equal(summarizeFailure(raw, WITH_CREDENTIALS).sessionExpiry, "auto-pending");
+    assert.equal(summarizeFailure(raw, WITHOUT_CREDENTIALS).sessionExpiry, "manual-only");
+  });
+
+  it("自動再ログインまで失敗した失効は、資格情報があっても手動が要る側にする", () => {
+    const summary = summarizeFailure(
+      new Error("Command failed: node keep-alive.mjs ZAIM_SESSION_EXPIRED\nZAIM_AUTO_RELOGIN_FAILED"),
+      WITH_CREDENTIALS,
+    );
+    assert.equal(summary.sessionExpiry, "auto-failed");
+    // マーカーは行を分けて足しているので、通知に載る理由の見た目は変わらない。
+    assert.equal(summary.reason, "Command failed: node keep-alive.mjs ZAIM_SESSION_EXPIRED");
+  });
+
+  it("自動で直る見込みと手動が要る状態で署名を分ける", () => {
+    // 同じ署名にすると、悪化したことが6時間の抑制で伝わらなくなる。
+    const pending = summarizeFailure(new Error("ZAIM_SESSION_EXPIRED"), WITH_CREDENTIALS);
+    const failed = summarizeFailure(
+      new Error("ZAIM_SESSION_EXPIRED\nZAIM_AUTO_RELOGIN_FAILED"),
+      WITH_CREDENTIALS,
+    );
+    assert.notEqual(pending.signature, failed.signature);
+    assert.equal(decideNotification(
+      { signature: pending.signature, firstFailedAt: "2026-08-29T13:32:00.000Z", notifiedAt: "2026-08-29T13:32:00.000Z", count: 1 },
+      failed.signature,
+      new Date("2026-08-29T14:02:00.000Z"),
+    ).shouldNotify, true);
   });
 });
 
@@ -150,20 +191,69 @@ describe("通知の中身", () => {
     );
   });
 
-  it("セッション失効は再ログインが要ると分かる形にする", () => {
+  it("自動再ログインまで失敗した失効は、再ログインが要ると分かる形にする", () => {
     const payload = buildFailurePayload({
       job: "zaim-keep-alive",
-      summary: summarizeFailure(new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/")),
+      summary: summarizeFailure(
+        new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/\nZAIM_AUTO_RELOGIN_FAILED"),
+        WITH_CREDENTIALS,
+      ),
       occurredAt,
       record: recordAt({ count: 4, firstFailedAt: "2026-08-14T00:00:00.000Z" }),
     });
     const [embed] = payload.embeds;
     assert.match(embed.title, /再ログインが必要/);
     // 本文だけ読んでも、手動ログインが要る失敗だと分かること。
-    assert.match(embed.description, /ログインセッションが失効/);
+    assert.match(embed.description, /自動再ログインも失敗/);
     assert.match(embed.fields.find((f) => f.name === "対応")?.value ?? "", /login\.mjs/);
     assert.match(embed.fields.find((f) => f.name === "エラー")?.value ?? "", /ZAIM_SESSION_EXPIRED/);
     assert.match(embed.fields.find((f) => f.name === "連続失敗")?.value ?? "", /4回目/);
+  });
+
+  it("自動で直る見込みがある失効には、手動ログインを促さない", () => {
+    // #191。実際には30分ごとの zaim-keep-alive が直すのに「手動でログインし直すまで
+    // 失敗し続けます」と送っており、受け取った側が対応の要否を判断できなかった。
+    const payload = buildFailurePayload({
+      job: "zaim-refresh",
+      summary: summarizeFailure(new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/"), WITH_CREDENTIALS),
+      occurredAt,
+      record: recordAt({ count: 1 }),
+    });
+    const [embed] = payload.embeds;
+    assert.match(embed.title, /自動再ログイン待ち/);
+    assert.match(embed.description, /zaim-keep-alive/);
+    assert.ok(!embed.description.includes("失敗し続けます"));
+    assert.match(embed.fields.find((f) => f.name === "対応")?.value ?? "", /まず待つ/);
+  });
+
+  it("資格情報が無い環境の失効は、従来どおり手動ログインを促す", () => {
+    const payload = buildFailurePayload({
+      job: "zaim-sync",
+      summary: summarizeFailure(new Error("ZAIM_SESSION_EXPIRED"), WITHOUT_CREDENTIALS),
+      occurredAt,
+      record: recordAt({ count: 1 }),
+    });
+    const [embed] = payload.embeds;
+    assert.match(embed.title, /再ログインが必要/);
+    assert.match(embed.description, /失敗し続けます/);
+    assert.match(embed.fields.find((f) => f.name === "対応")?.value ?? "", /login\.mjs/);
+  });
+
+  it("ジョブ横断の回復通知に、失敗していたジョブと確認したジョブが入る", () => {
+    const payload = buildZaimSessionRecoveryPayload({
+      succeededJob: "zaim-keep-alive",
+      recovered: [
+        { job: "zaim-refresh", record: recordAt({ firstFailedAt: "2026-08-14T00:00:00.000Z", count: 2 }) },
+      ],
+      recoveredAt: occurredAt,
+    });
+    const [embed] = payload.embeds;
+    assert.match(embed.title, /セッションが回復/);
+    assert.match(embed.description, /zaim-keep-alive/);
+    assert.match(
+      embed.fields.find((f) => f.name === "失効で失敗していたジョブ")?.value ?? "",
+      /zaim-refresh.*2回/,
+    );
   });
 
   it("復旧通知に失敗していた期間が入る", () => {
@@ -246,6 +336,29 @@ describe("送信と記録", () => {
 
     await notifyJobRecovered("zaim-sync");
     assert.equal(received.length, 2);
+  });
+
+  it("Zaimのジョブが成功したら、他のジョブの失効も回復として1回だけ知らせる", async () => {
+    // #191。zaim-refresh（12時間ごと）の失効を zaim-keep-alive（30分ごと）が直しても、
+    // ジョブ単位の復旧通知では次の zaim-refresh まで失敗だけが残っていた。
+    await notifyJobFailure("zaim-refresh", new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/"));
+    assert.equal(received.length, 1);
+
+    await notifyZaimSessionRecovered("zaim-keep-alive");
+    assert.equal(received.length, 2);
+    assert.equal((await readState())["zaim-refresh"], undefined);
+
+    // 記録を消したので、次に成功しても二重には送らない。
+    await notifyZaimSessionRecovered("zaim-keep-alive");
+    assert.equal(received.length, 2);
+  });
+
+  it("失効以外の失敗は、Zaimのジョブが成功しても消さない", async () => {
+    await notifyJobFailure("zaim-refresh", new Error("Zaimの連携口座を1件も読み取れませんでした"));
+    await notifyZaimSessionRecovered("zaim-keep-alive");
+    // 送るのは失敗の1件だけ。原因が解消したとは限らないため記録も残す。
+    assert.equal(received.length, 1);
+    assert.ok((await readState())["zaim-refresh"]);
   });
 
   it("記録にはWebhook URLも取得データも残さない", async () => {
