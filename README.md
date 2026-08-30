@@ -213,10 +213,17 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
 | `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今週の予定」「何時なら空いているか」に答えるためのもので、今日1日の見通しは `aide_daily_briefing` |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細（起票に使えるラベルの候補を含む） |
-| `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みを伴う唯一のツール**（作成のみ。編集・close・コメントは持たない） |
+| `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 | `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
-| `aide_zaim_payment` | Zaimへ支出を1件登録する。**2つ目の書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
+| `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
+| `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
+| `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
+| `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
+
+ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
+`AIDE_BOT_EMAIL` を使って aide-bot の `POST /api/notices` へ登録する。メールアドレスや認証トークンは
+MCPの引数・応答・ログへ出さない。詳しい設定と手動確認は [docs/chatgpt-mcp.md](docs/chatgpt-mcp.md) を参照。
 
 
 ## 機能一覧ページ
