@@ -1669,6 +1669,20 @@ AIDE_ZAIM_CONSUMER_KEY=xxx AIDE_ZAIM_CONSUMER_SECRET=yyy \
 取れた値は本番の `.env`（GitHubのsecret経由）と1Passwordにだけ置く。
 
 
+## ChatGPTからAsset Managerへ請求情報を取り込む（MCP）
+
+ChatGPTのスケジュールからGmailの請求情報を取り込む経路として、MCPツール
+`asset_manager_import_payment` を提供する（#199）。このツールはZaim APIを直接呼ばず、
+Asset Managerの `POST /api/receipts/import` だけを呼び出す。`gmailMessageId` と
+`confidence` は必須で、`source: "gmail"` はAIDE側が付与する。同じ `gmailMessageId` の再送は
+Asset Manager側の冪等性で `duplicate` になる。
+
+Asset ManagerのレスポンスJSON（`status`、`receiptId`、`zaimMoneyId`、`reason` 等）は加工せず返す。
+認証用の `ZAIM_SYNC_SECRET` は `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` としてAIDE側だけが保持し、
+MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANAGER_URL`（既定は
+`https://asset.gucchii.com`）で指定する。デプロイ時のsecret/variable配線は
+`.github/secrets-manifest.tsv` と `.github/workflows/deploy.yml` が正である。
+
 ## 外部のClaude CodeからのZaim登録（MCP）
 
 上のHTTP APIは**VPS内のアプリ専用のまま据え置く**。外（VPS外）のClaude Code・Claudeアプリから
