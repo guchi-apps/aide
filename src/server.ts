@@ -21,6 +21,11 @@ import { claudeSessionsTool } from "./mcp/tools/claude-sessions.ts";
 import { devStatusTool } from "./mcp/tools/dev.ts";
 import { createIssueTool } from "./mcp/tools/issue.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
+import {
+  createNotificationTool,
+  createTaskCandidateTool,
+  saveDailyBriefTool,
+} from "./mcp/tools/notifications.ts";
 import { opsStatusTool } from "./mcp/tools/ops.ts";
 import { pingTool } from "./mcp/tools/ping.ts";
 import { roomStatusTool } from "./mcp/tools/room.ts";
@@ -73,6 +78,9 @@ registry.register(claudeSessionsTool);
 registry.register(zaimMasterTool);
 registry.register(zaimPaymentTool);
 registry.register(assetManagerImportPaymentTool);
+registry.register(createNotificationTool);
+registry.register(createTaskCandidateTool);
+registry.register(saveDailyBriefTool);
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
