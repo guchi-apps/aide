@@ -26,6 +26,7 @@ import { pingTool } from "./mcp/tools/ping.ts";
 import { roomStatusTool } from "./mcp/tools/room.ts";
 import { scheduleTool } from "./mcp/tools/schedule.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./mcp/tools/zaim.ts";
+import { assetManagerImportPaymentTool } from "./mcp/tools/asset-manager.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import { handleKnowledgePage } from "./web/knowledge.ts";
@@ -71,6 +72,7 @@ registry.register(claudeSessionsTool);
 // 1本に畳むと、Claude Code側で「常に許可」にしたときに書き込みまで素通しになる。
 registry.register(zaimMasterTool);
 registry.register(zaimPaymentTool);
+registry.register(assetManagerImportPaymentTool);
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
