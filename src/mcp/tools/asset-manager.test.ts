@@ -79,6 +79,60 @@ describe("asset_manager_import_payment", () => {
     }
   });
 
+  it("usageを指定した場合はpayloadに含めて送る", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        source: "gmail",
+        gmailMessageId: "message-usage-1",
+        confidence: 0.95,
+        date: "2026-08-20",
+        amount: 7842,
+        place: "関西電力",
+        name: "電気料金",
+        usage: "258kWh",
+        accountHint: "楽天カード",
+      });
+      return new Response(JSON.stringify({ status: "imported", receiptId: "receipt-usage-1", zaimMoneyId: 456 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    try {
+      assert.deepEqual(
+        parsed(await assetManagerImportPaymentTool.handler({
+          gmailMessageId: "message-usage-1",
+          confidence: 0.95,
+          date: "2026-08-20",
+          amount: 7842,
+          place: "関西電力",
+          name: "電気料金",
+          usage: "258kWh",
+          accountHint: "楽天カード",
+        }, { sessionId: null })),
+        { status: "imported", receiptId: "receipt-usage-1", zaimMoneyId: 456 },
+      );
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("usageが32文字を超える場合はエラーにする", async () => {
+    assert.deepEqual(
+      parsed(await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-usage-2", confidence: 0.9, usage: "a".repeat(33) }, { sessionId: null })),
+      { status: "error", reason: "usage は32文字以内の文字列で指定してください" },
+    );
+  });
+
+  it("usageが文字列でない場合はエラーにする", async () => {
+    assert.deepEqual(
+      parsed(await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-usage-3", confidence: 0.9, usage: 258 }, { sessionId: null })),
+      { status: "error", reason: "usage は32文字以内の文字列で指定してください" },
+    );
+  });
+
   it("必須値とconfidenceを実行時にも検証する", async () => {
     assert.deepEqual(parsed(await assetManagerImportPaymentTool.handler({ confidence: 0.9 }, { sessionId: null })), {
       status: "error",

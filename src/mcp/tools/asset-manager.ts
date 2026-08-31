@@ -10,6 +10,7 @@ const PAYMENT_FIELDS = [
   "amount",
   "name",
   "place",
+  "usage",
   "paymentMethod",
   "accountHint",
   "rawSubject",
@@ -58,6 +59,13 @@ function buildPayload(args: Record<string, unknown>): Record<string, unknown> | 
     return "sourceMetadata はオブジェクトで指定してください";
   }
 
+  if (args["usage"] !== undefined) {
+    const usage = args["usage"];
+    if (typeof usage !== "string" || usage.length > 32) {
+      return "usage は32文字以内の文字列で指定してください";
+    }
+  }
+
   const payload: Record<string, unknown> = { source: "gmail" };
   for (const field of PAYMENT_FIELDS) {
     if (args[field] !== undefined) payload[field] = args[field];
@@ -92,6 +100,14 @@ export const assetManagerImportPaymentTool: Tool = {
       amount: { type: "integer", minimum: 1 },
       name: { type: "string" },
       place: { type: "string" },
+      usage: {
+        type: "string",
+        maxLength: 32,
+        description:
+          "電気・ガスなど使用量が書かれた請求メールでのみ指定する（例: 258kWh、12m3）。" +
+          "本文の表記のまま渡してよく、単位表記（kWh・m3・m³・㎥ 等）の正規化はAsset Manager側が行う。" +
+          "name には使用量を含めない（分類履歴のキーに影響するため）。本文から読み取れない・自信が無い場合は指定せず省略する（推測値を送らない）。",
+      },
       paymentMethod: { type: "string" },
       accountHint: { type: "string" },
       rawSubject: { type: "string" },
