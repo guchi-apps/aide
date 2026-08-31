@@ -2,6 +2,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
 import { loadZaimOAuthCredentials } from "../core/connectors/zaim/oauth.ts";
 import {
+  createZaimWebPayment,
+  normalizeWebPaymentInput,
+} from "../core/connectors/zaim/web-payment.ts";
+import {
   createZaimPayment,
   fetchZaimMaster,
   normalizePaymentInput,
@@ -161,6 +165,68 @@ export async function handleZaimPayment(req: IncomingMessage, res: ServerRespons
     moneyId: outcome.moneyId,
     duplicated: outcome.duplicated,
     requestId: normalized.input.requestId,
+  });
+}
+
+/**
+ * `POST /api/zaim/payment/web`
+ *
+ * **Web版の入力画面を操作して**品目明細を1件登録する（#214）。公式APIで作った明細は
+ * Zaimの「レシート置き換え」の候補にならないため、置き換えに載せたいものはこちらを使う。
+ *
+ * 上の `POST /api/zaim/payment` との違い。
+ *
+ * | | `/api/zaim/payment` | `/api/zaim/payment/web` |
+ * |---|---|---|
+ * | 資格情報 | ZaimのOAuth（`AIDE_ZAIM_*`） | ログイン状態（storage state） |
+ * | 分類の指定 | `categoryId` / `genreId` | `categoryName` / `genreName` |
+ * | 返す `moneyId` | Zaimのレコードid | **常に null**（画面にidが出ない） |
+ * | 応答までの時間 | 1秒未満 | **数十秒**（ヘッドレスChromiumを起動する） |
+ *
+ * **この口はどのマシンでも動くわけではない。** Playwrightとログイン状態
+ * （`data/zaim/storage-state.json`）がある実行環境——いまはサブPC——でだけ成立する。
+ * VPSのサーバーで叩くと `rejected` で返る（storage state が無いため）。
+ *
+ * **呼び出し元はタイムアウトを長く取ること。** 画面の操作は数十秒かかるので、既定の
+ * 短いタイムアウトで切ると「登録されたか分からない」状態を作ることになる。
+ */
+export async function handleZaimWebPayment(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method !== "POST") {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+  if (!(await authorize(req, res, "POST /api/zaim/payment/web"))) return;
+
+  // **OAuthの設定は見ない。** この経路が使うのはログイン状態だけで、`AIDE_ZAIM_*` は要らない。
+  // ここで503にすると、Zaimへ書ける環境なのに口が開かないことになる。
+  const body = await readBody(req, res);
+  if (body === null) return;
+
+  const normalized = normalizeWebPaymentInput(body);
+  if ("error" in normalized) {
+    json(res, 400, { ok: false, kind: "invalid", error: normalized.error });
+    return;
+  }
+
+  const outcome = await createZaimWebPayment(normalized.input);
+  if (!outcome.ok) {
+    json(res, statusFor(outcome.kind), {
+      ok: false,
+      kind: outcome.kind,
+      error: outcome.reason,
+      requestId: normalized.input.requestId,
+    });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    moneyId: outcome.moneyId,
+    duplicated: outcome.duplicated,
+    requestId: normalized.input.requestId,
+    registered: outcome.registered,
   });
 }
 

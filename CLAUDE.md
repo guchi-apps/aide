@@ -142,6 +142,10 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 - 自分が作成したPull Requestの自己マージ
 - **外部サービスへの実アクセス**（Zaim へのログイン・巡回など。storage state はCookieそのものであり、
   無人実行から触らない）
+- **Zaim へ実際に明細を登録すること**（`POST /api/zaim/payment/web` ・
+  `scripts/web-payment.mjs`）。**この経路は削除を持たない**ので、間違って作った明細は人が
+  Zaim の画面から手で消すことになる。画面の当て方を確かめる必要があるときは、送信を行わない
+  `ZAIM_WEB_PAYMENT_DRY_RUN=1` を必ず付ける（#214）
 
 ### コミット・PR・コメントの書き方
 
