@@ -26,6 +26,18 @@
 **Node 24 以上が要る**（`package.json` の `engines` が `>=24`）。それより下では型注釈付きの `.ts` を
 そのまま実行できず、`npm run dev`・`npm start` が起動しない。
 
+**`npm run dev` は `.env` に `AIDE_AUTH_PASSWORD` が無いと起動しない。** worktreeへコピーされる
+`.env` にはこの値が入っておらず、`loadAuthConfig`（`src/auth/config.ts`）が起動時に例外を投げて
+落ちる。**シークレットを`.env`へ書き足さず**、画面やMCPを手元で確かめるときは認証を明示的に
+切って起動する（#211）。
+
+```bash
+AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
+```
+
+`/mcp` は Bearer 認証の後ろにあるため、`AIDE_AUTH_DISABLED=1` を付けないと `tools/list` も
+`tools/call` も401で終わり、ツールの動作を確かめられない。
+
 **型ストリッピングは「型注釈を消すだけ」で、実行時に別のコードを生む構文は使えない。**
 `tsc --noEmit` は通るのに実行時だけ `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` で落ちるため、
 型チェックだけでは気づけない。該当するのは constructor 引数への修飾子（parameter property。
