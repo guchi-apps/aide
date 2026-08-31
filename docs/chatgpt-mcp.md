@@ -82,6 +82,12 @@ ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
 `targetProduct`、`extractedMetrics`、`keywords`、`tags`、`periodScope`（`IN_SCOPE` /
 `PAST_30_DAYS_SUPPLEMENT`）を渡せる。
 
+**件数の上限はAIDEとResearch Deskの両方に、それぞれ独立した定数として書かれている**
+（AIDE側は `src/core/connectors/research-desk/index.ts` の `MAX_ARTICLES` /
+`MAX_ARTICLES_PER_BUSINESS`、Research Desk側は `src/app/api/internal/weekly-report/route.ts` の
+`ARTICLE_LIMIT` / `ARTICLE_LIMIT_PER_BUSINESS`）。**片方だけ広げると、AIDEの検証は通るのに
+Research Deskが400で弾く**という形で失敗する。上限を動かすときは必ず両方を揃える。
+
 `extractedMetrics` は主要数値を項目名と値で持つオブジェクト（例: `{"設置駅数": 12, "ボックス数": 480}`）。
 **30項目・JSONにして2000文字まで**で、AIDEが見るのは入れ物の形と大きさだけ。要約や本文の置き場に
 しない（`summary` / `content` がある）。
