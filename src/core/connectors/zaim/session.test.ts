@@ -210,3 +210,31 @@ describe("runZaimScript: 呼び出し全体の上限（totalTimeout）", () => {
     assert.equal(deps.calls.length, 2);
   });
 });
+
+/**
+ * 書き込み（Web版の入力画面からの登録・#214）のために足した2つ。
+ *
+ * どちらも**やり直しと引数の扱いが巡回とは違う**ことを縛る。巡回は何度実行しても
+ * 結果が変わらないが、登録は変わる——やり直すと同じ明細が2件できる。
+ */
+describe("runZaimScript: 書き込み向けのオプション", () => {
+  it("retryTransient: false なら一時的な失敗をやり直さない", async () => {
+    const deps = stubDeps([new Error(TRANSIENT), "should not be reached"]);
+    await assert.rejects(
+      runZaimScript(TARGET, { timeout: 1_000, retryTransient: false }, deps),
+      /ERR_ADDRESS_UNREACHABLE/,
+    );
+    assert.equal(deps.calls.length, 1);
+  });
+
+  it("retryTransient: false でも、セッション失効なら自動再ログインを挟んでやり直す", async () => {
+    // 失効はページを開いた時点で分かる＝送信より前なので、やり直しても二重登録にならない。
+    setCredentials(true);
+    const deps = stubDeps([new Error(EXPIRED), "", "ok"]);
+    assert.equal(
+      await runZaimScript(TARGET, { timeout: 1_000, retryTransient: false }, deps),
+      "ok",
+    );
+    assert.deepEqual(deps.calls, ["keep-alive.mjs", "auto-login.mjs", "keep-alive.mjs"]);
+  });
+});

@@ -35,6 +35,25 @@ export interface ZaimScriptOptions {
   timeout: number;
   maxBuffer?: number;
   /**
+   * 子プロセスへ足す環境変数。`process.env` に**上書きで**重ねる。
+   *
+   * 登録の内容（金額・店名）はここで渡す。コマンドライン引数にすると `ps` に出るため。
+   * 自動再ログインの子プロセスには渡さない（そちらは資格情報だけで足りる）。
+   */
+  env?: Record<string, string>;
+  /**
+   * 一時的な失敗（ネットワーク断・タイムアウト等）をやり直すか。既定は true。
+   *
+   * **書き込みでは false にする。** 巡回・セッション延長は何度実行しても結果が変わらないが、
+   * 登録は変わる。送信の直後に打ち切られた場合、やり直すと同じ明細が2件できる——しかも
+   * この経路は削除を持たないので、消すのは人の手作業になる。やり直さずに失敗させれば、
+   * 呼び出し元の記録が「結果が確定していない」まま残り、次の再送を止められる。
+   *
+   * **セッション失効時の自動再ログインは false でも行う。** 失効はページを開いた時点で
+   * 分かる（`session-check.mjs`）ため、送信より前で必ず起きる。
+   */
+  retryTransient?: boolean;
+  /**
    * 再試行・自動再ログインを含めた**呼び出し全体**の上限。省略すると上限を設けない。
    *
    * 1回が数十秒で終わる処理（セッション延長・巡回）では、やり直しても次の定期実行に
@@ -58,7 +77,7 @@ export interface ZaimScriptDeps {
 const defaultDeps: ZaimScriptDeps = {
   async exec(script, options) {
     const { stdout } = await execFileAsync(process.execPath, [script], {
-      env: process.env,
+      env: options.env === undefined ? process.env : { ...process.env, ...options.env },
       timeout: options.timeout,
       ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),
     });
@@ -161,6 +180,9 @@ export async function runZaimScript(
         attemptTimeout = timeout;
         continue;
       }
+
+      // 書き込みは1回きり。やり直すと同じ明細が2件できうる（`retryTransient` を参照）。
+      if (options.retryTransient === false) throw cause;
 
       transientFailures += 1;
       const delay = retryDelayMs(transientFailures);

@@ -20,13 +20,13 @@ import { ZAIM_TIMEOUT_MS, zaimRequest, type ZaimOAuthCredentials } from "./oauth
  */
 
 /** 文字列項目の上限。Zaimは100文字を超えると受け付けない。 */
-const MAX_TEXT_LENGTH = 100;
+export const MAX_TEXT_LENGTH = 100;
 
 /** 冪等キーの上限。呼び出し元のレコードを指す文字列なので、これで十分足りる。 */
-const MAX_REQUEST_ID_LENGTH = 200;
+export const MAX_REQUEST_ID_LENGTH = 200;
 
 /** 金額の上限。桁を1つ間違えた登録を機械的に止めるための歯止め。 */
-const MAX_AMOUNT = 100_000_000;
+export const MAX_AMOUNT = 100_000_000;
 
 export interface ZaimPaymentInput {
   /** 呼び出し元がレコードごとに一意に決める冪等キー（例: `car-care:fuel-log:1234`）。 */
@@ -56,8 +56,13 @@ export type CreatePaymentOutcome =
       reason: string;
     };
 
-/** 文字列項目を整える。空文字は「指定なし」として落とす。 */
-function normalizeText(value: unknown, label: string): { value?: string } | { error: string } {
+/**
+ * 文字列項目を整える。空文字は「指定なし」として落とす。
+ *
+ * Web版の入力画面からの登録（`web-payment.ts`）も同じ検査を通す。**受け付ける値の範囲は
+ * 経路で変えない**——同じ内容がAPI経由では通り画面経由では弾かれる、という差を作らないため。
+ */
+export function normalizeText(value: unknown, label: string): { value?: string } | { error: string } {
   if (value === undefined || value === null) return {};
   if (typeof value !== "string") return { error: `${label} は文字列で指定してください` };
   const trimmed = value.trim();
@@ -68,7 +73,8 @@ function normalizeText(value: unknown, label: string): { value?: string } | { er
   return { value: trimmed };
 }
 
-function normalizeId(value: unknown, label: string, required: boolean): { value?: number } | { error: string } {
+/** IDの項目を整える。`required` なら未指定を誤りとして扱う。 */
+export function normalizeId(value: unknown, label: string, required: boolean): { value?: number } | { error: string } {
   if (value === undefined || value === null) {
     return required ? { error: `${label} が必要です` } : {};
   }
