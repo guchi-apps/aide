@@ -179,7 +179,9 @@ src/
     models/            共通データモデル
     views/             横断ビュー
   web/                 人間向けのHTMLページ（機能一覧・動作状況・共通知識）と共通レイアウト
-  worker/              定期実行ジョブ
+  worker/              サブPC側で動くもの
+    run.ts             定期実行ジョブのエントリポイント
+    zaim-web-server.ts Zaim Web版登録の受け口（VPSからの中継先。常駐）
 ```
 
 プロセスを1本に絞っているのはメモリ制約のため。パッケージ分割（monorepo化）は規模が育ってから検討する。
@@ -686,7 +688,7 @@ asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読�
 |---|---|---|---|
 | 手段 | Playwrightでの画面巡回 | `POST /v2/home/money/payment` | Playwrightでの画面操作 |
 | 資格情報 | ログイン状態（storage state） | OAuth 1.0a（`AIDE_ZAIM_*`） | ログイン状態（storage state） |
-| 動く場所 | サブPCの worker | VPSのサーバー（同期リクエスト内） | **サブPC**（storage state がある側） |
+| 動く場所 | サブPCの worker | VPSのサーバー（同期リクエスト内） | **サブPC**（storage state がある側。VPSは中継する） |
 | 実装 | `scrape.ts` / `parse.ts` / `session.ts` | `oauth.ts` / `write.ts` | `web-payment.ts` / `scripts/web-payment.mjs` |
 | 置き換えの候補になるか | — | **ならない** | **なる** |
 
@@ -738,12 +740,65 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web \
 取ること——短く切ると「登録されたか分からない」状態を自分で作ることになる。
 `"dryRun": true` を足すと**送信だけ行わず**、埋まった内容を返して終える。
 
-#### 動くのは storage state があるマシンだけ
+#### 動くのは storage state があるマシンだけ。VPSは中継する
 
 この口は `AIDE_ZAIM_*`（OAuth）を見ない。使うのはログイン状態だけで、**Playwrightと
 `data/zaim/storage-state.json` がある実行環境——いまはサブPC——でしか成立しない**。
-VPSのサーバーで叩くと `rejected` で返る。asset-manager（VPS）から届かせる配線は
-[aide#215](https://github.com/guchi-apps/aide/issues/215) で切り出している。
+ところが呼び出し元（asset-manager）もAIDEのサーバーもVPSにいるため、#214 の実装だけでは
+**呼び出し元から一度も届かなかった**。そこでサブPCにも受け口を常駐させ、VPSの同じパスが
+そこへ同期で中継する（#215）。
+
+```
+asset-manager（VPS）
+  └ POST https://aide.gucchii.com/api/zaim/payment/web   ← 呼び出し元から見えるURLは変えない
+      └ AIDE サーバー（VPS・PM2）
+          └ AIDE_ZAIM_WEB_UPSTREAM_URL があれば中継（src/core/connectors/zaim/web-payment-forward.ts）
+              └ 受け口（サブPC・systemd。Tailscaleのアドレスで待ち受け）
+                  └ Playwright で Zaim の画面を操作
+```
+
+| | VPS（中継する側） | サブPC（画面を操作する側） |
+|---|---|---|
+| 動かすもの | 本体サーバー（PM2） | `src/worker/zaim-web-server.ts`（`aide-zaim-web.service`） |
+| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web` と `/health` だけ** |
+| 要る設定 | `AIDE_ZAIM_WEB_UPSTREAM_URL` | `AIDE_ZAIM_WRITE_SECRET`・`AIDE_ZAIM_WEB_HOST` |
+| 冪等の記録 | 持たない | `data/zaim-web-payments.json` |
+
+**呼び出し元から見えるURLは変えない。** asset-manager が知っているのは `AIDE_BASE_URL` だけで、
+AIDEがどのマシンで何を動かしているかは AIDE 側の都合だから。サブPCへ直接向けさせると、
+読み取りAPIまでサブPC経由になり、常駐が止まった瞬間に無関係な機能まで落ちる。
+
+**サブPCで動かすのは本体サーバーではない。** `src/server.ts` をそのまま常駐させれば済むように
+見えるが、それだとOAuth認可サーバーとログイン画面がもう1組でき、`data/auth/` が二重になる。
+必要なのはこの1経路だけなので、それだけを開いた小さな受け口（`src/worker/zaim-web-routes.ts`）に
+してある。認証・入力の検査・失敗の分類は本体と同じ `handleZaimWebPayment` を通す。
+
+**受け口の `.env` に `AIDE_ZAIM_WEB_UPSTREAM_URL` を書かない。** 中継する側の設定で、
+受け口はこれが設定されていると起動を拒否する。取り違えても回り続けないよう、中継には
+`x-aide-zaim-web-forwarded: 1` を付けて1往復で止めている。
+
+#### 中継が失敗したときにどちらへ倒すか
+
+**「Zaimに何も登録されていないと言い切れるか」だけで分ける**（`web-payment.ts` の
+`classifyWebFailure()` と同じ考え方）。ここを誤ると、二重登録か、登録済みの明細を
+人が探す手間かのどちらかになる。
+
+| 中継の結果 | 分類 | 呼び出し元 |
+|---|---|---|
+| 接続できない（`ECONNREFUSED`・`ENOTFOUND` 等） | `rejected` | そのまま送り直してよい |
+| 受け口が画面を開く前に断った（401・429・503 等） | `rejected` | 設定を直して送り直す |
+| 受け口が `kind` を返した | **その値のまま** | 受け口の判断に従う |
+| 打ち切り・応答待ちでの切断 | `failed` | Zaimを確認するまで再送しない |
+
+**受け口が返した `kind` は潰さない。** 特に `conflict`（前回の結果が確定していない）を
+再送可能な分類へ倒すと、同じ支出が2件でき、この経路には削除が無いので人が手で消すことになる。
+
+#### 同時に流すのは1件だけ
+
+ログイン状態はファイル1つで、2つのChromiumが同時に開くと更新が競合し、巡回まで巻き込んで
+セッションを失う。そのため `createZaimWebPayment()` は**実行中なら待たせずに `rejected` で断る**。
+待たせないのは、待つと呼び出し元のタイムアウトに掛かって「登録されたか分からない」になるため。
+**画面を開く前に断れば言い切れる。**
 
 #### 画面の当て方
 
@@ -1527,9 +1582,14 @@ cp deploy/systemd/*.timer deploy/systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
+systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
 systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
 systemctl --user list-timers 'aide-*'
 ```
+
+**`aide-zaim-web.service` だけタイマーを持たない常駐**（#215。VPSからの中継を受ける口）。
+`systemctl --user status aide-zaim-web` と `curl -sS http://$AIDE_ZAIM_WEB_HOST:4748/health` で見る。
+**ログアウトで落ちないよう lingering が要る**（`loginctl enable-linger $USER`。他のタイマーも同じ前提）。
 
 以前はユニットがリポジトリの外にしか無く、間隔がなぜその値なのかを追えなかったため、実体をこちらへ移している。
 

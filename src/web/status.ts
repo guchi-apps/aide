@@ -13,6 +13,7 @@ import {
   revokeSession,
   type SupabaseAuthConfig,
 } from "../auth/supabase.ts";
+import { probeZaimWebUpstream } from "../core/connectors/zaim/web-payment-forward.ts";
 import { buildDevStatus } from "../core/views/dev.ts";
 import {
   buildHealth,
@@ -821,6 +822,9 @@ export async function runProbes(options: ProbeOptions = {}): Promise<ProbeResult
         detail: summary.fixedCosts.unavailable?.reason ?? (summary.fixedCosts.configured ? "" : "未設定"),
       };
     }),
+    // **横断ビューを持たない**（Googleログインの戻り先と同じ）。畳む先の「外の世界」が無く、
+    // 確かめたいのは中継先が生きているかどうかだけなので、コネクタを直接叩く（#215）。
+    measure("zaim-web-upstream", async () => probeZaimWebUpstream()),
   ]);
 }
 

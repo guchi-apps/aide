@@ -146,6 +146,12 @@ const ENDPOINTS: FeatureItem[] = [
       "個人アプリ向けのZaim登録API。支出を1件Zaimへ登録し、Zaim側のレコードID（money_id）を返す。requestId が同じ再送はZaimへ送らず前回の結果を返す。Zaim書き込み専用の共有シークレットで認証する。",
   },
   {
+    name: "/api/zaim/payment/web",
+    meta: "POST",
+    description:
+      "Zaim Web版の入力画面を操作して品目明細を1件登録する。公式APIで作った明細は「レシート置き換え」の候補にならないため、置き換えに載せたいものはこちらを通す。応答まで数十秒かかり、レコードIDは返らない。画面の操作が成立するのはログイン状態のあるサブPCだけなので、VPSのサーバーはそこへ中継する。",
+  },
+  {
     name: "/api/zaim/master",
     meta: "GET",
     description:
