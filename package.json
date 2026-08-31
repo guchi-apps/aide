@@ -11,7 +11,8 @@
     "start": "node --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.ts\"",
-    "worker": "node --env-file-if-exists=.env src/worker/run.ts"
+    "worker": "node --env-file-if-exists=.env src/worker/run.ts",
+    "zaim-web-server": "node --env-file-if-exists=.env src/worker/zaim-web-server.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

@@ -263,6 +263,38 @@ export async function createZaimWebPayment(
   input: ZaimWebPaymentInput,
   deps?: ZaimScriptDeps,
 ): Promise<CreateWebPaymentOutcome> {
+  // **同時に2件流さない**（#215）。#214 の時点では手元から1件ずつ叩くだけだったが、
+  // VPSから中継が届くようになると、呼び出し元の作り次第で並行して来る。ログイン状態
+  // （storage state）はファイル1つで、2つのChromiumが同時に開くと更新が競合し、
+  // 巡回まで巻き込んでセッションを失う。
+  //
+  // 待たせずに断るのは、待たせると呼び出し元のタイムアウトに掛かって
+  // 「登録されたか分からない」（`failed`）になるため。**画面を開く前に断れば
+  // `rejected` と言い切れる**ので、呼び出し元はそのまま送り直せる。
+  if (inFlight) {
+    return {
+      ok: false,
+      kind: "rejected",
+      reason:
+        "別のZaim Web版の登録を処理中です。Zaimには何も登録されていません。" +
+        "1件ずつ順に送り直してください。",
+    };
+  }
+  inFlight = true;
+  try {
+    return await runZaimWebPayment(input, deps);
+  } finally {
+    inFlight = false;
+  }
+}
+
+/** 実行中かどうか。プロセス内でしか見ないので、受け口は1プロセスに限る。 */
+let inFlight = false;
+
+async function runZaimWebPayment(
+  input: ZaimWebPaymentInput,
+  deps?: ZaimScriptDeps,
+): Promise<CreateWebPaymentOutcome> {
   // dryRun は登録しない。記録も残さない（残すと本番の登録が「登録済み」で弾かれる）。
   if (input.dryRun !== true) {
     const begun = await beginWebPayment(input.requestId);

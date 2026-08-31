@@ -2,8 +2,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
 import { loadZaimOAuthCredentials } from "../core/connectors/zaim/oauth.ts";
 import {
+  ZAIM_WEB_FORWARDED_HEADER,
+  forwardZaimWebPayment,
+  zaimWebUpstreamUrl,
+} from "../core/connectors/zaim/web-payment-forward.ts";
+import {
   createZaimWebPayment,
   normalizeWebPaymentInput,
+  type CreateWebPaymentOutcome,
+  type ZaimWebPaymentInput,
 } from "../core/connectors/zaim/web-payment.ts";
 import {
   createZaimPayment,
@@ -169,6 +176,36 @@ export async function handleZaimPayment(req: IncomingMessage, res: ServerRespons
 }
 
 /**
+ * 中継するか、自分のところで画面を操作するかを決めて実行する（#215）。
+ *
+ * **中継してきたリクエストは二度と中継しない。** 受け側の `.env` に中継先URLが残っていると
+ * 2台のあいだで永久に回り続けるため、ヘッダ1つで1往復に閉じる。この場合は画面の操作を
+ * 試みる——storage state が無ければ `rejected` で返り、設定の誤りが呼び出し元まで伝わる。
+ */
+async function runOrForwardWebPayment(
+  req: IncomingMessage,
+  input: ZaimWebPaymentInput,
+): Promise<CreateWebPaymentOutcome> {
+  const upstream = zaimWebUpstreamUrl();
+  if (!upstream) return createZaimWebPayment(input);
+
+  if (req.headers[ZAIM_WEB_FORWARDED_HEADER] === "1") {
+    console.warn(
+      "[zaim-api] 中継されたリクエストに AIDE_ZAIM_WEB_UPSTREAM_URL が設定されています。" +
+        "受け口側では設定しないでください。ここでは中継せず画面の操作を試みます。",
+    );
+    return createZaimWebPayment(input);
+  }
+
+  const secret = zaimWriteSecret();
+  // `authorize()` を通っている以上ここには来ないが、型のために見る。
+  if (!secret) return { ok: false, kind: "rejected", reason: "AIDE_ZAIM_WRITE_SECRET が未設定です" };
+
+  console.log(`[zaim-api] Web版の登録を中継: requestId=${input.requestId}`);
+  return forwardZaimWebPayment(input, { baseUrl: upstream, secret });
+}
+
+/**
  * `POST /api/zaim/payment/web`
  *
  * **Web版の入力画面を操作して**品目明細を1件登録する（#214）。公式APIで作った明細は
@@ -183,12 +220,15 @@ export async function handleZaimPayment(req: IncomingMessage, res: ServerRespons
  * | 返す `moneyId` | Zaimのレコードid | **常に null**（画面にidが出ない） |
  * | 応答までの時間 | 1秒未満 | **数十秒**（ヘッドレスChromiumを起動する） |
  *
- * **この口はどのマシンでも動くわけではない。** Playwrightとログイン状態
- * （`data/zaim/storage-state.json`）がある実行環境——いまはサブPC——でだけ成立する。
- * VPSのサーバーで叩くと `rejected` で返る（storage state が無いため）。
+ * **この口はどのマシンでも画面を操作できるわけではない。** Playwrightとログイン状態
+ * （`data/zaim/storage-state.json`）があるのはサブPCだけで、VPSのサーバーには無い。
+ * そこで `AIDE_ZAIM_WEB_UPSTREAM_URL` が設定されていれば、**同じ口を開いているサブPCの
+ * 受け口へ中継する**（#215。受け口は `src/worker/zaim-web-server.ts`）。未設定なら
+ * 従来どおり自分のところで画面を操作する——サブPC側の受け口がこちらの経路を通る。
  *
  * **呼び出し元はタイムアウトを長く取ること。** 画面の操作は数十秒かかるので、既定の
- * 短いタイムアウトで切ると「登録されたか分からない」状態を作ることになる。
+ * 短いタイムアウトで切ると「登録されたか分からない」状態を作ることになる。中継する場合も
+ * 待ち時間は変わらない（VPSは応答を待つだけで、Chromiumは起動しない）。
  */
 export async function handleZaimWebPayment(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
@@ -210,7 +250,7 @@ export async function handleZaimWebPayment(req: IncomingMessage, res: ServerResp
     return;
   }
 
-  const outcome = await createZaimWebPayment(normalized.input);
+  const outcome = await runOrForwardWebPayment(req, normalized.input);
   if (!outcome.ok) {
     json(res, statusFor(outcome.kind), {
       ok: false,
