@@ -89,23 +89,52 @@ describe("research-desk 週報入力の検証", () => {
     assert.equal(reversed.ok, false);
   });
 
-  it("記事は1〜6件、1事業あたり3件までに制限する", () => {
+  it("記事は1〜10件、1事業あたり5件までに制限する（#226）", () => {
     assert.equal(normalizeWeeklyReportInput(validArgs([])).ok, false);
-    assert.equal(normalizeWeeklyReportInput(validArgs(Array.from({ length: 7 }, () => article()))).ok, false);
+    assert.equal(normalizeWeeklyReportInput(validArgs(Array.from({ length: 11 }, () => article()))).ok, false);
 
-    const fourDelivery = normalizeWeeklyReportInput(validArgs(Array.from({ length: 4 }, () => article())));
-    assert.equal(fourDelivery.ok, false);
-    if (!fourDelivery.ok) assert.match(fourDelivery.reason, /DELIVERY/);
+    const sixDelivery = normalizeWeeklyReportInput(validArgs(Array.from({ length: 6 }, () => article())));
+    assert.equal(sixDelivery.ok, false);
+    if (!sixDelivery.ok) assert.match(sixDelivery.reason, /DELIVERY/);
 
+    // 宅配5件＋ロッカー5件の日次10件が通ること。
     const mixed = normalizeWeeklyReportInput(validArgs([
-      article(),
-      article(),
-      article(),
-      article({ business: "LOCKER" }),
-      article({ business: "LOCKER" }),
-      article({ business: "LOCKER" }),
+      ...Array.from({ length: 5 }, () => article()),
+      ...Array.from({ length: 5 }, () => article({ business: "LOCKER" })),
     ]));
     assert.equal(mixed.ok, true);
+    if (mixed.ok) assert.equal(mixed.input.articles.length, 10);
+  });
+
+  it("以前までの6件・1事業3件の呼び出しはそのまま通る", () => {
+    const legacy = normalizeWeeklyReportInput(validArgs([
+      ...Array.from({ length: 3 }, () => article()),
+      ...Array.from({ length: 3 }, () => article({ business: "LOCKER" })),
+    ]));
+    assert.equal(legacy.ok, true);
+  });
+
+  it("主要数値は形と大きさだけを検証して素通しする（#226）", () => {
+    const metrics = { 設置駅数: 12, ボックス数: 480, 完了予定: "2027-03", 全国展開: true, 備考: null };
+    const result = normalizeWeeklyReportInput(validArgs([article({ extractedMetrics: metrics })]));
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.input.articles[0]?.extractedMetrics, metrics);
+
+    // 空オブジェクトは渡さなかったのと同じ扱いにする。
+    const empty = normalizeWeeklyReportInput(validArgs([article({ extractedMetrics: {} })]));
+    assert.equal(empty.ok, true);
+    if (empty.ok) assert.equal(empty.input.articles[0]?.extractedMetrics, undefined);
+
+    for (const invalid of [
+      [1, 2],
+      "設置台数は12台",
+      Object.fromEntries(Array.from({ length: 31 }, (_, index) => [`項目${index}`, index])),
+      { 本文: "あ".repeat(2_001) },
+      { ["k".repeat(101)]: 1 },
+    ]) {
+      const rejected = normalizeWeeklyReportInput(validArgs([article({ extractedMetrics: invalid })]));
+      assert.equal(rejected.ok, false, `${JSON.stringify(invalid).slice(0, 40)} は不正として扱うべき`);
+    }
   });
 
   it("事業・種別・URL・列挙値の誤りを弾く", () => {
@@ -222,6 +251,33 @@ describe("research-desk 週報の登録", () => {
     }) as unknown as typeof fetch);
     assert.equal(failed.ok, false);
     if (!failed.ok) assert.match(failed.reason, /接続できません/);
+  });
+
+  it("統合更新・除外の件数もそのまま返す（#226 / research-desk#43）", async () => {
+    const outcome = await importWeeklyReport(input, config, (async () =>
+      jsonResponse({
+        ...succeededBody,
+        insertedCount: 6,
+        mergedCount: 2,
+        duplicateCount: 1,
+        excludedCount: 1,
+        businessCounts: { DELIVERY: 4, LOCKER: 4 },
+        supplementalFrom: "2026-08-01T09:00:00.000Z",
+      })) as unknown as typeof fetch);
+    assert.equal(outcome.ok, true);
+    if (outcome.ok) {
+      assert.equal(outcome.result.mergedCount, 2);
+      assert.equal(outcome.result.excludedCount, 1);
+      // 契約に無い項目も読み替えずに素通しする。
+      assert.equal(outcome.result["supplementalFrom"], "2026-08-01T09:00:00.000Z");
+    }
+  });
+
+  it("件数の項目が欠けた応答でも runId と status があれば結果として扱う", async () => {
+    const outcome = await importWeeklyReport(input, config, (async () =>
+      jsonResponse({ runId: "run-2", status: "SUCCEEDED" })) as unknown as typeof fetch);
+    assert.equal(outcome.ok, true);
+    if (outcome.ok) assert.equal(outcome.result.runId, "run-2");
   });
 
   it("実行結果を含まない応答は失敗として扱う", async () => {
