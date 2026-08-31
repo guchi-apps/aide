@@ -49,6 +49,9 @@ export interface ToolDefinition {
   name: string;
   /** Claudeがツール選択に使う。「何をするか」だけでなく「いつ呼ぶか」を書く。 */
   description: string;
+  /** `tools/list` で返すだけの宣言。呼び出し元クライアント向けの案内であり、`type`・`maxLength`・
+   * `required` 等はこのサーバー自身では検証しない。実行時の妥当性チェックは各ツールの
+   * handler（`buildPayload` 等）に別途書く必要がある。 */
   inputSchema: Record<string, unknown>;
 }
 

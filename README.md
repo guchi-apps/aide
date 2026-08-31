@@ -1873,6 +1873,11 @@ Asset Managerの `POST /api/receipts/import` だけを呼び出す。`gmailMessa
 `confidence` は必須で、`source: "gmail"` はAIDE側が付与する。同じ `gmailMessageId` の再送は
 Asset Manager側の冪等性で `duplicate` になる。
 
+電気・ガスなど使用量が書かれた請求メールでは、任意項目の `usage`（32文字以内）に本文の表記の
+まま渡せる（例: `258kWh`、`12m3`）。単位表記の正規化はAsset Manager側が行うため、AIDEは
+本文の表記を変換せずそのまま送る。使用量を `name` に含めてはいけない（分類履歴のキーに影響
+するため）。本文から読み取れない・自信が無い月は `usage` を省略する（#223）。
+
 Asset ManagerのレスポンスJSON（`status`、`receiptId`、`zaimMoneyId`、`reason` 等）は加工せず返す。
 認証用の `ZAIM_SYNC_SECRET` は `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` としてAIDE側だけが保持し、
 MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANAGER_URL`（既定は
