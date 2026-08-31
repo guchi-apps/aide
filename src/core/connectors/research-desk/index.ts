@@ -1,14 +1,17 @@
 /**
  * Research Desk の週報登録コネクタ。
  *
- * ChatGPT が検索・要約した宅配事業／ロッカー事業の週次業界情報を、Research Desk の
- * **AIDE専用内部API** へ中継する（aide#211 / research-desk#31）。
+ * ChatGPT が検索・要約した宅配事業／ロッカー事業の業界情報を、Research Desk の
+ * **AIDE専用内部API** へ中継する（aide#211 / research-desk#31）。収集は週1回から
+ * 毎日20時へ変わり、Research Desk 側が日曜始まりの週へ集約する（aide#226 / research-desk#43）。
  *
  * ChatGPT は AIDE の接続認証だけを使い、Research Desk のサービス間シークレットは
  * AIDEサーバーの環境変数からしか読まない。引数・応答・ログのどこにも出さない。
  *
- * 冪等性・重複判定・実行履歴は Research Desk 側が持つ。ここでは入力の形だけを検証し、
- * 結果はそのまま素通しする（件数や status を AIDE 側で読み替えない）。
+ * 冪等性・重複判定・**同一イベントの統合更新**・実行履歴は Research Desk 側が持つ。
+ * ここでは入力の形だけを検証し、結果はそのまま素通しする（件数や status を AIDE 側で
+ * 読み替えない）。**同一性判定に使う項目（発表主体・対象製品・発表日・主要数値）も、
+ * AIDE は形を検証して渡すだけで判定そのものは行わない。**
  */
 
 export type ResearchDeskBusiness = "DELIVERY" | "LOCKER";
@@ -49,6 +52,8 @@ export interface ResearchDeskArticle {
   importance?: ResearchDeskImportance;
   targetCompany?: string | null;
   targetProduct?: string | null;
+  /** 主要数値（設置台数・金額・稼働率など）。同一イベントへ統合されるとき項目単位でマージされる。 */
+  extractedMetrics?: Record<string, unknown>;
   keywords?: string[];
   tags?: string[];
   periodScope?: ResearchDeskPeriodScope;
@@ -61,16 +66,29 @@ export interface ResearchDeskWeeklyReportInput {
   articles: ResearchDeskArticle[];
 }
 
-/** Research Desk の `WeeklyReportImportResult` をそのまま受け取るための形。 */
+/**
+ * Research Desk の `WeeklyReportImportResult` をそのまま受け取るための形。
+ *
+ * **必須として扱うのは `runId` と `status` の2つだけ**（`toImportResult` もこの2つしか見ない）。
+ * 件数の項目は Research Desk 側の都合で増減しうるため任意にしてあり、増えた項目も
+ * インデックスシグネチャでそのまま呼び出し元へ届く。
+ */
 export interface ResearchDeskImportResult {
   runId: string;
   status: "SUCCEEDED" | "PARTIAL" | "FAILED";
-  insertedCount: number;
-  duplicateCount: number;
-  failedCount: number;
-  businessCounts: Record<ResearchDeskBusiness, number>;
-  duplicateBusinessCounts: Record<ResearchDeskBusiness, number>;
-  errors: string[];
+  /** 新規追加された件数。 */
+  insertedCount?: number;
+  /** 別URLの同一発表として既存記事へ統合・上書き更新された件数（research-desk#43）。 */
+  mergedCount?: number;
+  /** 同一URL、または内容に変化が無く何もしなかった件数。 */
+  duplicateCount?: number;
+  /** 週あたりの保持上限を超えて取り込まれなかった・入れ替えられた件数（research-desk#43）。 */
+  excludedCount?: number;
+  failedCount?: number;
+  /** 新規追加＋統合更新の事業別内訳。 */
+  businessCounts?: Record<ResearchDeskBusiness, number>;
+  duplicateBusinessCounts?: Record<ResearchDeskBusiness, number>;
+  errors?: string[];
   [key: string]: unknown;
 }
 
@@ -83,9 +101,14 @@ interface ResearchDeskConfig {
   token: string;
 }
 
-/** 1回の週報で送れる記事の上限。全体と1事業あたりの両方を見る（#211）。 */
-export const MAX_ARTICLES = 6;
-export const MAX_ARTICLES_PER_BUSINESS = 3;
+/**
+ * 1回の登録で送れる記事の上限。全体と1事業あたりの両方を見る（#211）。
+ *
+ * 毎日20時の日次実行で宅配・ロッカーを1回にまとめて送るため、全体6件・1事業3件から広げた（#226）。
+ * **Research Desk 側の受け口にも同じ上限がある**ので、あちらを広げるまで10件は400で弾かれる。
+ */
+export const MAX_ARTICLES = 10;
+export const MAX_ARTICLES_PER_BUSINESS = 5;
 
 const LIMITS = {
   title: 500,
@@ -95,6 +118,10 @@ const LIMITS = {
   shortText: 500,
   keywords: 30,
   keyword: 100,
+  metrics: 30,
+  metricKey: 100,
+  /** 主要数値をJSONにしたときの長さ。要約や本文の置き場にされるのを防ぐためだけの値。 */
+  metricsJson: 2_000,
 } as const;
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -149,6 +176,30 @@ function optionalStringArray(value: unknown, name: string): { value: string[] | 
     items.push(trimmed);
   }
   return { value: items };
+}
+
+/**
+ * 主要数値（`extractedMetrics`）の検証。
+ *
+ * 中身の意味は Research Desk 側が決める（項目単位でマージして既存記事へ反映する）ため、
+ * ここで見るのは**入れ物の形と大きさだけ**。値はMCPのJSONを通ってきた時点でJSONに戻せる
+ * ものしか無いので、型の検査はしない。
+ */
+function optionalMetrics(value: unknown, name: string): { value: Record<string, unknown> | undefined } | { error: string } {
+  if (value === undefined || value === null) return { value: undefined };
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: `${name} は項目名と値を持つオブジェクトで指定してください` };
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return { value: undefined };
+  if (entries.length > LIMITS.metrics) return { error: `${name} は ${LIMITS.metrics} 項目以内で指定してください` };
+  for (const [key] of entries) {
+    if (key.length > LIMITS.metricKey) return { error: `${name} の項目名は ${LIMITS.metricKey} 文字以内で指定してください` };
+  }
+  if (JSON.stringify(value).length > LIMITS.metricsJson) {
+    return { error: `${name} が大きすぎます（要約や本文は summary・content へ入れてください）` };
+  }
+  return { value: value as Record<string, unknown> };
 }
 
 function normalizeArticle(value: unknown, index: number):
@@ -247,6 +298,10 @@ function normalizeArticle(value: unknown, index: number):
     if ("error" in parsed) return { ok: false, reason: parsed.error };
     if (parsed.value !== undefined) article[field] = parsed.value;
   }
+
+  const metrics = optionalMetrics(item["extractedMetrics"], `${label}.extractedMetrics`);
+  if ("error" in metrics) return { ok: false, reason: metrics.error };
+  if (metrics.value !== undefined) article.extractedMetrics = metrics.value;
 
   return { ok: true, article };
 }
