@@ -22,9 +22,10 @@ import type {
  * トークン認証は guchi-apps/ops-dashboard#85 で追加済み（`requireSessionOrApiToken`）。
  *
  * **6ソースすべてが 401 になるときは、AIDE側の設定漏れではなく値のずれを疑う。**
- * トークンは ops-dashboard の `OPS_API_TOKEN` と同じ値である必要があるが、1Passwordでは
- * 別項目（`op://apps/aide/ops-dashboard-token` と `op://apps/ops-dashboard/ops-api-token`）
- * として管理しているため、片方だけ更新すると静かに全滅する（#63）。
+ * トークンは ops-dashboard の `OPS_API_TOKEN` と同じ値である必要がある。1Passwordの正は
+ * `op://apps/ops-dashboard/ops-api-token` の1か所で、AIDE側のマニフェストもこれを参照する
+ * （#217）。ただしGitHubのsecretは各リポジトリへ同期した写しなので、値を入れ替えた後に
+ * 片方のリポジトリだけ同期していないと静かに全滅する（#63）。
  */
 
 /** ops-dashboard は同じVPS上のPM2プロセス（ポート3110）。 */

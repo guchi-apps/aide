@@ -828,16 +828,18 @@ HTTPステータスと例外の種別まで丸める（例外の `message` に�
 
 #### 全ソースが 401 になるとき
 
-**トークンは同じ値を2か所で別々に管理している。** ここがずれると6ソースすべてが 401 になる（#63）。
+**トークンは1Password上の1か所を両側から参照している**（#217）。以前はAIDE側にも同じ値を複製して
+おり、ずれると6ソースすべてが 401 になっていた（#63）。
 
 | どちら側 | 環境変数 | 1Password |
 |---|---|---|
 | ops-dashboard（受け） | `OPS_API_TOKEN` | `op://apps/ops-dashboard/ops-api-token` |
-| AIDE（送り） | `AIDE_OPS_DASHBOARD_TOKEN` | `op://apps/aide/ops-dashboard-token` |
+| AIDE（送り） | `AIDE_OPS_DASHBOARD_TOKEN` | 同上（提供側を参照する） |
 
 `unavailable` が **1本だけ** 401 なら ops-dashboard 側のルート追加漏れ、**6本すべて** 401 なら
 値の不一致か、ops-dashboard 側で `OPS_API_TOKEN` が未設定（未設定だとトークン経路は常に不可）。
-`configured: true` なのに全滅している場合は、AIDE側の設定漏れではなく**値のずれ**を疑う。
+1Passwordの正は1か所だが、GitHubのsecretは各リポジトリへ同期した写しなので、値を入れ替えた後に
+**片方のリポジトリだけ同期していない**とずれる。
 
 ### 返す粒度
 
@@ -880,9 +882,10 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 | `AIDE_SUBSCRIPTIONS_URL` | `http://127.0.0.1:3107` | そのURLへ問い合わせる |
 | `AIDE_SUBSCRIPTIONS_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
-止まる）。取得に失敗しても Zaim 由来の残高・保有銘柄は従来どおり返す。失敗の理由はHTTPステータスと
-例外の種別まで丸める（例外の `message` にはURLが載るため）。
+トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**。1Passwordでは値を
+複製せず提供側の `op://` をそのまま参照する（#217）。取得に失敗しても Zaim 由来の残高・保有銘柄は
+従来どおり返す。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが
+載るため）。
 
 ### 計算はしない
 
@@ -939,8 +942,9 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 | `AIDE_MYROOM_URL` | `http://127.0.0.1:8000` | そのURLへ問い合わせる |
 | `AIDE_MYROOM_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
-止まる）。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
+トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**。1Passwordでは値を複製せず
+提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで丸める
+（例外の `message` にはURLが載るため）。
 
 **myroom の読み取りAPIは元々 Supabase のユーザーログイン必須**で、サーバー間から読める口が無い。
 内部APIは [myroom#161](https://github.com/guchi-apps/myroom/issues/161) で追加する。**未実装の
@@ -1003,8 +1007,9 @@ Google Calendar API用のリフレッシュトークンをAES-256-GCMで暗号�
 | `AIDE_DAYSPAN_URL` | `http://127.0.0.1:3113` | そのURLへ問い合わせる |
 | `AIDE_DAYSPAN_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
-止まる）。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
+トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**。1Passwordでは値を
+複製せず提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで
+丸める（例外の `message` にはURLが載るため）。
 
 **タイムアウトは8秒**と、他のコネクタ（3秒）より長い。DaySpanの内部APIは受けたリクエストの中で
 Google Calendar と Notion を叩くため、localhost で完結する相手と違って外部サービスの応答時間が
