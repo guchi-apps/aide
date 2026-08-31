@@ -46,10 +46,10 @@ const server = createServer((req, res) => {
   });
 });
 
-// **既定（2分）では足りない。** 画面の操作に最大 WEB_PAYMENT_TIMEOUT_MS かかり、
-// Nodeがその前にソケットを切ると、呼び出し元には「登録されたか分からない」失敗だけが残る。
+// 画面の操作に最大 WEB_PAYMENT_TIMEOUT_MS かかる。Nodeの既定（5分）でもいまは足りるが、
+// **上限を上げたときに黙って切られる側にしない**ためスクリプトの上限に紐づけておく。
+// 途中で切られると、呼び出し元には「登録されたか分からない」失敗だけが残る。
 server.requestTimeout = WEB_PAYMENT_TIMEOUT_MS + 60_000;
-server.headersTimeout = 60_000;
 // 呼び出し元は1件ずつ送るため、応答後の接続は長く抱えない。
 server.keepAliveTimeout = 10_000;
 
