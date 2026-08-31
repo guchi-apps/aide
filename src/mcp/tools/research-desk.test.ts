@@ -40,7 +40,9 @@ const importResult = {
   runId: "run-1",
   status: "SUCCEEDED",
   insertedCount: 1,
+  mergedCount: 1,
   duplicateCount: 1,
+  excludedCount: 1,
   failedCount: 0,
   businessCounts: { DELIVERY: 1, LOCKER: 1 },
   duplicateBusinessCounts: { DELIVERY: 0, LOCKER: 1 },
@@ -66,10 +68,23 @@ describe("aide_research_desk_import_weekly_report", () => {
   it("書き込みツールとして必要な入力を必須にする", () => {
     assert.deepEqual(tool.inputSchema["required"], ["executedAt", "targetFrom", "targetTo", "articles"]);
     const properties = tool.inputSchema["properties"] as Record<string, Record<string, unknown>>;
-    assert.equal(properties["articles"]?.["maxItems"], 6);
+    assert.equal(properties["articles"]?.["maxItems"], 10);
     assert.match(tool.description, /書き込みツール/);
     // 認証情報はサーバー側の設定から決まる。引数として受け取らない。
     assert.deepEqual(Object.keys(properties).sort(), ["articles", "executedAt", "targetFrom", "targetTo"]);
+  });
+
+  it("同一イベント判定に使う項目をChatGPTへ説明する（#226）", () => {
+    const items = (tool.inputSchema["properties"] as Record<string, Record<string, unknown>>)["articles"]?.["items"] as Record<string, unknown>;
+    const articleProperties = items["properties"] as Record<string, Record<string, unknown>>;
+    assert.equal(articleProperties["extractedMetrics"]?.["type"], "object");
+    for (const field of ["publisher", "targetCompany", "targetProduct", "occurredAt"]) {
+      assert.match(String(articleProperties[field]?.["description"]), /同一/, `${field} の説明に同一性判定の用途が要る`);
+    }
+    // 新規・統合更新・重複・除外の4区分を応答から読めることを説明に含める。
+    for (const pattern of [/insertedCount/, /mergedCount/, /duplicateCount/, /excludedCount/]) {
+      assert.match(tool.description, pattern);
+    }
   });
 
   it("Research Deskの内部APIへ送り、件数と実行IDを返す", async () => {
@@ -86,6 +101,8 @@ describe("aide_research_desk_import_weekly_report", () => {
         assert.equal(payload["status"], "SUCCEEDED");
         assert.equal(payload["runId"], "run-1");
         assert.equal(payload["duplicateCount"], 1);
+        assert.equal(payload["mergedCount"], 1);
+        assert.equal(payload["excludedCount"], 1);
         assert.deepEqual(payload["businessCounts"], { DELIVERY: 1, LOCKER: 1 });
       } finally {
         fetchMock.mock.restore();
