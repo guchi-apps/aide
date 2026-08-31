@@ -4,8 +4,8 @@ import { dirname } from "node:path";
 /**
  * 「登録済みかどうかの記録」を置くJSONファイルの読み書き。
  *
- * 二重登録を防ぐ記録は**経路ごとに別のファイル**へ置く。公式API経由（`idempotency.ts`）は
- * ZaimのレコードID（`money_id`）を持てるが、Web版の入力画面経由（`web-idempotency.ts`）は
+ * 二重登録を防ぐ記録は**経路ごとに別のファイル**へ置く。Zaim公式API経由（`zaim/idempotency.ts`）は
+ * ZaimのレコードID（`money_id`）を持てるが、Web版の入力画面経由（`zaim/web-idempotency.ts`）は
  * 画面からIDを読めないため、記録に持てるものが違う。1つのファイルに混ぜると
  * 「IDが無い＝結果が確定していない」という判定が経路をまたいで壊れる。
  *
@@ -40,7 +40,7 @@ export function createRecordFile<T>(path: string, maxRecords: number): RecordFil
       return Array.isArray(parsed) ? (parsed as T[]) : [];
     } catch {
       // 壊れていたら空として扱う。ここで例外にすると登録そのものが通らなくなる。
-      console.warn(`[zaim] 登録記録が読めないため、空として扱います: ${path}`);
+      console.warn(`[record-file] 記録が読めないため、空として扱います: ${path}`);
       return [];
     }
   }

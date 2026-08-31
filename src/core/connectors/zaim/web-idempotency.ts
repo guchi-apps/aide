@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { DATA_DIR } from "../../paths.ts";
-import { createRecordFile } from "./record-file.ts";
+import { createRecordFile } from "../../record-file.ts";
 
 /**
  * Web版の入力画面から登録したかどうかの記録（#214）。

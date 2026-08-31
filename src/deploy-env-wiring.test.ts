@@ -40,6 +40,8 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_GITHUB_ORG: "既定 guchi-apps で足りる",
   AIDE_GITHUB_REPOS: "未設定なら活動中のリポジトリを自動で拾う",
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
+  AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH: "画像メール送信の冪等記録の置き場。既定（data/image-mail-idempotency.json）で足りる",
+  AIDE_IMAGE_MAIL_LOG_PATH: "画像メール送信の履歴の置き場。既定（data/image-mail-log.json）で足りる",
   AIDE_INGEST_URL: "送信側（サブPCのworker）の設定。受け側のVPSでは読まない",
   AIDE_MCP_ACCESS_LOG_PATH: "MCPアクセスの記録の置き場。既定（data/mcp-access.json）で足りる",
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",

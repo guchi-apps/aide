@@ -157,6 +157,12 @@ const ENDPOINTS: FeatureItem[] = [
     description:
       "Zaimの口座・カテゴリ・ジャンルのID一覧。登録時に渡すIDを呼び出し元が引くための口で、/api/zaim/payment と同じシークレットで認証する。",
   },
+  {
+    name: "/api/image-mail/send",
+    meta: "POST",
+    description:
+      "Research Deskのサーバーからmultipart/form-dataで届く画像ZIPを、AIDEが保持するGmail資格情報で社用メールへ送信する。件名は「[画像] {title}」固定、宛先・BCCも環境変数で固定する。専用の共有シークレットで認証し、idempotencyKeyで二重送信を防ぐ。",
+  },
 ];
 
 export function buildSections(registry: ToolRegistry): FeatureSection[] {

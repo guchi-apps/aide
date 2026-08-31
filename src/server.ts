@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleMoneySummary } from "./api/read.ts";
 import { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } from "./api/zaim.ts";
@@ -220,6 +221,15 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
   if (path === "/api/zaim/master") {
     await handleZaimMaster(req, res);
+    return;
+  }
+
+  // ---- 画像メール送信API（#230） ----
+  // Research Desk**のサーバー**からmultipart/form-dataで届く画像ZIPをGmailで送る。
+  // サーバー間通信のためCORS対応は不要。公開URLの遮断リスト（README「公開URLからの遮断」）
+  // には入れない——Research Desk側から直接届く必要があるため。
+  if (path === "/api/image-mail/send") {
+    await handleImageMailSend(req, res);
     return;
   }
 
