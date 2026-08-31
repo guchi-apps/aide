@@ -220,10 +220,17 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
+| `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の週次業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（全体6件・1事業3件まで。重複判定と冪等性はResearch Desk側が持つ） |
 
 ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
 `AIDE_BOT_EMAIL` を使って aide-bot の `POST /api/notices` へ登録する。メールアドレスや認証トークンは
 MCPの引数・応答・ログへ出さない。詳しい設定と手動確認は [docs/chatgpt-mcp.md](docs/chatgpt-mcp.md) を参照。
+
+`aide_research_desk_import_weekly_report` も同じ考え方で、`AIDE_RESEARCH_DESK_URL` と
+`AIDE_RESEARCH_DESK_TOKEN` を使って Research Desk の **AIDE専用内部API**
+（`POST /api/integrations/aide/weekly-report`）へ中継する。ChatGPTはAIDEの接続認証だけを使い、
+Research Desk側の認証情報には触れない。**重複判定・実行履歴・冪等性はResearch Desk側が持つ**ため、
+AIDEは入力の形（事業ごとの件数上限・URL・列挙値・日時）だけを検証して結果をそのまま返す。
 
 
 ## 機能一覧ページ

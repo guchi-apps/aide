@@ -40,3 +40,61 @@ aide-bot側の既存の重複排除・上書き動作を利用できる。
 
 ChatGPT側のMCP接続には既存AIDEの公開URL末尾 `/mcp` を指定する。設定変更後はメタデータ更新または再接続が
 必要になる場合がある。スケジュール実行時の承認有無はChatGPT側の仕様に依存するため、実測結果を記録する。
+
+---
+
+# ChatGPTのスケジュールからResearch Deskへ週報を登録する
+
+宅配事業・ロッカー事業の業界情報は、ChatGPTの定期タスクが毎週日曜日18:00（Asia/Tokyo）に検索・選定・
+要約し、AIDE経由でResearch Deskへ登録する（#211 / guchi-apps/research-desk#31）。
+
+**Research Deskの独立MCPへ直接繋がない。** 静的Bearer認証の独立MCPはChatGPT側の認証運用と合わず、
+アプリごとに接続を増やすより、既に接続・認証済みのAIDEを共通窓口にするほうが既存のAsset Manager連携と
+揃う。ChatGPTはAIDEの接続認証だけを使い、Research Desk側の認証情報には触れない。
+
+```
+ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
+                  → Research Desk（POST /api/integrations/aide/weekly-report）→ DB
+```
+
+## AIDE側の設定
+
+サーバーの `.env` に次の2つを設定する。値はIssue、ログ、MCPの引数や応答へ記録しない。
+
+| 設定 | 内容 |
+| --- | --- |
+| `AIDE_RESEARCH_DESK_URL` | Research Deskの公開URL（例: `https://research.gucchii.com`） |
+| `AIDE_RESEARCH_DESK_TOKEN` | Research Desk側のAIDE専用内部APIと共有するサーバー間Bearerシークレット |
+
+どちらかが未設定、またはURLが `http` / `https` でない場合、ツールは外部へ送信せず未設定結果を返す。
+
+## 入力と制限
+
+`aide_research_desk_import_weekly_report` の引数は `executedAt`、`targetFrom`、`targetTo`、`articles`。
+日時はISO 8601形式で指定する。記事は**全体で1〜6件、1事業あたり3件まで**。
+
+記事の必須項目は `business`（`DELIVERY` = 宅配事業 / `LOCKER` = ロッカー事業）、`informationType`、
+`title`、`url`、`sourceName`。任意で `publisher`、`isPrimarySource`、`publishedAt`、`occurredAt`、
+`summary`、`content`、`implications`（商品企画・全体設計への示唆）、`importance`、`targetCompany`、
+`targetProduct`、`keywords`、`tags`、`periodScope`（`IN_SCOPE` / `PAST_30_DAYS_SUPPLEMENT`）を渡せる。
+
+**重複判定・実行履歴・冪等性はResearch Desk側が持つ。** AIDEは入力の形だけを検証し、応答の
+`status`・`runId`・`insertedCount`・`duplicateCount`・`businessCounts`・`duplicateBusinessCounts`・
+`errors` をそのまま返す。同じ週報を再送しても二重登録されず、重複件数として返る。
+
+登録できなかった場合は `ok: false` と日本語の `reason` を返す。入力の誤りは `INVALID_REQUEST`、
+接続・認証・Research Desk側のエラーは `FAILED`。**HTTPの応答本文は理由文へ混ぜない**（認証情報や
+取得データが漏れる経路になるため）。
+
+## ChatGPT定期タスクの指示例
+
+「宅配事業とロッカー事業の業界情報を直近7日から探し、事業ごとに3件まで選ぶ。7日で足りなければ30日まで
+広げ、その記事の `periodScope` を `PAST_30_DAYS_SUPPLEMENT` にする。各記事にタイトル・URL・情報源・
+公開日・要約・商品企画への示唆・重要度・キーワードを付け、`aide_research_desk_import_weekly_report` を
+1回だけ呼ぶ。」
+
+## 手動確認
+
+1. 通常のChatGPTチャットから記事1件を登録し、Research Deskの週間画面に出ることを確認する。
+2. 同じ内容をもう一度送り、`insertedCount` が増えず `duplicateCount` が増えることを確認する。
+3. 宅配事業とロッカー事業を混ぜて送り、`businessCounts` が分かれて返り、画面でも分かれて見えることを確認する。
