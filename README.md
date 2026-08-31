@@ -2143,3 +2143,16 @@ Claudeは `Anthropic/Toolbox` と `Anthropic/ClaudeAI` の2クライアントで
 
 この5か所の抜けは `src/deploy-env-wiring.test.ts` が検査する。`src/` が読む `AIDE_*` は、すべて
 配線されているか、テスト内の `NOT_REQUIRED_IN_PRODUCTION` に理由付きで登録されているかのどちらかになる。
+
+**この検査は `process.env["AIDE_XXX"]` という直接参照だけを走査する（aide#230）。**
+`readResearchDeskConfig(env: NodeJS.ProcessEnv = process.env)` のように、テストでenvを
+差し替えられるようにする目的で関数の引数に持たせ、内部では `env["AIDE_XXX"]` と間接的に
+読む書き方をすると、この走査から漏れる——本番で値が空でも検査は気づかない。**実行時に
+本番で要る `AIDE_*` は、`src/api/zaim.ts` の `zaimWriteSecret()` のように引数を取らず
+`process.env["AIDE_XXX"]` を直接参照する形にする。** テスト側は `process.env["AIDE_XXX"] = "..."`
+を実際にセット・削除して差し替える。
+
+コメント中に環境変数名をワイルドカード付きで例示するときも要注意で、
+`` `process.env["AIDE_GMAIL_*"]` `` のように `process.env["..."]` の形で書くと、正規表現が
+`*` の手前までを1つの名前として拾い、存在しない `AIDE_GMAIL_` の配線漏れとして誤検出する。
+コメントでは `AIDE_GMAIL_*` を直接参照する、のように地の文で書く。
