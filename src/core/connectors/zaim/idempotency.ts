@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { DATA_DIR } from "../../paths.ts";
-import { createRecordFile } from "./record-file.ts";
+import { createRecordFile } from "../../record-file.ts";
 
 /**
  * 登録済みかどうかの記録。**同じ支出を二重にZaimへ登録しないためだけに持つ。**

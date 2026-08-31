@@ -40,6 +40,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
+| `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 
 #### Zaimへの登録は条件1の例外（aide#37）
 
@@ -51,6 +52,14 @@ Zaim の `POST /v2/home/money/payment` は**公開APIで、car-care / asset-mana
 
 **この例外を前例として使わない。** 「経路は開いているが資格情報を分散させたくない」という形の要望は
 他のサービスでも出うるので、次に持ち込むときはこの節を根拠にせず、Issueで改めて決める。
+
+#### 画像メール送信は条件1の例外だが、Zaimの例外を前例にしていない（aide#230）
+
+Research DeskのブラウザからGmail APIを直接叩くことも技術的には可能で、その場合「他のどこからも
+塞がっている経路」ではなくなる。それでもAIDEへ寄せたのは、Zaimの例外（aide#37）と同じく
+**Gmailの資格情報を1か所に閉じ込めるため**——Research Deskがメール送信権限を持つと、送信元の
+資格情報を持つアプリがまた1つ増える。**この判断はZaimの例外を前例として使わず、Issue #230で
+改めて行った。** 条件2（別の資格情報）・条件3（作成のみ）は文言どおり満たす。
 
 詳細は[個人アプリ向けのZaim登録API](#個人アプリ向けのzaim登録api)。
 
@@ -128,6 +137,12 @@ Notion にはそれがあり、**Googleカレンダー・Gmailには無い**（a
 
 必要になった時点で、この節を根拠にせず改めてIssueで判断する。
 
+**送信専用の `gmail.send`（[個人アプリ向けの画像メール送信API](#個人アプリ向けの画像メール送信api)。
+aide#230）はこの節と別判断。** メール本文を読む権限を持たない別のスコープであり、見送ったのは
+読み取りだけなので、この節の判断はそのまま当てはまらない——改めてIssue #230で判断した。ただし
+`gmail.send` も sensitive scope にあたり、**同意画面が「テスト」のままだと7日で失効する制約は
+同じ**なので、そちらも「本番」への切り替えが要る。
+
 ## 取得と提供の分離
 
 Playwright を使うZaim取得のような重い処理は **worker が定期実行してキャッシュに書き**、MCPサーバー／APIは**キャッシュを読むだけ**にする。
@@ -173,9 +188,12 @@ src/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
     read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary）
     zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
+    image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
+    multipart.ts       multipart/form-data の最小パーサー
     secret.ts          /api 配下の共有シークレット認証
   core/
     connectors/        外部サービスからの取得
+      image-mail/       Gmail送信・冪等記録・履歴（#230）
     models/            共通データモデル
     views/             横断ビュー
   web/                 人間向けのHTMLページ（機能一覧・動作状況・共通知識）と共通レイアウト
@@ -1869,6 +1887,70 @@ AIDE_ZAIM_CONSUMER_KEY=xxx AIDE_ZAIM_CONSUMER_SECRET=yyy \
 取れた値は本番の `.env`（GitHubのsecret経由）と1Passwordにだけ置く。
 
 
+## 個人アプリ向けの画像メール送信API
+
+Research Desk（guchi-apps/research-desk#64）が、ブラウザ内で圧縮・ZIP化した画像を社用メールへ
+即時送信するための口。実装は `src/api/image-mail.ts`。iCloudショートカット「画像を社用メールに
+送る」と同等の操作を、Research Deskの画面から行えるようにする。
+
+**呼び出し元はResearch Desk**のサーバー**（`src/app/api/image-mail/send/route.ts`。Supabase認証は
+あちらで完結する）で、ブラウザではない。** サーバー間通信のためCORS対応は不要——`/api/zaim/payment`
+と同じ構図。
+
+| | |
+|---|---|
+| エンドポイント | `POST /api/image-mail/send`（`multipart/form-data`） |
+| 認証 | `Authorization: Bearer $AIDE_IMAGE_MAIL_TOKEN`（Research Desk側の同名環境変数と同じ値） |
+| 必要な設定 | 上のトークン、宛先（`AIDE_IMAGE_MAIL_TO`）、Gmail OAuthの3つ（`AIDE_GMAIL_CLIENT_ID` ほか）。**1つでも欠ければ503** |
+| リクエストの項目 | `title`（200文字まで）・`imageCount`（整数）・`width`（`1200`/`900`/`600`）・`idempotencyKey`・`zip`（2MiBまで） |
+
+### 件名・宛先はAIDE側で固定する
+
+件名は常に `[画像] {title}` で組み立てる。`[画像]` は固定文字列で、リクエストのどの項目からも
+変更できない。宛先（`AIDE_IMAGE_MAIL_TO`）・BCC（`AIDE_IMAGE_MAIL_BCC`）もAIDE側の環境変数で
+固定し、リクエストに宛先・BCCの項目があっても無視する（Research Desk側もそもそも送らない）。
+
+### 送信元はAIDEが保持するGmail資格情報
+
+送信元GmailのOAuthクライアント・リフレッシュトークンはAIDEだけが持ち、Research Deskへは渡さない。
+`googleapis` 等のSDKは入れず、依存ゼロの方針に従い `fetch` とMIMEの手組みだけで実装している
+（`src/core/connectors/image-mail/gmail.ts`）。
+
+`gmail.send` はGoogleの sensitive scope にあたり、OAuth同意画面の公開ステータスが「テスト」の
+ままだとリフレッシュトークンが7日で失効する（[Gmailを載せていない理由](#gmailを載せていない理由aide173)
+と同じ制約。あちらは読み取り、こちらは送信専用で権限が異なるため、Issue #230で改めて判断した）。
+運用では同意画面を「本番」へ切り替えておく必要がある。
+
+### 二重送信を止める
+
+`idempotencyKey` が同じ再送はGmailへ送らず、前回の `messageId` を `duplicated: true` で返す。
+考え方は[二重登録を止める](#二重登録を止める)と同じで、送る前に「結果不明」として記録し、
+送信されなかったことが確実な場合（Gmailの拒否・資格情報の失効）だけ記録を消す。
+
+### 応答の意味
+
+| 状態 | 意味 |
+|---|---|
+| 200 | 送信できた（`duplicated: true` なら再送で、Gmailへは送っていない） |
+| 400 | 入力が不正。直して送り直す |
+| 409 | 前回の結果が不明。**再送しない**。Gmailの送信済みメールを確認する |
+| 422 | Gmailが内容を拒んだ。送信されていない |
+| 502 | Gmailへ届かない・打ち切り。送信されたかは不明 |
+| 503 | `AIDE_IMAGE_MAIL_*` / `AIDE_GMAIL_*` が揃っておらず、口が開いていない |
+
+### 記録するもの・しないもの
+
+送信成功・失敗、件数、横幅、ZIPサイズ、Gmail messageIdを `data/image-mail-log.json` に記録する
+（`src/core/connectors/image-mail/log.ts`）。**タイトルは記録しない**——写真の内容を示唆する
+文字列を平文ログへ溜めないため。**画像データ（ZIP本体）は送信処理後に保持しない。** メモリ上で
+Gmail APIへ渡すだけで、ディスクへは一度も書かない。
+
+### 公開URLからの遮断リストには入れない
+
+Research Desk側のサーバーから直接届く必要があるため、`/api/money`・`/api/zaim` と違い
+[公開URLからの遮断](#公開urlからの遮断)のApache設定には `image-mail` を入れない。
+
+
 ## ChatGPTからAsset Managerへ請求情報を取り込む（MCP）
 
 ChatGPTのスケジュールからGmailの請求情報を取り込む経路として、MCPツール
@@ -2061,3 +2143,16 @@ Claudeは `Anthropic/Toolbox` と `Anthropic/ClaudeAI` の2クライアントで
 
 この5か所の抜けは `src/deploy-env-wiring.test.ts` が検査する。`src/` が読む `AIDE_*` は、すべて
 配線されているか、テスト内の `NOT_REQUIRED_IN_PRODUCTION` に理由付きで登録されているかのどちらかになる。
+
+**この検査は `process.env["AIDE_XXX"]` という直接参照だけを走査する（aide#230）。**
+`readResearchDeskConfig(env: NodeJS.ProcessEnv = process.env)` のように、テストでenvを
+差し替えられるようにする目的で関数の引数に持たせ、内部では `env["AIDE_XXX"]` と間接的に
+読む書き方をすると、この走査から漏れる——本番で値が空でも検査は気づかない。**実行時に
+本番で要る `AIDE_*` は、`src/api/zaim.ts` の `zaimWriteSecret()` のように引数を取らず
+`process.env["AIDE_XXX"]` を直接参照する形にする。** テスト側は `process.env["AIDE_XXX"] = "..."`
+を実際にセット・削除して差し替える。
+
+コメント中に環境変数名をワイルドカード付きで例示するときも要注意で、
+`` `process.env["AIDE_GMAIL_*"]` `` のように `process.env["..."]` の形で書くと、正規表現が
+`*` の手前までを1つの名前として拾い、存在しない `AIDE_GMAIL_` の配線漏れとして誤検出する。
+コメントでは `AIDE_GMAIL_*` を直接参照する、のように地の文で書く。
