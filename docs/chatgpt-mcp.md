@@ -54,7 +54,7 @@ ChatGPT側のMCP接続には既存AIDEの公開URL末尾 `/mcp` を指定する�
 
 ```
 ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
-                  → Research Desk（POST /api/integrations/aide/weekly-report）→ DB
+                  → Research Desk（POST /api/internal/weekly-report）→ DB
 ```
 
 ## AIDE側の設定
@@ -64,7 +64,7 @@ ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
 | 設定 | 内容 |
 | --- | --- |
 | `AIDE_RESEARCH_DESK_URL` | Research Deskの公開URL（例: `https://research.gucchii.com`） |
-| `AIDE_RESEARCH_DESK_TOKEN` | Research Desk側のAIDE専用内部APIと共有するサーバー間Bearerシークレット |
+| `AIDE_RESEARCH_DESK_TOKEN` | Research Desk側の `INTERNAL_API_KEY` と同じサーバー間Bearerシークレット |
 
 どちらかが未設定、またはURLが `http` / `https` でない場合、ツールは外部へ送信せず未設定結果を返す。
 

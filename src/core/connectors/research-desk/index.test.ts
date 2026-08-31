@@ -150,7 +150,7 @@ describe("research-desk 週報の登録", () => {
     }) as unknown as typeof fetch);
 
     const request = requests[0];
-    assert.equal(request?.url, "https://research.example.test/api/integrations/aide/weekly-report");
+    assert.equal(request?.url, "https://research.example.test/api/internal/weekly-report");
     assert.equal(request?.init.method, "POST");
     const headers = request?.init.headers as Record<string, string>;
     assert.equal(headers["Authorization"], "Bearer service-secret");
@@ -174,7 +174,7 @@ describe("research-desk 週報の登録", () => {
     }
   });
 
-  it("HTTPエラーを判断できる理由へ変換し、本文を漏らさない", async () => {
+  it("HTTPエラーを判断できる理由へ変換し、応答本文を漏らさない", async () => {
     const cases: [number, RegExp][] = [
       [401, /認証/],
       [400, /入力/],
@@ -190,6 +190,23 @@ describe("research-desk 週報の登録", () => {
         assert.match(outcome.reason, pattern);
         assert.doesNotMatch(outcome.reason, /secret-leak|service-secret/);
       }
+    }
+  });
+
+  it("入力エラーはResearch Deskの説明文を添えて返す", async () => {
+    const outcome = await importWeeklyReport(input, config, (async () =>
+      jsonResponse({ error: "invalid_request", message: "articles[0].urlが不正です" }, 400)) as unknown as typeof fetch);
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) assert.match(outcome.reason, /articles\[0\]\.urlが不正です/);
+  });
+
+  it("認証の失敗には応答本文を添えない", async () => {
+    const outcome = await importWeeklyReport(input, config, (async () =>
+      jsonResponse({ error: "unauthorized", message: "INTERNAL_API_KEYが一致しません" }, 401)) as unknown as typeof fetch);
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) {
+      assert.match(outcome.reason, /認証/);
+      assert.doesNotMatch(outcome.reason, /INTERNAL_API_KEY/);
     }
   });
 

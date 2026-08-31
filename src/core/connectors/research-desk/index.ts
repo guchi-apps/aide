@@ -99,8 +99,11 @@ const LIMITS = {
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
-/** Research Desk 側の受け口。research-desk#31 の推奨API。 */
-const IMPORT_PATH = "/api/integrations/aide/weekly-report";
+/** Research Desk 側の受け口（research-desk#31）。あちらの `INTERNAL_API_KEY` と同じ値で認証する。 */
+const IMPORT_PATH = "/api/internal/weekly-report";
+
+/** Research Desk が返す説明文をそのまま返すときの上限。あちら側でも200文字に切っている。 */
+const MAX_DETAIL_LENGTH = 200;
 
 export function readResearchDeskConfig(env: NodeJS.ProcessEnv = process.env): ResearchDeskConfig | null {
   const url = (env["AIDE_RESEARCH_DESK_URL"] ?? "").trim().replace(/\/$/, "");
@@ -324,7 +327,7 @@ export async function importWeeklyReport(
     });
 
     if (!response.ok) {
-      return { ok: false, reason: httpReason(response.status) };
+      return { ok: false, reason: httpReason(response.status, await errorDetail(response)) };
     }
 
     let payload: unknown = null;
@@ -344,7 +347,33 @@ export async function importWeeklyReport(
   }
 }
 
-function httpReason(status: number): string {
+/**
+ * 失敗応答から説明文だけを取り出す。
+ *
+ * Research Desk は入力の直し方が分かる `message` を返す設計で、入力本文もシークレットも
+ * 載せない（research-desk#31）。**取り出すのはその1フィールドだけ**にし、応答全体は使わない。
+ * 認証の失敗だけは何も取り出さない（トークンの取り違えを示す文面を素通ししないため）。
+ */
+async function errorDetail(response: Response): Promise<string | null> {
+  if (response.status === 401 || response.status === 403) return null;
+  try {
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    const message = (payload as Record<string, unknown>)["message"];
+    if (typeof message !== "string") return null;
+    const trimmed = message.trim();
+    return trimmed ? trimmed.slice(0, MAX_DETAIL_LENGTH) : null;
+  } catch {
+    return null;
+  }
+}
+
+function httpReason(status: number, detail: string | null = null): string {
+  const base = baseHttpReason(status);
+  return detail ? `${base}（Research Desk: ${detail}）` : base;
+}
+
+function baseHttpReason(status: number): string {
   if (status === 401 || status === 403) return "Research Deskの認証に失敗しました（AIDE側の設定を確認してください）";
   if (status === 400 || status === 422) return "Research Deskが入力を受け付けませんでした（週報の内容を見直してください）";
   if (status === 404) return "Research Deskの登録先が見つかりませんでした（接続先URLを確認してください）";

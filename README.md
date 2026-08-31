@@ -228,7 +228,7 @@ MCPの引数・応答・ログへ出さない。詳しい設定と手動確認�
 
 `aide_research_desk_import_weekly_report` も同じ考え方で、`AIDE_RESEARCH_DESK_URL` と
 `AIDE_RESEARCH_DESK_TOKEN` を使って Research Desk の **AIDE専用内部API**
-（`POST /api/integrations/aide/weekly-report`）へ中継する。ChatGPTはAIDEの接続認証だけを使い、
+（`POST /api/internal/weekly-report`）へ中継する。ChatGPTはAIDEの接続認証だけを使い、
 Research Desk側の認証情報には触れない。**重複判定・実行履歴・冪等性はResearch Desk側が持つ**ため、
 AIDEは入力の形（事業ごとの件数上限・URL・列挙値・日時）だけを検証して結果をそのまま返す。
 

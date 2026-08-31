@@ -75,7 +75,7 @@ describe("aide_research_desk_import_weekly_report", () => {
   it("Research Deskの内部APIへ送り、件数と実行IDを返す", async () => {
     await withEnv(async () => {
       const fetchMock = mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
-        assert.equal(input, "https://research.example.test/api/integrations/aide/weekly-report");
+        assert.equal(input, "https://research.example.test/api/internal/weekly-report");
         assert.equal(init?.method, "POST");
         assert.equal((init?.headers as Record<string, string>)["Authorization"], `Bearer ${SECRET}`);
         return new Response(JSON.stringify(importResult), { status: 200, headers: { "content-type": "application/json" } });
