@@ -39,6 +39,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_create_issue`（aide#50） | ClaudeアプリからのGitHub Issue起票 | 満たす | `AIDE_GITHUB_ISSUE_TOKEN`（取得用とは別のPAT） | 作成のみ |
 | `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
+| `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 
 #### Zaimへの登録は条件1の例外（aide#37）
 
@@ -64,6 +65,22 @@ Zaimへ書く手段は現状ゼロ。唯一の口である `POST /api/zaim/payme
 資格情報を持つ側だけで、Claudeはそれを持たない。条件2・3は aide#37 と同じ理由で満たす。
 
 詳細は[外部のClaude CodeからのZaim登録](#外部のclaude-codeからのzaim登録mcp)。
+
+#### Web版の入力画面からの登録は条件1を満たす（aide#214）
+
+`POST /api/zaim/payment/web` は同じZaimへの登録だが、**aide#37 の例外を根拠にしていない**。
+
+条件1が問うのは「その経路が他から届くか」で、**Zaim Web版の入力画面を操作する経路は他に無い**。
+公式APIは公開されているが、そのAPIで作った明細はZaimの「レシート置き換え」の候補にならない
+（品目・出金元・日付・金額がまったく同じでも、分かれ目は作成経路にある。
+guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state）とPlaywrightの実行基盤は
+このリポジトリにしか無く、asset-manager 側にはどちらも無い。
+
+条件2は取得と同じ storage state を使うため文言どおりには満たさない——が、**これは
+「読み取り用のトークンに書き込み権限を足した」のではない**。Zaimのログイン状態は元から
+読み書きの区別を持たないCookieで、権限を広げる操作は発生していない。条件3（作成のみ）は満たす。
+
+詳細は[Web版の入力画面からの登録](#web版の入力画面からの登録置き換えに載せるため)。
 
 ## Core と MCP層の境界
 
@@ -162,7 +179,9 @@ src/
     models/            共通データモデル
     views/             横断ビュー
   web/                 人間向けのHTMLページ（機能一覧・動作状況・共通知識）と共通レイアウト
-  worker/              定期実行ジョブ
+  worker/              サブPC側で動くもの
+    run.ts             定期実行ジョブのエントリポイント
+    zaim-web-server.ts Zaim Web版登録の受け口（VPSからの中継先。常駐）
 ```
 
 プロセスを1本に絞っているのはメモリ制約のため。パッケージ分割（monorepo化）は規模が育ってから検討する。
@@ -220,10 +239,17 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
+| `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の週次業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（全体6件・1事業3件まで。重複判定と冪等性はResearch Desk側が持つ） |
 
 ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
 `AIDE_BOT_EMAIL` を使って aide-bot の `POST /api/notices` へ登録する。メールアドレスや認証トークンは
 MCPの引数・応答・ログへ出さない。詳しい設定と手動確認は [docs/chatgpt-mcp.md](docs/chatgpt-mcp.md) を参照。
+
+`aide_research_desk_import_weekly_report` も同じ考え方で、`AIDE_RESEARCH_DESK_URL` と
+`AIDE_RESEARCH_DESK_TOKEN` を使って Research Desk の **AIDE専用内部API**
+（`POST /api/internal/weekly-report`）へ中継する。ChatGPTはAIDEの接続認証だけを使い、
+Research Desk側の認証情報には触れない。**重複判定・実行履歴・冪等性はResearch Desk側が持つ**ため、
+AIDEは入力の形（事業ごとの件数上限・URL・列挙値・日時）だけを検証して結果をそのまま返す。
 
 
 ## 機能一覧ページ
@@ -518,12 +544,16 @@ src/core/connectors/zaim/
   refresh.ts     子プロセスで連携口座の一括更新スクリプトを起動する
   retry.ts       再試行と自動再ログインの「判断」（純粋関数。テストはここ）
   session.ts     子プロセスの起動と、失敗時の回復（再試行・自動再ログイン）
+  web-payment.ts Web版の入力画面からの登録（#214）。子プロセスでスクリプトを起動する
+  web-idempotency.ts / idempotency.ts  二重登録を防ぐ記録（経路ごとに別ファイル）
   scripts/       Playwright本体（子プロセスとして実行）
     login.mjs        初回の手動ログイン。storage state を保存する
     auto-login.mjs   ID・パスワードによる自動ログイン（任意機能）
     scrape.mjs       残高＋証券詳細ページの巡回
     refresh.mjs      連携口座の「データを更新する」を押し、反映を待つ
     keep-alive.mjs   セッション延長のみ（軽量）
+    web-payment.mjs  入力画面（/money/new）を埋めて品目明細を1件登録する
+    receipt-form.mjs 入力画面の当て方のうち、ブラウザが要らない判断（純粋関数。テストはここ）
 ```
 
 ### 前提
@@ -649,24 +679,173 @@ ZAIM_REFRESH_DRY_RUN=1 node --env-file-if-exists=.env src/core/connectors/zaim/s
 
 asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読み取りapi)（`GET /api/money/summary`）から受け取る。
 
-### 取得は巡回、登録は公式API
+### 取得は巡回、登録は2経路
 
 同じZaimでも、**読む経路と書く経路はまったく別**にしている。混同すると、片方の資格情報で
-もう片方を動かそうとして詰まる。
+もう片方を動かそうとして詰まる。さらに書く側も**公式APIとWeb版の画面の2本**ある（#214）。
 
-| | 取得（残高・保有銘柄） | 登録（支出） |
-|---|---|---|
-| 手段 | Playwrightでの画面巡回 | 公式API（`POST /v2/home/money/payment`） |
-| 資格情報 | ログイン状態（storage state。Cookieそのもの） | OAuth 1.0a（`AIDE_ZAIM_*`） |
-| 動く場所 | サブPCの worker | VPSのサーバー（同期リクエスト内） |
-| 実装 | `scrape.ts` / `parse.ts` / `session.ts` | `oauth.ts` / `write.ts` |
+| | 取得（残高・保有銘柄） | 登録: 公式API | 登録: Web版の入力画面 |
+|---|---|---|---|
+| 手段 | Playwrightでの画面巡回 | `POST /v2/home/money/payment` | Playwrightでの画面操作 |
+| 資格情報 | ログイン状態（storage state） | OAuth 1.0a（`AIDE_ZAIM_*`） | ログイン状態（storage state） |
+| 動く場所 | サブPCの worker | VPSのサーバー（同期リクエスト内） | **サブPC**（storage state がある側。VPSは中継する） |
+| 実装 | `scrape.ts` / `parse.ts` / `session.ts` | `oauth.ts` / `write.ts` | `web-payment.ts` / `scripts/web-payment.mjs` |
+| 置き換えの候補になるか | — | **ならない** | **なる** |
 
 **Zaim APIで扱えるのは利用者が手入力したレコードだけ**という制約があり、残高も取れない。
-だから取得は巡回のまま残している。逆に登録はAPIで素直にできるため、Playwrightを持ち出さない
-（同期リクエスト中にChromiumを起動しないという「取得と提供の分離」の方針とも合う）。
+だから取得は巡回のまま残している。
 
 銀行・カード・スマートレシート由来の**自動連携レコードはAPIから見えず、編集もできない**。
 既存レコードの口座付け替え・集計対象外化はこの経路では実現できない（asset-manager#153 Phase 5）。
+
+### Web版の入力画面からの登録（置き換えに載せるため）
+
+**Zaimの「レシート置き換え」の候補になるのは、Web版の入力画面で作った明細だけ。**
+品目・出金元・日付・金額がまったく同じでも、公式APIで作った明細は候補にならない
+（guchi-apps/asset-manager#300 で実測）。分かれ目は内容ではなく**作成経路**にある。
+
+| 作成経路 | 置き換え候補になるか |
+|---|---|
+| 公式API（`POST /v2/home/money/payment`）・出金元が「反映待ち」 | ならない |
+| 公式API・出金元が連携カード | ならない |
+| **Web版の入力画面（`/money/new`）・出金元が連携カード** | **なる** |
+
+そのため、置き換えに載せたい明細だけは `POST /api/zaim/payment/web` を通す。**置き換えの
+操作そのものはスマートフォンアプリ限定なので、この経路が担うのは登録まで**。置き換えは人が行う。
+
+#### 呼び出し方
+
+登録に使う値は**呼び出し元が決めて渡す**（`write.ts` と同じ方針で、アプリ固有のドメイン知識は
+AIDEへ持ち込まない）。公式API経由との違いは3つ。
+
+- **カテゴリはIDではなく名前で渡す**（`categoryName` / `genreName`）。画面がIDを受け取る欄を
+  持っていないため。名前は `GET /api/zaim/master` で引ける
+- **`name`（品目名）・`place`（店舗名）・`fromAccountId`（出金元）は必須。** 置き換えの成立条件が
+  「品目・出金元・日付・金額の一致」なので、欠けた明細を作っても目的を果たさない。
+  `fromAccountId` には**自動連携しているクレジットカード**を指定する（どの口座が自動連携かは
+  AIDEでは判断しない）
+- **`moneyId` は返せない。** 履歴の行にレコードidが振られておらず、画面から読めない。
+  代わりに冪等キーを**メモ欄へ `#<requestId>` として書き込む**ので、後からZaim側で引ける
+
+```bash
+curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web \
+  -H "authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"requestId":"asset-manager:receipt-item:1","date":"2026-08-29","amount":1880,
+       "name":"ピザ","place":"ドミノ・ピザ","categoryName":"食費","genreName":"外食",
+       "fromAccountId":21678522}'
+```
+
+**応答まで数十秒かかる**（ヘッドレスChromiumの起動を含む）。呼び出し元はタイムアウトを長く
+取ること——短く切ると「登録されたか分からない」状態を自分で作ることになる。
+`"dryRun": true` を足すと**送信だけ行わず**、埋まった内容を返して終える。
+
+#### 動くのは storage state があるマシンだけ。VPSは中継する
+
+この口は `AIDE_ZAIM_*`（OAuth）を見ない。使うのはログイン状態だけで、**Playwrightと
+`data/zaim/storage-state.json` がある実行環境——いまはサブPC——でしか成立しない**。
+ところが呼び出し元（asset-manager）もAIDEのサーバーもVPSにいるため、#214 の実装だけでは
+**呼び出し元から一度も届かなかった**。そこでサブPCにも受け口を常駐させ、VPSの同じパスが
+そこへ同期で中継する（#215）。
+
+```
+asset-manager（VPS）
+  └ POST https://aide.gucchii.com/api/zaim/payment/web   ← 呼び出し元から見えるURLは変えない
+      └ AIDE サーバー（VPS・PM2）
+          └ AIDE_ZAIM_WEB_UPSTREAM_URL があれば中継（src/core/connectors/zaim/web-payment-forward.ts）
+              └ 受け口（サブPC・systemd。Tailscaleのアドレスで待ち受け）
+                  └ Playwright で Zaim の画面を操作
+```
+
+| | VPS（中継する側） | サブPC（画面を操作する側） |
+|---|---|---|
+| 動かすもの | 本体サーバー（PM2） | `src/worker/zaim-web-server.ts`（`aide-zaim-web.service`） |
+| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web` と `/health` だけ** |
+| 要る設定 | `AIDE_ZAIM_WEB_UPSTREAM_URL` | `AIDE_ZAIM_WRITE_SECRET`・`AIDE_ZAIM_WEB_HOST` |
+| 冪等の記録 | 持たない | `data/zaim-web-payments.json` |
+
+**呼び出し元から見えるURLは変えない。** asset-manager が知っているのは `AIDE_BASE_URL` だけで、
+AIDEがどのマシンで何を動かしているかは AIDE 側の都合だから。サブPCへ直接向けさせると、
+読み取りAPIまでサブPC経由になり、常駐が止まった瞬間に無関係な機能まで落ちる。
+
+**サブPCで動かすのは本体サーバーではない。** `src/server.ts` をそのまま常駐させれば済むように
+見えるが、それだとOAuth認可サーバーとログイン画面がもう1組でき、`data/auth/` が二重になる。
+必要なのはこの1経路だけなので、それだけを開いた小さな受け口（`src/worker/zaim-web-routes.ts`）に
+してある。認証・入力の検査・失敗の分類は本体と同じ `handleZaimWebPayment` を通す。
+
+**受け口の `.env` に `AIDE_ZAIM_WEB_UPSTREAM_URL` を書かない。** 中継する側の設定で、
+受け口はこれが設定されていると起動を拒否する。取り違えても回り続けないよう、中継には
+`x-aide-zaim-web-forwarded: 1` を付けて1往復で止めている。
+
+#### 中継が失敗したときにどちらへ倒すか
+
+**「Zaimに何も登録されていないと言い切れるか」だけで分ける**（`web-payment.ts` の
+`classifyWebFailure()` と同じ考え方）。ここを誤ると、二重登録か、登録済みの明細を
+人が探す手間かのどちらかになる。
+
+| 中継の結果 | 分類 | 呼び出し元 |
+|---|---|---|
+| 接続できない（`ECONNREFUSED`・`ENOTFOUND` 等） | `rejected` | そのまま送り直してよい |
+| 受け口が画面を開く前に断った（401・429・503 等） | `rejected` | 設定を直して送り直す |
+| 受け口が `kind` を返した | **その値のまま** | 受け口の判断に従う |
+| 打ち切り・応答待ちでの切断 | `failed` | Zaimを確認するまで再送しない |
+
+**受け口が返した `kind` は潰さない。** 特に `conflict`（前回の結果が確定していない）を
+再送可能な分類へ倒すと、同じ支出が2件でき、この経路には削除が無いので人が手で消すことになる。
+
+#### 同時に流すのは1件だけ
+
+ログイン状態はファイル1つで、2つのChromiumが同時に開くと更新が競合し、巡回まで巻き込んで
+セッションを失う。そのため `createZaimWebPayment()` は**実行中なら待たせずに `rejected` で断る**。
+待たせないのは、待つと呼び出し元のタイムアウトに掛かって「登録されたか分からない」になるため。
+**画面を開く前に断れば言い切れる。**
+
+#### 画面の当て方
+
+**クラス名はCSS Modulesのハッシュ付き**（`PaymentForm-module__total___3LWZX`）でZaimのデプロイ
+ごとに変わるため使わない。当てているのは `name` 属性・`placeholder`・ラベルの文言。
+実物で確かめた作り（2026-08-31）は次のとおり。
+
+| | 実際の作り |
+|---|---|
+| フォーム | `form#money_new_form`（`action="/receipts"`）。**品目の行は3行で固定**。増やす操作は無い |
+| 品目名・メモ | `input[name="item_name"]` / `input[name="comment"]`。素直に入力できる |
+| 金額 | `input[name="amount"]` は **readonly**。クリックで開く電卓に**キーボードで打ち、Enterで確定**する。電卓のボタンは合成クリックに反応しない |
+| カテゴリ | コンボボックスに名前で絞り込んで選ぶ。**絞り込みは部分一致**で、「その他」だけでは13件が並ぶため、直前のカテゴリ見出しと合わせて特定する |
+| 出金元 | フォーム内で唯一の `<select>`。`option` の value が**Zaimの口座IDそのもの** |
+| 日付 | ピッカーを開いて「前／次」で月を送り、日を押す。**表示形式（`2026年8月31日(月)`）を自前で組み立てない**（曜日の計算がずれると違う日付で登録される） |
+
+**使わない品目行は消してから送る。** 空行が無視される保証が無く、0円の明細が増えると
+人が手で消すことになる（この経路は削除を持たない）。
+
+**要素が見つからなければ必ず失敗させる。** 入力欄が欠けたまま進むと、金額や出金元の無い明細が
+家計簿に残る。埋め終えた後も、送信の直前に「入れたつもりの値が実際に入っているか」を読み直す。
+
+画面の確認は送信せずに行える。
+
+```bash
+ZAIM_WEB_PAYMENT_DRY_RUN=1 \
+ZAIM_WEB_PAYMENT_INPUT='{"requestId":"check:1","date":"2026-08-29","amount":1880,"name":"ピザ","place":"ドミノ・ピザ","categoryName":"食費","genreName":"外食","fromAccountId":21678522}' \
+node --env-file-if-exists=.env src/core/connectors/zaim/scripts/web-payment.mjs
+```
+
+#### 二重登録を止める
+
+記録は `data/zaim-web-payments.json`（`web-idempotency.ts`）。**公式API経由の
+`data/zaim-payments.json` とは別ファイル**にしている——あちらは「`money_id` が入っていること」を
+確定の印にしており、idを持てないこちらの記録を混ぜると、登録できた明細まで「結果不明」として
+扱われる。
+
+失敗したときに**Zaimへ何が残っているか**で扱いが割れる。ここが二重登録の分かれ目になる。
+
+| 失敗の種類 | 記録 | 呼び出し元 |
+|---|---|---|
+| 送信の**前**に止まった（要素が見つからない・カテゴリが候補に無い・セッション失効） | 消す | `rejected`。直せば送り直してよい |
+| 送信した**後**で確認できない・打ち切り・Chromiumが落ちた | 残す | `failed`。次の再送は `conflict` で止まる |
+
+**一時的な失敗をやり直さない**（`runZaimScript` の `retryTransient: false`）。巡回は何度実行しても
+結果が変わらないが、登録は変わる。セッション失効時の自動再ログインだけは従来どおり通す——
+失効はページを開いた時点で分かるため、送信より前で必ず起きる。
 
 
 ## コネクタ: ops-dashboard
@@ -704,16 +883,18 @@ HTTPステータスと例外の種別まで丸める（例外の `message` に�
 
 #### 全ソースが 401 になるとき
 
-**トークンは同じ値を2か所で別々に管理している。** ここがずれると6ソースすべてが 401 になる（#63）。
+**トークンは1Password上の1か所を両側から参照している**（#217）。以前はAIDE側にも同じ値を複製して
+おり、ずれると6ソースすべてが 401 になっていた（#63）。
 
 | どちら側 | 環境変数 | 1Password |
 |---|---|---|
 | ops-dashboard（受け） | `OPS_API_TOKEN` | `op://apps/ops-dashboard/ops-api-token` |
-| AIDE（送り） | `AIDE_OPS_DASHBOARD_TOKEN` | `op://apps/aide/ops-dashboard-token` |
+| AIDE（送り） | `AIDE_OPS_DASHBOARD_TOKEN` | 同上（提供側を参照する） |
 
 `unavailable` が **1本だけ** 401 なら ops-dashboard 側のルート追加漏れ、**6本すべて** 401 なら
 値の不一致か、ops-dashboard 側で `OPS_API_TOKEN` が未設定（未設定だとトークン経路は常に不可）。
-`configured: true` なのに全滅している場合は、AIDE側の設定漏れではなく**値のずれ**を疑う。
+1Passwordの正は1か所だが、GitHubのsecretは各リポジトリへ同期した写しなので、値を入れ替えた後に
+**片方のリポジトリだけ同期していない**とずれる。
 
 ### 返す粒度
 
@@ -756,9 +937,10 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 | `AIDE_SUBSCRIPTIONS_URL` | `http://127.0.0.1:3107` | そのURLへ問い合わせる |
 | `AIDE_SUBSCRIPTIONS_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
-止まる）。取得に失敗しても Zaim 由来の残高・保有銘柄は従来どおり返す。失敗の理由はHTTPステータスと
-例外の種別まで丸める（例外の `message` にはURLが載るため）。
+トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**。1Passwordでは値を
+複製せず提供側の `op://` をそのまま参照する（#217）。取得に失敗しても Zaim 由来の残高・保有銘柄は
+従来どおり返す。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが
+載るため）。
 
 ### 計算はしない
 
@@ -815,8 +997,9 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 | `AIDE_MYROOM_URL` | `http://127.0.0.1:8000` | そのURLへ問い合わせる |
 | `AIDE_MYROOM_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
-止まる）。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
+トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**。1Passwordでは値を複製せず
+提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで丸める
+（例外の `message` にはURLが載るため）。
 
 **myroom の読み取りAPIは元々 Supabase のユーザーログイン必須**で、サーバー間から読める口が無い。
 内部APIは [myroom#161](https://github.com/guchi-apps/myroom/issues/161) で追加する。**未実装の
@@ -879,8 +1062,9 @@ Google Calendar API用のリフレッシュトークンをAES-256-GCMで暗号�
 | `AIDE_DAYSPAN_URL` | `http://127.0.0.1:3113` | そのURLへ問い合わせる |
 | `AIDE_DAYSPAN_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**（片方だけ変えると連携が
-止まる）。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが載るため）。
+トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**。1Passwordでは値を
+複製せず提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで
+丸める（例外の `message` にはURLが載るため）。
 
 **タイムアウトは8秒**と、他のコネクタ（3秒）より長い。DaySpanの内部APIは受けたリクエストの中で
 Google Calendar と Notion を叩くため、localhost で完結する相手と違って外部サービスの応答時間が
@@ -1398,9 +1582,14 @@ cp deploy/systemd/*.timer deploy/systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
+systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
 systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
 systemctl --user list-timers 'aide-*'
 ```
+
+**`aide-zaim-web.service` だけタイマーを持たない常駐**（#215。VPSからの中継を受ける口）。
+`systemctl --user status aide-zaim-web` と `curl -sS http://$AIDE_ZAIM_WEB_HOST:4748/health` で見る。
+**ログアウトで落ちないよう lingering が要る**（`loginctl enable-linger $USER`。他のタイマーも同じ前提）。
 
 以前はユニットがリポジトリの外にしか無く、間隔がなぜその値なのかを追えなかったため、実体をこちらへ移している。
 

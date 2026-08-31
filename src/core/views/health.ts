@@ -14,6 +14,7 @@ import { readMyRoomConfig } from "../connectors/myroom/index.ts";
 import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
 import { readSubscriptionsConfig } from "../connectors/subscriptions/index.ts";
 import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
+import { zaimWebUpstreamUrl } from "../connectors/zaim/web-payment-forward.ts";
 import type { ZaimSnapshot } from "../connectors/zaim/types.ts";
 import { STALE_AFTER_MINUTES } from "./money.ts";
 
@@ -299,6 +300,16 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       configured: null,
       probeable: false,
       note: "巡回は worker（サブPC）が担当する。動いているかは定期ジョブの記録で分かる。",
+    },
+    {
+      key: "zaim-web-upstream",
+      label: "Zaim Web版登録の受け口（サブPC）",
+      side: "server",
+      configured: zaimWebUpstreamUrl() !== null,
+      probeable: true,
+      // **ここを確かめる手段が他に無い。** 実際に登録して確かめると本物の明細ができ、
+      // この経路には削除が無いので人がZaimの画面から手で消すことになる（#215）。
+      note: "POST /api/zaim/payment/web の中継先。落ちている間、asset-manager からのZaim登録は届かない。",
     },
     {
       key: "signaly",

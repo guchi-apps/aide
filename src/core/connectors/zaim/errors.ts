@@ -24,6 +24,33 @@ export const ZAIM_SESSION_EXPIRED = "ZAIM_SESSION_EXPIRED";
  */
 export const ZAIM_AUTO_RELOGIN_FAILED = "ZAIM_AUTO_RELOGIN_FAILED";
 
+/**
+ * Web版の入力画面が想定と噛み合わないことを表すマーカー（#214）。
+ *
+ * **「送信ボタンを押す前に止まった」という意味を持たせている。** 入力欄が見つからない、
+ * カテゴリが候補に無い、金額を確定できない——いずれもZaimには何も登録されていないので、
+ * 呼び出し元は記録を消して再送を許してよい。
+ */
+export const ZAIM_RECEIPT_FORM = "ZAIM_RECEIPT_FORM";
+
+/**
+ * 送信は行ったが、登録できたかを確認できなかったことを表すマーカー（#214）。
+ *
+ * **こちらは登録された可能性が残る。** 記録を消してはいけない（消すと再送で二重登録になり、
+ * この経路は削除を持たないので人が手で消すことになる）。
+ */
+export const ZAIM_RECEIPT_SUBMITTED = "ZAIM_RECEIPT_SUBMITTED";
+
+/** その失敗が「送信の前に止まった＝Zaimには何も登録されていない」ものか。 */
+export function isZaimReceiptFormFailure(message: string): boolean {
+  return message.includes(ZAIM_RECEIPT_FORM);
+}
+
+/** その失敗が「送信した後で分からなくなった」ものか。 */
+export function isZaimReceiptSubmitted(message: string): boolean {
+  return message.includes(ZAIM_RECEIPT_SUBMITTED);
+}
+
 /** エラーメッセージがセッション失効によるものか。 */
 export function isZaimSessionExpired(message: string): boolean {
   return message.includes(ZAIM_SESSION_EXPIRED);

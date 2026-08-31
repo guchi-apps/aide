@@ -11,7 +11,13 @@ export {
 } from "./parse.ts";
 export { loadZaimOAuthCredentials } from "./oauth.ts";
 export { createZaimPayment, fetchZaimMaster, normalizePaymentInput } from "./write.ts";
+export { createZaimWebPayment, normalizeWebPaymentInput } from "./web-payment.ts";
 export type { ZaimOAuthCredentials } from "./oauth.ts";
+export type {
+  CreateWebPaymentOutcome,
+  ZaimWebPaymentInput,
+  ZaimWebPaymentRegistered,
+} from "./web-payment.ts";
 export type {
   CreatePaymentOutcome,
   ZaimMaster,

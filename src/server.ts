@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { handleIngest } from "./api/ingest.ts";
 import { handleMoneySummary } from "./api/read.ts";
-import { handleZaimMaster, handleZaimPayment } from "./api/zaim.ts";
+import { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -32,6 +32,7 @@ import { roomStatusTool } from "./mcp/tools/room.ts";
 import { scheduleTool } from "./mcp/tools/schedule.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./mcp/tools/zaim.ts";
 import { assetManagerImportPaymentTool } from "./mcp/tools/asset-manager.ts";
+import { researchDeskImportWeeklyReportTool } from "./mcp/tools/research-desk.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import { handleKnowledgePage } from "./web/knowledge.ts";
@@ -78,6 +79,7 @@ registry.register(claudeSessionsTool);
 registry.register(zaimMasterTool);
 registry.register(zaimPaymentTool);
 registry.register(assetManagerImportPaymentTool);
+registry.register(researchDeskImportWeeklyReportTool);
 registry.register(createNotificationTool);
 registry.register(createTaskCandidateTool);
 registry.register(saveDailyBriefTool);
@@ -207,6 +209,13 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 残高を読みたいだけのアプリへZaimへの書き込み権限を渡さない。
   if (path === "/api/zaim/payment") {
     await handleZaimPayment(req, res);
+    return;
+  }
+  // Web版の入力画面を操作して登録する口（#214）。公式APIで作った明細はZaimの
+  // 「レシート置き換え」の候補にならないため、置き換えに載せたいものはこちらを通す。
+  // **Playwrightとログイン状態がある実行環境（サブPC）でだけ成立する。**
+  if (path === "/api/zaim/payment/web") {
+    await handleZaimWebPayment(req, res);
     return;
   }
   if (path === "/api/zaim/master") {

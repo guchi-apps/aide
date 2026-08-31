@@ -8,7 +8,8 @@ import { after, beforeEach, describe, it } from "node:test";
 // 検査を通らない要求はZaimへ届かないが、記録の置き場だけは本番と分けておく。
 const dir = await mkdtemp(join(tmpdir(), "aide-zaim-api-test-"));
 process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
-const { handleZaimMaster, handleZaimPayment } = await import("./zaim.ts");
+process.env["AIDE_ZAIM_WEB_PAYMENT_LOG_PATH"] = join(dir, "zaim-web-payments.json");
+const { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } = await import("./zaim.ts");
 const { resetRateLimits } = await import("../auth/ratelimit.ts");
 
 /**
@@ -169,5 +170,74 @@ describe("GET /api/zaim/master", () => {
     const { res, captured } = fakeRes();
     await handleZaimMaster(fakeReq("GET", "", `Bearer ${SECRET}`), res);
     assert.equal(captured.status, 503);
+  });
+});
+
+/**
+ * `POST /api/zaim/payment/web`（#214）。
+ *
+ * こちらもZaimへ届く前に決まるところだけを見る。**上の口との違いで押さえるのは2点。**
+ * ZaimのOAuth設定を見ないこと（使うのはログイン状態だけ）と、必須の項目が増えていること。
+ */
+async function postWeb(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Promise<Captured> {
+  const { res, captured } = fakeRes();
+  await handleZaimWebPayment(
+    fakeReq("POST", typeof body === "string" ? body : JSON.stringify(body), authorization),
+    res,
+  );
+  return captured;
+}
+
+const VALID_WEB_BODY = {
+  requestId: "test:web:1",
+  amount: 1200,
+  date: "2026-08-19",
+  name: "ピザ",
+  place: "ドミノ・ピザ",
+  categoryName: "食費",
+  genreName: "外食",
+  fromAccountId: 21678522,
+};
+
+describe("POST /api/zaim/payment/web", () => {
+  it("シークレット未設定なら503", async () => {
+    delete process.env["AIDE_ZAIM_WRITE_SECRET"];
+    const result = await postWeb(VALID_WEB_BODY);
+    assert.equal(result.status, 503);
+  });
+
+  it("シークレットが違えば401", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await postWeb(VALID_WEB_BODY, "Bearer wrong")).status, 401);
+  });
+
+  it("POST以外は405（認証より先に見る）", async () => {
+    const { res, captured } = fakeRes();
+    await handleZaimWebPayment(fakeReq("GET", "", null), res);
+    assert.equal(captured.status, 405);
+  });
+
+  it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
+    // ここで503にすると、Zaimへ書ける環境（サブPC）なのに口が開かないことになる。
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    setOAuthEnv(false);
+    const result = await postWeb({ ...VALID_WEB_BODY, name: undefined });
+    assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
+    assert.match(result.body, /name/);
+  });
+
+  it("入力が不正なら400で、何が足りないかを返す", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+
+    for (const key of ["place", "categoryName", "genreName", "fromAccountId"]) {
+      const result = await postWeb({ ...VALID_WEB_BODY, [key]: undefined });
+      assert.equal(result.status, 400, `${key} が無くても通ってしまいます`);
+      assert.match(result.body, new RegExp(key));
+    }
+  });
+
+  it("JSONとして読めなければ400", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await postWeb("{壊れた")).status, 400);
   });
 });

@@ -1,0 +1,24 @@
+[Unit]
+# Zaim Web版の入力画面からの登録を受け付ける常駐サーバー（#215）。
+# 他のユニットと違いタイマーを持たない。VPSのAIDEが中継してきたときだけ働く。
+Description=AIDE: Zaim Web版の入力画面からの登録の受け口
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# 待ち受けるアドレスは .env の AIDE_ZAIM_WEB_HOST（本番は Tailscale のアドレス）。
+# **Tailscale が上がる前に起動すると bind に失敗する。** ユーザーユニットからは
+# tailscaled（システム側）に依存を書けないため、失敗しても Restart で拾う。
+Restart=always
+RestartSec=10s
+
+# 画面の操作に最大180秒かかる。停止のたびに登録の途中で切らないよう、終了は長めに待つ。
+TimeoutStopSec=4min
+
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && exec node --env-file-if-exists=.env src/worker/zaim-web-server.ts'
+
+[Install]
+WantedBy=default.target

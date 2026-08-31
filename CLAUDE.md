@@ -26,6 +26,18 @@
 **Node 24 以上が要る**（`package.json` の `engines` が `>=24`）。それより下では型注釈付きの `.ts` を
 そのまま実行できず、`npm run dev`・`npm start` が起動しない。
 
+**`npm run dev` は `.env` に `AIDE_AUTH_PASSWORD` が無いと起動しない。** worktreeへコピーされる
+`.env` にはこの値が入っておらず、`loadAuthConfig`（`src/auth/config.ts`）が起動時に例外を投げて
+落ちる。**シークレットを`.env`へ書き足さず**、画面やMCPを手元で確かめるときは認証を明示的に
+切って起動する（#211）。
+
+```bash
+AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
+```
+
+`/mcp` は Bearer 認証の後ろにあるため、`AIDE_AUTH_DISABLED=1` を付けないと `tools/list` も
+`tools/call` も401で終わり、ツールの動作を確かめられない。
+
 **型ストリッピングは「型注釈を消すだけ」で、実行時に別のコードを生む構文は使えない。**
 `tsc --noEmit` は通るのに実行時だけ `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` で落ちるため、
 型チェックだけでは気づけない。該当するのは constructor 引数への修飾子（parameter property。
@@ -52,6 +64,21 @@ develop向けPRが `develop` とコンフリクトした場合は、`claude-conf
 - 進捗管理の設計: [progress-status-architecture.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/progress-status-architecture.md)
 - 無人実行の挙動: [multi-agent/dispatch.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/multi-agent/dispatch.md)
 - 自動修復の挙動: [multi-agent/auto-repair.md](https://github.com/guchi-apps/issue-deck/blob/main/docs/multi-agent/auto-repair.md)
+
+### IssueやPRの本文をプログラムで読むときは `gh api` を使う
+
+**`gh issue view --comments` と `gh pr view --json body` はこのリポジトリで落ちる**（#215）。
+Projects (classic) の廃止で `GraphQL: ... (repository.issue.projectCards)` だけが返り、本文は
+1行も出ない。パイプの先で「本文が空」として扱うと黙って壊れるので、REST版に置き換える。
+
+```bash
+gh api repos/guchi-apps/aide/issues/<番号>/comments --jq '.[] | .body'
+gh api repos/guchi-apps/aide/pulls/<番号> --jq .body
+gh api repos/guchi-apps/aide/pulls/<番号> --method PATCH -F body=@body.md
+```
+
+人が読むだけなら `gh issue view <番号> --json title,body,labels,comments` も通る
+（フィールドを明示すれば `projectCards` を引かない）。
 
 ### リリース・デプロイ通知
 
@@ -130,6 +157,13 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 - 自分が作成したPull Requestの自己マージ
 - **外部サービスへの実アクセス**（Zaim へのログイン・巡回など。storage state はCookieそのものであり、
   無人実行から触らない）
+- **Zaim へ実際に明細を登録すること**（`POST /api/zaim/payment/web` ・
+  `scripts/web-payment.mjs`）。**この経路は削除を持たない**ので、間違って作った明細は人が
+  Zaim の画面から手で消すことになる。画面の当て方を確かめる必要があるときは、送信を行わない
+  `ZAIM_WEB_PAYMENT_DRY_RUN=1` を必ず付ける（#214）
+- **サブPCで動いている受け口（`aide-zaim-web.service` / `npm run zaim-web-server`）を止める・
+  再起動すること**（#215）。VPSからのZaim登録がその間ずっと届かなくなる。手元で挙動を
+  確かめるときは `AIDE_ZAIM_WEB_PORT` を空きポートにして別に起動する
 
 ### コミット・PR・コメントの書き方
 
