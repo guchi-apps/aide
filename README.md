@@ -1901,20 +1901,35 @@ Research Desk（guchi-apps/research-desk#64）が、ブラウザ内で圧縮・Z
 |---|---|
 | エンドポイント | `POST /api/image-mail/send`（`multipart/form-data`） |
 | 認証 | `Authorization: Bearer $AIDE_IMAGE_MAIL_TOKEN`（Research Desk側の同名環境変数と同じ値） |
-| 必要な設定 | 上のトークン、宛先（`AIDE_IMAGE_MAIL_TO`）、Gmail OAuthの3つ（`AIDE_GMAIL_CLIENT_ID` ほか）。**1つでも欠ければ503** |
+| 必要な設定 | 上のトークン、宛先（`AIDE_IMAGE_MAIL_TO`）、Gmail OAuthの3つ（`AIDE_GMAIL_CLIENT_ID` ほか）。**1つでも欠ければ503**。送信元（`AIDE_IMAGE_MAIL_FROM`）は任意 |
 | リクエストの項目 | `title`（200文字まで）・`imageCount`（整数）・`width`（`1200`/`900`/`600`）・`idempotencyKey`・`zip`（2MiBまで） |
 
-### 件名・宛先はAIDE側で固定する
+### 件名・宛先・送信元はAIDE側で固定する
 
 件名は常に `[画像] {title}` で組み立てる。`[画像]` は固定文字列で、リクエストのどの項目からも
-変更できない。宛先（`AIDE_IMAGE_MAIL_TO`）・BCC（`AIDE_IMAGE_MAIL_BCC`）もAIDE側の環境変数で
-固定し、リクエストに宛先・BCCの項目があっても無視する（Research Desk側もそもそも送らない）。
+変更できない。宛先（`AIDE_IMAGE_MAIL_TO`）・BCC（`AIDE_IMAGE_MAIL_BCC`）・送信元
+（`AIDE_IMAGE_MAIL_FROM`）もAIDE側の環境変数で固定し、リクエストに同じ項目があっても無視する
+（Research Desk側もそもそも送らない）。**呼び出し元から任意のアドレスを名乗れないようにする**
+ため、送信元だけをリクエスト項目にする例外は作っていない。
 
 ### 送信元はAIDEが保持するGmail資格情報
 
 送信元GmailのOAuthクライアント・リフレッシュトークンはAIDEだけが持ち、Research Deskへは渡さない。
 `googleapis` 等のSDKは入れず、依存ゼロの方針に従い `fetch` とMIMEの手組みだけで実装している
 （`src/core/connectors/image-mail/gmail.ts`）。
+
+`AIDE_IMAGE_MAIL_FROM` を設定すると、その値が `From` ヘッダに載る（aide#238）。
+`user@example.com` と `表示名 <user@example.com>` のどちらの形でも書け、日本語の表示名は
+RFC 2047でエンコードされる。**未設定なら `From` を書かず、Gmailが認可済みアカウントのアドレスで
+補完する**（以前の挙動）。
+
+**Gmailが `From` に許すのは、認可したアカウント本人か、Gmailの設定「アカウントとインポート →
+名前 → 他のメールアドレスを追加」で確認済みの別アドレス（send-as alias）だけ。** それ以外を
+指定すると送信時に拒否され、この口は422を返す。エイリアスの確認を済ませてから設定すること。
+
+形式が不正な値（`@` が無い・改行を含むなど）を設定した場合は、Gmailへ送らず503を返す——
+`From` へ素通しすると改行で任意のヘッダを差し込まれるため、`src/core/connectors/image-mail/gmail.ts`
+の `formatFromAddress()` で弾いている。
 
 `gmail.send` はGoogleの sensitive scope にあたり、OAuth同意画面の公開ステータスが「テスト」の
 ままだとリフレッシュトークンが7日で失効する（[Gmailを載せていない理由](#gmailを載せていない理由aide173)
@@ -1936,7 +1951,7 @@ Research Desk（guchi-apps/research-desk#64）が、ブラウザ内で圧縮・Z
 | 409 | 前回の結果が不明。**再送しない**。Gmailの送信済みメールを確認する |
 | 422 | Gmailが内容を拒んだ。送信されていない |
 | 502 | Gmailへ届かない・打ち切り。送信されたかは不明 |
-| 503 | `AIDE_IMAGE_MAIL_*` / `AIDE_GMAIL_*` が揃っておらず、口が開いていない |
+| 503 | `AIDE_IMAGE_MAIL_*` / `AIDE_GMAIL_*` が揃っていない、または `AIDE_IMAGE_MAIL_FROM` の形式が不正で、口が開いていない |
 
 ### 記録するもの・しないもの
 
@@ -1958,6 +1973,14 @@ ChatGPTのスケジュールからGmailの請求情報を取り込む経路と�
 Asset Managerの `POST /api/receipts/import` だけを呼び出す。`gmailMessageId` と
 `confidence` は必須で、`source: "gmail"` はAIDE側が付与する。同じ `gmailMessageId` の再送は
 Asset Manager側の冪等性で `duplicate` になる。
+
+`date` は購入日時で、`YYYY-MM-DD` に加えて `YYYY-MM-DDTHH:mm`（秒・末尾の `Z` / `+09:00` も可）を
+受け付ける（#236）。書式はAsset Manager側の `parsePurchasedAt`（`lib/receipt-service.ts`）に
+合わせてあり、タイムゾーンを省いた値はAsset ManagerがJSTとして解釈する。**時刻を付けるのは、
+メール本文に購入時刻・利用時刻が印字されていて読み取れるときだけ**で、読み取れない・自信が無い
+ときは日付だけを送る（推測した時刻を送らない）。**メールの受信日時（`internalDate`・`Date`
+ヘッダ）を購入時刻として使ってはいけない**——請求メールは購入から数時間〜数日遅れて届くため、
+家計簿に誤った購入時刻が残る。Zaimの支出に時刻の概念は無いので、時刻が残るのはAsset Manager側だけ。
 
 電気・ガスなど使用量が書かれた請求メールでは、任意項目の `usage`（32文字以内）に本文の表記の
 まま渡せる（例: `258kWh`、`12m3`）。単位表記の正規化はAsset Manager側が行うため、AIDEは

@@ -42,7 +42,9 @@ export function loadGmailCredentials(): GmailCredentials | null {
   return { clientId, clientSecret, refreshToken };
 }
 
-export interface ImageMailRecipients {
+export interface ImageMailAddresses {
+  /** `From` に載せる値（組み立て済み）。未設定なら null で、Gmailが認可済みアカウントのアドレスで補完する。 */
+  from: string | null;
   to: string[];
   bcc: string[];
 }
@@ -55,10 +57,62 @@ function splitAddresses(value: string | undefined): string[] {
     .filter((address) => address !== "");
 }
 
-export function loadImageMailRecipients(): ImageMailRecipients | null {
+/** `user@example.com` の形か（表示名・山括弧を含まない裸のアドレス）。 */
+function isPlainAddress(address: string): boolean {
+  return /^[^\s<>@,;:"]+@[^\s<>@,;:."]+(\.[^\s<>@,;:."]+)+$/.test(address);
+}
+
+/**
+ * RFC 2822 の表示名を組み立てる。非ASCIIはRFC 2047でエンコードし、
+ * ASCIIでも特殊文字（`.` や `,` など）を含むなら引用符でくくる。
+ */
+function formatDisplayName(name: string): string {
+  if (!/^[\x20-\x7e]*$/.test(name)) return encodeWord(name);
+  if (!/[()<>@,;:\\".[\]]/.test(name)) return name;
+  return `"${name.replace(/([\\"])/g, "\\$1")}"`;
+}
+
+/**
+ * `AIDE_IMAGE_MAIL_FROM` の値から `From` ヘッダに載せる文字列を作る（aide#238）。
+ * `user@example.com` と `表示名 <user@example.com>` の両方を受け付け、形式が不正なら null。
+ *
+ * **改行を含む値は必ず弾く。** ヘッダに素通しすると任意のヘッダを差し込まれる
+ * （現状の値の出どころは環境変数だけだが、検査はここで閉じておく）。
+ */
+export function formatFromAddress(value: string): string | null {
+  if (/[\r\n]/.test(value)) return null;
+  const trimmed = value.trim();
+  const match = /^(.*)<([^<>]*)>$/.exec(trimmed);
+  const displayName = match ? match[1]!.trim() : "";
+  const address = (match ? match[2]! : trimmed).trim();
+  if (!isPlainAddress(address)) return null;
+  if (!displayName) return address;
+  return `${formatDisplayName(displayName)} <${address}>`;
+}
+
+/**
+ * 送信元・宛先・BCCを環境変数から読む。設定が足りない・形式が不正なら理由を返す
+ * （呼び出し元はそのまま503のメッセージに使う）。
+ */
+export function loadImageMailAddresses(): { addresses: ImageMailAddresses } | { error: string } {
   const to = splitAddresses(process.env["AIDE_IMAGE_MAIL_TO"]);
-  if (to.length === 0) return null;
-  return { to, bcc: splitAddresses(process.env["AIDE_IMAGE_MAIL_BCC"]) };
+  if (to.length === 0) {
+    return { error: "送信先（AIDE_IMAGE_MAIL_TO）が未設定のため利用できません" };
+  }
+
+  const rawFrom = (process.env["AIDE_IMAGE_MAIL_FROM"] ?? "").trim();
+  let from: string | null = null;
+  if (rawFrom !== "") {
+    from = formatFromAddress(rawFrom);
+    if (from === null) {
+      // 値そのものは出さない（設定ミスの指摘に実値は要らない）。
+      return {
+        error: "送信元（AIDE_IMAGE_MAIL_FROM）の形式が不正です。user@example.com または 表示名 <user@example.com> の形で指定してください",
+      };
+    }
+  }
+
+  return { addresses: { from, to, bcc: splitAddresses(process.env["AIDE_IMAGE_MAIL_BCC"]) } };
 }
 
 type TokenOutcome = { ok: true; accessToken: string } | { ok: false; kind: "unauthorized" | "failed"; reason: string };
@@ -106,9 +160,9 @@ async function fetchAccessToken(
   }
 }
 
-/** RFC 2047: 非ASCII件名を `=?UTF-8?B?...?=` へエンコードする。 */
-function encodeSubject(subject: string): string {
-  return `=?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`;
+/** RFC 2047: 非ASCIIのヘッダ値（件名・表示名）を `=?UTF-8?B?...?=` へエンコードする。 */
+function encodeWord(value: string): string {
+  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 
 /** RFC 2045: base64本文は76文字ごとに改行する。 */
@@ -117,6 +171,8 @@ function chunkBase64(base64: string): string {
 }
 
 export interface BuildMimeMessageInput {
+  /** 送信元（`formatFromAddress()` を通した値）。省略するとGmailが認可済みアカウントのアドレスで補完する。 */
+  from?: string | undefined;
   to: string[];
   bcc: string[];
   subject: string;
@@ -128,16 +184,19 @@ export interface BuildMimeMessageInput {
  * RFC 2822 のメッセージ本文（`multipart/mixed`）を組み立てる。
  *
  * 本文・添付ともに `Content-Transfer-Encoding: base64` にし、メッセージ全体をASCIIだけで
- * 構成する（quoted-printableとの使い分けをせず実装を単純にする）。**`From` は書かない**——
- * Gmail APIが認可されたアカウントのアドレスを自動で補完するため、誤った送信元を書いて
- * 拒否される余地を無くす。
+ * 構成する（quoted-printableとの使い分けをせず実装を単純にする）。
+ *
+ * **`From` は指定されたときだけ書く**（aide#238）。書かなければGmail APIが認可済みアカウントの
+ * アドレスを補完する。Gmailは認可済みアカウント本人か、Gmailの設定で確認済みの別アドレス
+ * （send-as alias）しか `From` に許さないため、それ以外を書くと400（`rejected`）で返ってくる。
  */
 export function buildMimeMessage(input: BuildMimeMessageInput): string {
   const boundary = `----aide-image-mail-${randomBytes(16).toString("hex")}`;
   const headers = [
+    ...(input.from ? [`From: ${input.from}`] : []),
     `To: ${input.to.join(", ")}`,
     ...(input.bcc.length > 0 ? [`Bcc: ${input.bcc.join(", ")}`] : []),
-    `Subject: ${encodeSubject(input.subject)}`,
+    `Subject: ${encodeWord(input.subject)}`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ];

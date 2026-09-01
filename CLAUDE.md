@@ -80,6 +80,23 @@ gh api repos/guchi-apps/aide/pulls/<番号> --method PATCH -F body=@body.md
 人が読むだけなら `gh issue view <番号> --json title,body,labels,comments` も通る
 （フィールドを明示すれば `projectCards` を引かない）。
 
+### 連携先リポジトリの対応状況は、Issueの状態ではなくブランチの実物で確かめる
+
+AIDEは asset-manager など他リポジトリのAPIを呼ぶため、「相手側が対応済みか」を前提にした変更を
+入れることがある。**その判定にIssueのopen/closedを使わない。** issue-deckの運用では
+`develop` へマージ済みでもIssueはopenのまま（Statusが`Develop`）なので、openを見て「未対応」と
+判断すると誤る。逆に、対応が`develop`止まりで**本番（`main`）へは出ていない**こともある。
+
+```bash
+cd ~/apps/<相手リポジトリ> && git fetch origin develop main -q
+git show origin/develop:<相手のファイル> | grep -n <確かめたい実装>
+git show origin/main:<相手のファイル>    | grep -n <確かめたい実装>
+```
+
+`main` に入っていない機能に依存する変更をAIDEだけ先に本番へ出すと、本番でだけ失敗する
+（#236では、時刻付き `date` を送ると asset-manager の `main` が400を返す状態だった）。
+その場合は**リリース順**をPR本文の「注意点」とIssueコメントに明記する。
+
 ### リリース・デプロイ通知
 
 `deploy.yml` の `notify`（デプロイ）と `notify-release`（リリース）が

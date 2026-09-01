@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { buildMimeMessage, loadGmailCredentials, loadImageMailRecipients, sendGmailMessage } from "./gmail.ts";
+import { buildMimeMessage, formatFromAddress, loadGmailCredentials, loadImageMailAddresses, sendGmailMessage } from "./gmail.ts";
 
 /** 実際のGmail API・Google OAuthエンドポイントへは接続しない。すべて fetch をモックする。 */
 
@@ -10,6 +10,7 @@ const ENV_NAMES = [
   "AIDE_GMAIL_REFRESH_TOKEN",
   "AIDE_IMAGE_MAIL_TO",
   "AIDE_IMAGE_MAIL_BCC",
+  "AIDE_IMAGE_MAIL_FROM",
 ] as const;
 
 afterEach(() => {
@@ -30,22 +31,67 @@ describe("loadGmailCredentials", () => {
   });
 });
 
-describe("loadImageMailRecipients", () => {
-  it("TOが無ければ null（口が開かない）", () => {
-    assert.equal(loadImageMailRecipients(), null);
+describe("formatFromAddress", () => {
+  it("裸のアドレスはそのまま使う", () => {
+    assert.equal(formatFromAddress("from@example.com"), "from@example.com");
+  });
+
+  it("表示名付きは山括弧の形を保ち、日本語の表示名はRFC2047でエンコードする", () => {
+    assert.equal(formatFromAddress("Aide Bot <from@example.com>"), "Aide Bot <from@example.com>");
+    const encoded = formatFromAddress("画像便 <from@example.com>");
+    assert.equal(encoded, `=?UTF-8?B?${Buffer.from("画像便", "utf8").toString("base64")}?= <from@example.com>`);
+  });
+
+  it("ASCIIでも特殊文字を含む表示名は引用符でくくる", () => {
+    assert.equal(formatFromAddress("Aide, Bot <from@example.com>"), '"Aide, Bot" <from@example.com>');
+  });
+
+  it("形式が不正なら null（改行によるヘッダ差し込みも弾く）", () => {
+    assert.equal(formatFromAddress("not-an-address"), null);
+    assert.equal(formatFromAddress("from@localhost"), null);
+    assert.equal(formatFromAddress("from@example.com\r\nBcc: leak@example.com"), null);
+    assert.equal(formatFromAddress("Aide <from@example.com> extra"), null);
+  });
+});
+
+describe("loadImageMailAddresses", () => {
+  it("TOが無ければ理由を返す（口が開かない）", () => {
+    const result = loadImageMailAddresses();
+    assert.ok("error" in result);
+    assert.match(result.error, /AIDE_IMAGE_MAIL_TO/);
   });
 
   it("カンマ区切りで複数の宛先・BCCを読む", () => {
     process.env["AIDE_IMAGE_MAIL_TO"] = "a@example.com, b@example.com";
     process.env["AIDE_IMAGE_MAIL_BCC"] = "c@example.com";
-    const recipients = loadImageMailRecipients();
-    assert.deepEqual(recipients, { to: ["a@example.com", "b@example.com"], bcc: ["c@example.com"] });
+    const result = loadImageMailAddresses();
+    assert.deepEqual(result, {
+      addresses: { from: null, to: ["a@example.com", "b@example.com"], bcc: ["c@example.com"] },
+    });
   });
 
-  it("BCC未設定なら空配列", () => {
+  it("BCC・FROM未設定なら空配列とnull", () => {
     process.env["AIDE_IMAGE_MAIL_TO"] = "a@example.com";
-    const recipients = loadImageMailRecipients();
-    assert.deepEqual(recipients, { to: ["a@example.com"], bcc: [] });
+    const result = loadImageMailAddresses();
+    assert.deepEqual(result, { addresses: { from: null, to: ["a@example.com"], bcc: [] } });
+  });
+
+  it("FROMが設定されていれば組み立てた値を返す", () => {
+    process.env["AIDE_IMAGE_MAIL_TO"] = "a@example.com";
+    process.env["AIDE_IMAGE_MAIL_FROM"] = " Aide Bot <from@example.com> ";
+    const result = loadImageMailAddresses();
+    assert.deepEqual(result, {
+      addresses: { from: "Aide Bot <from@example.com>", to: ["a@example.com"], bcc: [] },
+    });
+  });
+
+  it("FROMの形式が不正なら理由を返し、実値は含めない", () => {
+    process.env["AIDE_IMAGE_MAIL_TO"] = "a@example.com";
+    process.env["AIDE_IMAGE_MAIL_FROM"] = "broken-address";
+    const result = loadImageMailAddresses();
+    assert.ok("error" in result);
+    assert.match(result.error, /AIDE_IMAGE_MAIL_FROM/);
+    assert.doesNotMatch(result.error, /broken-address/);
   });
 });
 
@@ -71,6 +117,29 @@ describe("buildMimeMessage", () => {
     assert.ok(attachmentMatch);
     const decoded = Buffer.from(attachmentMatch[1]!.replace(/\r\n/g, ""), "base64");
     assert.ok(decoded.equals(zip));
+  });
+
+  it("From未指定ならFromヘッダを書かない（Gmailが認可済みアカウントで補完する）", () => {
+    const raw = buildMimeMessage({
+      to: ["to@example.com"],
+      bcc: [],
+      subject: "件名",
+      bodyText: "本文",
+      attachment: { filename: "images.zip", contentType: "application/zip", data: Buffer.from("zip") },
+    });
+    assert.doesNotMatch(raw, /^From:/m);
+  });
+
+  it("From指定ありならToより前にFromヘッダを書く", () => {
+    const raw = buildMimeMessage({
+      from: "Aide Bot <from@example.com>",
+      to: ["to@example.com"],
+      bcc: [],
+      subject: "件名",
+      bodyText: "本文",
+      attachment: { filename: "images.zip", contentType: "application/zip", data: Buffer.from("zip") },
+    });
+    assert.match(raw, /^From: Aide Bot <from@example\.com>\r\nTo: to@example\.com\r\n/);
   });
 
   it("ASCIIのみで構成される（base64エンコードのため）", () => {

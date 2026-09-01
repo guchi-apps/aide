@@ -133,6 +133,71 @@ describe("asset_manager_import_payment", () => {
     );
   });
 
+  it("時刻付きのdateを加工せずそのまま送る", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        source: "gmail",
+        gmailMessageId: "message-date-1",
+        confidence: 0.9,
+        date: "2026-08-20T19:04",
+        amount: 1280,
+        name: "コーヒー豆",
+      });
+      return new Response(JSON.stringify({ status: "imported", receiptId: "receipt-date-1", zaimMoneyId: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    try {
+      assert.deepEqual(
+        parsed(await assetManagerImportPaymentTool.handler({
+          gmailMessageId: "message-date-1",
+          confidence: 0.9,
+          date: "2026-08-20T19:04",
+          amount: 1280,
+          name: "コーヒー豆",
+        }, { sessionId: null })),
+        { status: "imported", receiptId: "receipt-date-1", zaimMoneyId: null },
+      );
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("dateはAsset Managerが受け付ける書式だけを通す", async () => {
+    // 入力スキーマのpatternと実行時の検証が食い違わないよう、同じ値で両方を確かめる。
+    const properties = assetManagerImportPaymentTool.inputSchema["properties"] as Record<string, { pattern?: string }>;
+    const pattern = new RegExp(properties["date"]!.pattern!);
+    // 認証情報が無いときのreasonを目印にして、dateの検証を通り抜けたことを確かめる。
+    const secret = process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+    delete process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+
+    try {
+      for (const value of ["2026-08-20", "2026-08-20T19:04", "2026-08-20T19:04:32", "2026-08-20T19:04Z", "2026-08-20T19:04:32+09:00"]) {
+        assert.equal(pattern.test(value), true, `${value} はスキーマで受け付けるはず`);
+        assert.deepEqual(
+          parsed(await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-date-ok", confidence: 0.9, date: value }, { sessionId: null })),
+          { status: "error", reason: "未設定（Asset Manager連携用の認証情報がありません）" },
+          `${value} はdateの検証を通り抜けるはず`,
+        );
+      }
+
+      for (const value of ["2026-08-20 19:04", "2026-08-20T19", "2026/08/20", "2026-08-20T19:04+0900", ""]) {
+        assert.equal(pattern.test(value), false, `${value} はスキーマで弾くはず`);
+        assert.deepEqual(
+          parsed(await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-date-ng", confidence: 0.9, date: value }, { sessionId: null })),
+          { status: "error", reason: "date は YYYY-MM-DD または YYYY-MM-DDTHH:mm 形式で指定してください" },
+        );
+      }
+    } finally {
+      if (secret === undefined) delete process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+      else process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = secret;
+    }
+  });
+
   it("必須値とconfidenceを実行時にも検証する", async () => {
     assert.deepEqual(parsed(await assetManagerImportPaymentTool.handler({ confidence: 0.9 }, { sessionId: null })), {
       status: "error",
