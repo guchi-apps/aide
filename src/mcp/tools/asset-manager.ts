@@ -31,8 +31,15 @@ function invalid(reason: string): ToolResult {
   return result({ status: "error", reason });
 }
 
+/**
+ * 購入日時として受け付ける形。`YYYY-MM-DD` と `YYYY-MM-DDTHH:mm[:ss]`（末尾に `Z` / `±HH:MM` を付けてもよい）。
+ * Asset Manager の `parsePurchasedAt`（`lib/receipt-service.ts`）と同じ書式に揃えてある（#236）。
+ * タイムゾーンを省いた場合はAsset Manager側がJSTとして解釈する。
+ */
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})?)?$/;
+
 function validDate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  return typeof value === "string" && DATE_PATTERN.test(value);
 }
 
 function buildPayload(args: Record<string, unknown>): Record<string, unknown> | string {
@@ -45,7 +52,7 @@ function buildPayload(args: Record<string, unknown>): Record<string, unknown> | 
   }
 
   if (args["date"] !== undefined && !validDate(args["date"])) {
-    return "date は YYYY-MM-DD 形式で指定してください";
+    return "date は YYYY-MM-DD または YYYY-MM-DDTHH:mm 形式で指定してください";
   }
 
   if (args["amount"] !== undefined) {
@@ -90,13 +97,23 @@ export const assetManagerImportPaymentTool: Tool = {
     "重複判定・信頼度判定・反映待ち登録を行う。Gmailの請求メール1件を取り込むときだけ呼び、" +
     "gmailMessageId は必ず元メールの messageId を渡す。confidence も必ず指定し、曖昧な抽出結果は低くする。" +
     "status（imported / pendingReview / duplicate / ignored / error）、receiptId、zaimMoneyId、reasonを含む" +
-    "Asset Managerの結果をそのまま返す。同じgmailMessageIdを再送してもduplicateになる。",
+    "Asset Managerの結果をそのまま返す。同じgmailMessageIdを再送してもduplicateになる。" +
+    "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。",
   inputSchema: {
     type: "object",
     properties: {
       gmailMessageId: { type: "string", description: "Gmailの元メールのmessageId。再送・重複防止に使う。" },
       threadId: { type: "string" },
-      date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+      date: {
+        type: "string",
+        pattern: DATE_PATTERN.source,
+        description:
+          "購入日時。JSTで `YYYY-MM-DD`、または時刻まで分かる場合は `YYYY-MM-DDTHH:mm`（秒・末尾の `Z` / `+09:00` も可）。" +
+          "時刻を付けるのは、メール本文に購入時刻・利用時刻が印字されていて読み取れるときだけにする。" +
+          "読み取れない・自信が無いときは日付だけを送る（推測した時刻を送らない）。" +
+          "メールの受信日時（internalDate・Dateヘッダ）を購入時刻として使ってはいけない" +
+          "（請求メールは購入から数時間〜数日遅れて届くため）。",
+      },
       amount: { type: "integer", minimum: 1 },
       name: { type: "string" },
       place: { type: "string" },

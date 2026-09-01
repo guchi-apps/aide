@@ -1959,6 +1959,14 @@ Asset Managerの `POST /api/receipts/import` だけを呼び出す。`gmailMessa
 `confidence` は必須で、`source: "gmail"` はAIDE側が付与する。同じ `gmailMessageId` の再送は
 Asset Manager側の冪等性で `duplicate` になる。
 
+`date` は購入日時で、`YYYY-MM-DD` に加えて `YYYY-MM-DDTHH:mm`（秒・末尾の `Z` / `+09:00` も可）を
+受け付ける（#236）。書式はAsset Manager側の `parsePurchasedAt`（`lib/receipt-service.ts`）に
+合わせてあり、タイムゾーンを省いた値はAsset ManagerがJSTとして解釈する。**時刻を付けるのは、
+メール本文に購入時刻・利用時刻が印字されていて読み取れるときだけ**で、読み取れない・自信が無い
+ときは日付だけを送る（推測した時刻を送らない）。**メールの受信日時（`internalDate`・`Date`
+ヘッダ）を購入時刻として使ってはいけない**——請求メールは購入から数時間〜数日遅れて届くため、
+家計簿に誤った購入時刻が残る。Zaimの支出に時刻の概念は無いので、時刻が残るのはAsset Manager側だけ。
+
 電気・ガスなど使用量が書かれた請求メールでは、任意項目の `usage`（32文字以内）に本文の表記の
 まま渡せる（例: `258kWh`、`12m3`）。単位表記の正規化はAsset Manager側が行うため、AIDEは
 本文の表記を変換せずそのまま送る。使用量を `name` に含めてはいけない（分類履歴のキーに影響
