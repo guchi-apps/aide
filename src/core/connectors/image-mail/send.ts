@@ -1,5 +1,5 @@
 import { abandonImageMail, beginImageMail, completeImageMail } from "./idempotency.ts";
-import { type GmailCredentials, type ImageMailRecipients, sendGmailMessage } from "./gmail.ts";
+import { type GmailCredentials, type ImageMailAddresses, sendGmailMessage } from "./gmail.ts";
 import { recordImageMailLog } from "./log.ts";
 
 /**
@@ -25,7 +25,7 @@ function buildBodyText(input: Pick<SendImageMailInput, "title" | "imageCount" | 
 
 export async function sendImageMail(
   credentials: GmailCredentials,
-  recipients: ImageMailRecipients,
+  addresses: ImageMailAddresses,
   input: SendImageMailInput,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SendImageMailOutcome> {
@@ -45,8 +45,9 @@ export async function sendImageMail(
   const outcome = await sendGmailMessage(
     credentials,
     {
-      to: recipients.to,
-      bcc: recipients.bcc,
+      from: addresses.from ?? undefined,
+      to: addresses.to,
+      bcc: addresses.bcc,
       subject: `[画像] ${input.title}`,
       bodyText: buildBodyText(input),
       attachment: { filename: "images.zip", contentType: "application/zip", data: input.zip },
