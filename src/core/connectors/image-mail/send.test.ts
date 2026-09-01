@@ -15,7 +15,7 @@ after(async () => {
 });
 
 const credentials = { clientId: "id", clientSecret: "secret", refreshToken: "token" };
-const recipients = { to: ["to@example.com"], bcc: [] };
+const addresses = { from: null, to: ["to@example.com"], bcc: [] };
 
 function baseInput(idempotencyKey: string) {
   return {
@@ -44,7 +44,7 @@ describe("sendImageMail", () => {
   it("成功: messageIdを返し、ログに記録される", async () => {
     const outcome = await sendImageMail(
       credentials,
-      recipients,
+      addresses,
       baseInput("send-1"),
       fetchImplFor(200, { id: "msg-1" }),
     );
@@ -67,9 +67,9 @@ describe("sendImageMail", () => {
       return new Response(JSON.stringify({ id: "msg-2" }), { status: 200 });
     }) as typeof fetch;
 
-    const first = await sendImageMail(credentials, recipients, baseInput("send-2"), fetchImpl);
+    const first = await sendImageMail(credentials, addresses, baseInput("send-2"), fetchImpl);
     assert.equal(first.ok, true);
-    const second = await sendImageMail(credentials, recipients, baseInput("send-2"), fetchImpl);
+    const second = await sendImageMail(credentials, addresses, baseInput("send-2"), fetchImpl);
     assert.deepEqual(second, { ok: true, messageId: "msg-2", duplicated: true });
     assert.equal(sendCalls, 1);
   });
@@ -77,7 +77,7 @@ describe("sendImageMail", () => {
   it("rejected（Gmailが拒否）は記録を消し、次回同じキーで再試行できる", async () => {
     const rejected = await sendImageMail(
       credentials,
-      recipients,
+      addresses,
       baseInput("send-3"),
       fetchImplFor(400, { error: "invalid" }),
     );
@@ -87,7 +87,7 @@ describe("sendImageMail", () => {
     // abandon 済みなので次回は new として扱われ、conflict にならない。
     const retried = await sendImageMail(
       credentials,
-      recipients,
+      addresses,
       baseInput("send-3"),
       fetchImplFor(200, { id: "msg-3" }),
     );
@@ -97,7 +97,7 @@ describe("sendImageMail", () => {
   it("failed（送信されたか不明）は記録を残し、次回同じキーはconflictになる", async () => {
     const failed = await sendImageMail(
       credentials,
-      recipients,
+      addresses,
       baseInput("send-4"),
       fetchImplFor(500, "error"),
     );
@@ -106,7 +106,7 @@ describe("sendImageMail", () => {
 
     const retried = await sendImageMail(
       credentials,
-      recipients,
+      addresses,
       baseInput("send-4"),
       fetchImplFor(200, { id: "msg-4" }),
     );

@@ -38,6 +38,7 @@ beforeEach(() => {
   process.env["AIDE_GMAIL_REFRESH_TOKEN"] = "token";
   process.env["AIDE_IMAGE_MAIL_TO"] = "to@example.com";
   process.env["AIDE_IMAGE_MAIL_BCC"] = "";
+  process.env["AIDE_IMAGE_MAIL_FROM"] = "";
   // Gmailへは実接続しない。token取得・送信のどちらも成功で応答する。
   globalThis.fetch = (async (url: string | URL) => {
     if (String(url).includes("oauth2.googleapis.com")) {
@@ -163,6 +164,41 @@ describe("POST /api/image-mail/send", () => {
     const result = await post(validBody());
     assert.equal(result.status, 503);
     assert.match(result.body, /AIDE_IMAGE_MAIL_TO/);
+  });
+
+  it("送信元の形式が不正なら503（送信しない）", async () => {
+    process.env["AIDE_IMAGE_MAIL_FROM"] = "broken-address";
+    let sendCalled = false;
+    globalThis.fetch = (async () => {
+      sendCalled = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    const result = await post(validBody({ idempotencyKey: "bad-from-key" }));
+    assert.equal(result.status, 503);
+    assert.match(result.body, /AIDE_IMAGE_MAIL_FROM/);
+    assert.equal(sendCalled, false);
+  });
+
+  it("送信元が設定されていればFromヘッダに載る", async () => {
+    process.env["AIDE_IMAGE_MAIL_FROM"] = "画像便 <from@example.com>";
+    let raw: string | null = null;
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      if (String(url).includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "at" }), { status: 200 });
+      }
+      const payload = JSON.parse(String(init?.body)) as { raw: string };
+      raw = Buffer.from(payload.raw, "base64url").toString("utf8");
+      return new Response(JSON.stringify({ id: "msg-from" }), { status: 200 });
+    }) as typeof fetch;
+
+    const result = await post(validBody({ idempotencyKey: "from-header-key" }));
+    assert.equal(result.status, 200);
+    assert.ok(raw);
+    assert.match(
+      raw,
+      new RegExp(`^From: =\\?UTF-8\\?B\\?${Buffer.from("画像便", "utf8").toString("base64")}\\?= <from@example\\.com>\r\n`),
+    );
   });
 
   it("multipart/form-dataでなければ400", async () => {

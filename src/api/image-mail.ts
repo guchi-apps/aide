@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
-import { loadGmailCredentials, loadImageMailRecipients } from "../core/connectors/image-mail/gmail.ts";
+import { loadGmailCredentials, loadImageMailAddresses } from "../core/connectors/image-mail/gmail.ts";
 import { sendImageMail, type SendImageMailInput, type SendImageMailOutcome } from "../core/connectors/image-mail/send.ts";
 import { extractBoundary, parseMultipart, readRawBody } from "./multipart.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
@@ -13,7 +13,7 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * サーバー間通信のため、`/api/zaim/payment` と同じくCORS対応は不要。
  *
  * 認証は共有シークレット1本（`AIDE_IMAGE_MAIL_TOKEN`。Research Desk側の同名環境変数と
- * 同じ値）。件名は常に `[画像] {title}` で固定し、宛先・BCCも環境変数で固定する——
+ * 同じ値）。件名は常に `[画像] {title}` で固定し、送信元・宛先・BCCも環境変数で固定する——
  * リクエストのどの項目からも上書きできない（受け入れ条件）。
  *
  * **応答のエラーフィールドは `message`。** `src/api/zaim.ts` は `error` を使うが、
@@ -136,9 +136,9 @@ export async function handleImageMailSend(req: IncomingMessage, res: ServerRespo
     json(res, 503, { ok: false, message: "GmailのOAuth設定（AIDE_GMAIL_*）が揃っていないため利用できません" });
     return;
   }
-  const recipients = loadImageMailRecipients();
-  if (!recipients) {
-    json(res, 503, { ok: false, message: "送信先（AIDE_IMAGE_MAIL_TO）が未設定のため利用できません" });
+  const addresses = loadImageMailAddresses();
+  if ("error" in addresses) {
+    json(res, 503, { ok: false, message: addresses.error });
     return;
   }
 
@@ -163,7 +163,7 @@ export async function handleImageMailSend(req: IncomingMessage, res: ServerRespo
     return;
   }
 
-  const outcome = await sendImageMail(credentials, recipients, normalized.input);
+  const outcome = await sendImageMail(credentials, addresses.addresses, normalized.input);
   if (!outcome.ok) {
     json(res, statusFor(outcome.kind), { ok: false, message: outcome.reason });
     return;
