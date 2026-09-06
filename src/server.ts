@@ -19,6 +19,7 @@ import { McpTransport } from "./mcp/transport.ts";
 import { ToolRegistry } from "./mcp/registry.ts";
 import { dailyBriefingTool } from "./mcp/tools/briefing.ts";
 import { claudeSessionsTool } from "./mcp/tools/claude-sessions.ts";
+import { createEventTool } from "./mcp/tools/create-event.ts";
 import { devStatusTool } from "./mcp/tools/dev.ts";
 import { createIssueTool } from "./mcp/tools/issue.ts";
 import { moneySummaryTool } from "./mcp/tools/money.ts";
@@ -72,6 +73,8 @@ registry.register(opsStatusTool);
 registry.register(roomStatusTool);
 registry.register(dailyBriefingTool);
 registry.register(scheduleTool);
+// 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
+registry.register(createEventTool);
 registry.register(devStatusTool);
 registry.register(createIssueTool);
 registry.register(claudeSessionsTool);

@@ -21,8 +21,8 @@ import type { DaySpanSchedule } from "./types.ts";
  * 追加・変更されうるため、ジョブ間隔ぶん古い写しを返すと「この後の予定」に答えられなくなる。
  */
 
-/** DaySpan は同じVPS上のPM2プロセス（Next.js・ポート3113）。 */
-const DEFAULT_BASE_URL = "http://127.0.0.1:3113";
+/** DaySpan は同じVPS上のPM2プロセス（Next.js・ポート3113）。書き込み（`write.ts`）とも共有する。 */
+export const DEFAULT_BASE_URL = "http://127.0.0.1:3113";
 
 /**
  * 1本あたりの制限時間。
@@ -31,8 +31,11 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:3113";
  * Google Calendar と Notion のAPIを叩くため、localhost で完結する相手と違って
  * 外部サービスの応答時間がそのまま乗る。短く切りすぎると、相手が正常でも毎回
  * タイムアウトになる。それでもMCPの同期リクエスト内なので、上限は掛ける。
+ *
+ * `write.ts`（`POST /api/internal/events`）も同じ理由（DaySpan側がGoogle Calendarを叩く）で
+ * この値を共有する。
  */
-const TIMEOUT_MS = 8_000;
+export const TIMEOUT_MS = 8_000;
 
 export interface DaySpanConfig {
   baseUrl: string;
