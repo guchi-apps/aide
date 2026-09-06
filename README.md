@@ -1621,6 +1621,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
+systemctl --user enable --now aide-zaim-money-sync.timer  # 初回のみ（未導入のユニット）
 systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
 systemctl --user list-timers 'aide-*'
 ```

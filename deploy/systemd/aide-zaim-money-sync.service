@@ -1,0 +1,15 @@
+[Unit]
+# Zaim Web版の家計簿明細一覧（当月ぶん）を巡回してキャッシュを更新する。ヘッドレスChromiumを起動するため十数秒かかる。
+Description=AIDE: Zaim家計簿明細一覧の巡回とキャッシュ更新
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# 巡回本体のタイムアウトは aide-zaim-sync.service と同じ想定（300秒）。次の実行まで12時間
+# 空くので30分を上限にしておけば足りる。
+TimeoutStartSec=30min
+
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts zaim-money-sync'
