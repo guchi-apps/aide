@@ -1,11 +1,14 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import {
+    buildZaimMoneyList,
     buildZaimRefreshResult,
     buildZaimSnapshot,
+    extractZaimMoneyId,
     findStaleZaimAccounts,
     parseYenAmount,
     parseZaimLastUpdatedAt,
+    parseZaimMoneyDate,
     toMatchKey,
 } from "./parse.ts"
 
@@ -352,5 +355,131 @@ describe("buildZaimRefreshResult", () => {
 
         assert.equal(result.accounts[0]?.name, "新しい口座")
         assert.equal(result.accounts[0]?.previousLastUpdatedAt, null)
+    })
+})
+
+describe("extractZaimMoneyId", () => {
+    it("編集リンクから明細IDを取り出す", () => {
+        assert.equal(extractZaimMoneyId("/money/10228209053/edit"), 10228209053)
+    })
+
+    it("読めない形式は null を返す", () => {
+        assert.equal(extractZaimMoneyId(""), null)
+        assert.equal(extractZaimMoneyId("/money/new"), null)
+        assert.equal(extractZaimMoneyId("/money/0/edit"), null)
+    })
+})
+
+describe("parseZaimMoneyDate", () => {
+    it("「9月2日（水）」と month（YYYYMM）から YYYY-MM-DD を組み立てる", () => {
+        assert.equal(parseZaimMoneyDate("9月2日（水）", "202609"), "2026-09-02")
+    })
+
+    it("桁が揃っていない表記も拾う", () => {
+        assert.equal(parseZaimMoneyDate("12月31日(木)", "202512"), "2025-12-31")
+    })
+
+    it("実在しない日付・読めない形式は null を返す", () => {
+        assert.equal(parseZaimMoneyDate("2月31日（日）", "202602"), null)
+        assert.equal(parseZaimMoneyDate("", "202609"), null)
+        assert.equal(parseZaimMoneyDate("9月2日（水）", "26-09"), null)
+    })
+})
+
+describe("buildZaimMoneyList", () => {
+    it("一覧の生テキストから明細を組み立てる", () => {
+        const list = buildZaimMoneyList({
+            url: "https://zaim.net/money?month=202609",
+            month: "202609",
+            entries: [
+                {
+                    editUrl: "/money/10228209053/edit",
+                    date: "9月2日（水）",
+                    amount: "￥1,238",
+                    category: "食費",
+                    genre: "調理食品",
+                    account: "スマートレシート",
+                    toAccount: "",
+                    place: "ライフ 高槻城西店",
+                    name: "SS大盛りペペロ…",
+                    comment: "",
+                },
+            ],
+        })
+
+        assert.deepEqual(list.entries, [
+            {
+                id: 10228209053,
+                date: "2026-09-02",
+                amount: 1238,
+                category: "食費",
+                genre: "調理食品",
+                account: "スマートレシート",
+                toAccount: "",
+                place: "ライフ 高槻城西店",
+                name: "SS大盛りペペロ…",
+                comment: "",
+            },
+        ])
+    })
+
+    it("金額・日付を読めない行は落とす", () => {
+        const list = buildZaimMoneyList({
+            url: "https://zaim.net/money?month=202609",
+            month: "202609",
+            entries: [
+                {
+                    editUrl: "/money/1/edit",
+                    date: "",
+                    amount: "￥100",
+                    category: "",
+                    genre: "",
+                    account: "",
+                    toAccount: "",
+                    place: "",
+                    name: "",
+                    comment: "",
+                },
+                {
+                    editUrl: "/money/2/edit",
+                    date: "9月2日",
+                    amount: "",
+                    category: "",
+                    genre: "",
+                    account: "",
+                    toAccount: "",
+                    place: "",
+                    name: "",
+                    comment: "",
+                },
+            ],
+        })
+
+        assert.deepEqual(list.entries, [])
+    })
+
+    it("編集リンクを読めない行はIDだけ null になる（他の項目は落とさない）", () => {
+        const list = buildZaimMoneyList({
+            url: "https://zaim.net/money?month=202609",
+            month: "202609",
+            entries: [
+                {
+                    editUrl: "",
+                    date: "9月2日",
+                    amount: "￥500",
+                    category: "食費",
+                    genre: "外食",
+                    account: "財布",
+                    toAccount: "",
+                    place: "",
+                    name: "",
+                    comment: "",
+                },
+            ],
+        })
+
+        assert.equal(list.entries.length, 1)
+        assert.equal(list.entries[0]?.id, null)
+        assert.equal(list.entries[0]?.amount, 500)
     })
 })

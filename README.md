@@ -201,7 +201,7 @@ src/
     tools/             MCPツール
   api/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
-    read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary）
+    read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary, GET /api/money/transactions）
     zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
     image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
     multipart.ts       multipart/form-data の最小パーサー
@@ -1771,6 +1771,51 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 更新できない口座があると巡回が新しくても中身は古いままになるため、当日でないものを `staleAccounts` に
 まとめている（[更新できない口座の扱い](#更新できない口座の扱い)）。**これも捨てるかどうかは決めない。**
 連携していない口座（現金・手入力）と、この項目を持たない時期のキャッシュでは `null` になる。
+
+### Zaim Web版の家計簿明細一覧（aide#244）
+
+`GET /v2/home/money`（公式API）は、**銀行・カード・スマートレシート由来の自動連携レコードを
+返さない**（`src/core/connectors/zaim/write.ts:13-15` を参照。guchi-apps/asset-manager#379 で実測）。
+`GET /api/money/transactions` は、Zaim Web版の家計簿一覧画面（`https://zaim.net/money?month=YYYYMM`）を
+Playwrightでそのまま読むため、公式APIに現れない明細もここでは取得できる。
+
+| | |
+|---|---|
+| エンドポイント | `GET /api/money/transactions` |
+| 返す内容 | 当月ぶんの明細一覧（`buildMoneyTransactions()`） |
+| 認証 | `Authorization: Bearer $AIDE_READ_SECRET`（`/api/money/summary` と同じ値） |
+| 取得ジョブ | `zaim-money-sync`（1日2回。実体は `src/core/connectors/zaim/money-list.ts`） |
+
+```bash
+curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/money/transactions
+```
+
+```jsonc
+{
+  "empty": false,
+  "fetchedAt": "2026-09-02T14:35:00.000Z",
+  "ageMinutes": 30,
+  "stale": false,
+  "entries": [
+    { "id": 10228209053, "date": "2026-09-02", "amount": 1238,
+      "category": "食費", "genre": "調理食品", "account": "スマートレシート",
+      "toAccount": "", "place": "ライフ 高槻城西店", "name": "SS大盛りペペロ…", "comment": "" }
+  ],
+  "note": "..."
+}
+```
+
+**`id` は明細一覧の編集リンク（`/money/<id>/edit`）から取り出した値。** Zaimの`money_id`そのものなので、
+呼び出し側（asset-manager等）はこれを使って二重登録を防げる。読めなかった場合だけ `null` になる。
+
+**`name`（品目名）は、1件の明細に複数品目があると先頭の1件しか取れず、末尾が「…」で省略されることがある。**
+これはZaim Web版の一覧表示そのものの仕様で、一覧を1回読むだけでは正確な全品目は分からない。編集画面
+（`/money/<id>/edit`）を個別に開けば `var Receipt = {...}` というJS変数に品目ごとの正確なデータ
+（`item_name` / `genre_id` / `amount`）が埋め込まれているが、これは明細ごとに追加のページ遷移が要るため
+今回のクロール（一覧の1回読み）には含めていない。全品目が必須になった場合はそちらを実装する。
+
+**対象は「当月（JST）ぶん」のみ。** 月をまたぐキャッシュの保持や、任意の年月を指定する口はまだ無い
+（Issueの要求が「読める経路を作る」段階だったため）。
 
 ### キャッシュを素で返さない理由
 

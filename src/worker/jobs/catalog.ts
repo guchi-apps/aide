@@ -52,6 +52,14 @@ export const JOB_CATALOG = [
     staleAfterMinutes: 90,
   },
   {
+    name: "zaim-money-sync",
+    description:
+      "Zaim Web版の家計簿明細一覧（当月ぶん）を巡回し、キャッシュを更新する。公式APIが返さない" +
+      "自動連携明細（スマートレシート等）もこの経路なら読める。Playwrightを使うため重い。",
+    interval: "1日2回（11:35 / 23:35 JST）",
+    staleAfterMinutes: 18 * 60,
+  },
+  {
     name: "weather-sync",
     description:
       "Open-Meteo から今日・明日の天気・最高／最低気温・降水確率を取得し、キャッシュを更新する。" +

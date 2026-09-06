@@ -108,3 +108,61 @@ export interface ZaimRefreshResult {
   /** 最大待ち時間まで待っても全口座が当日にならなかったか。 */
   timedOut: boolean;
 }
+
+/**
+ * money-list.mjs が一覧の1行から拾う生テキスト（aide#244）。
+ *
+ * Zaim Web版の家計簿一覧（`/money?month=YYYYMM`）は、公式API（`GET /v2/home/money`）が
+ * 返さない自動連携明細（スマートレシート等）もそのまま表示する。この画面を読むことで、
+ * その明細も取得できる。
+ */
+export interface ZaimRawMoneyEntry {
+  /** 明細の編集リンク（例: `/money/10228209053/edit`）。IDはここから取り出す。 */
+  editUrl: string;
+  /** 表示のまま（例: `"9月2日（水）"`）。年は month パラメータ側で補う。 */
+  date: string;
+  /** 「￥1,238」のような表示のまま。 */
+  amount: string;
+  category: string;
+  genre: string;
+  /** 出金元の口座名（一覧のアイコンの alt テキスト）。 */
+  account: string;
+  /** 振替の場合の振込先口座名。通常は空。 */
+  toAccount: string;
+  place: string;
+  /**
+   * 品目名。**1件の明細に複数品目がある場合、一覧には先頭の1件しか出ず、
+   * 末尾が「…」で省略されることがある。** 正確な全品目が要る場合は
+   * 一覧だけでは読めない（Zaimの編集画面を個別に開く必要がある）。
+   */
+  name: string;
+  comment: string;
+}
+
+export interface ZaimRawMoneyListResult {
+  url: string;
+  /** クロール対象の年月（`YYYYMM`）。表示テキストの日付に年を足すために使う。 */
+  month: string;
+  entries: ZaimRawMoneyEntry[];
+}
+
+/** 家計簿明細1件。金額を数値化し、明細IDを編集リンクから取り出した結果。 */
+export interface ZaimMoneyEntry {
+  /** Zaimの明細ID。編集リンクから取れなければ null。 */
+  id: number | null;
+  /** `YYYY-MM-DD`。 */
+  date: string;
+  amount: number;
+  category: string;
+  genre: string;
+  account: string;
+  toAccount: string;
+  place: string;
+  /** `ZaimRawMoneyEntry.name` を参照（省略されうる）。 */
+  name: string;
+  comment: string;
+}
+
+export interface ZaimMoneyList {
+  entries: ZaimMoneyEntry[];
+}

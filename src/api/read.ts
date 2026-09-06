@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { buildMoneySummary } from "../core/views/money.ts";
+import { buildMoneyTransactions } from "../core/views/money-transactions.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
 /**
@@ -75,4 +76,29 @@ export async function handleMoneySummary(req: IncomingMessage, res: ServerRespon
       "Cache-Control": "no-store",
     })
     .end(JSON.stringify(summary));
+}
+
+/**
+ * `GET /api/money/transactions`
+ *
+ * Zaim Web版の家計簿明細一覧（当月ぶん）をキャッシュから返す。公式API（`GET /v2/home/money`）が
+ * 返さない自動連携明細（スマートレシート等）も含む（aide#244）。
+ */
+export async function handleMoneyTransactions(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "GET, HEAD" })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+
+  if (!authorize(req, res, "GET /api/money/transactions")) return;
+
+  const transactions = await buildMoneyTransactions();
+  res
+    .writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    })
+    .end(JSON.stringify(transactions));
 }

@@ -1,8 +1,11 @@
 import type {
   ZaimBalance,
   ZaimHolding,
+  ZaimMoneyEntry,
+  ZaimMoneyList,
   ZaimOnlineAccount,
   ZaimRawEntry,
+  ZaimRawMoneyListResult,
   ZaimRawRefreshResult,
   ZaimRawScrapeResult,
   ZaimRefreshResult,
@@ -207,4 +210,77 @@ export function buildZaimSnapshot(raw: ZaimRawScrapeResult): ZaimSnapshot {
   }
 
   return { balances, holdings, onlineAccounts };
+}
+
+/** 「9月2日」のような表示から月・日を取り出す。 */
+const MONEY_DATE_PATTERN = /(\d{1,2})月\s*(\d{1,2})日/;
+
+/**
+ * 一覧の編集リンク（`/money/10228209053/edit`）から明細IDを取り出す。読めなければ null。
+ */
+export function extractZaimMoneyId(editUrl: string): number | null {
+  const match = /\/money\/(\d+)\/edit/.exec(editUrl ?? "");
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * 「9月2日（水）」のような一覧の日付表示を、クロールした年月（`month`。`YYYYMM`）と
+ * 組み合わせて `YYYY-MM-DD` にする。
+ *
+ * **年は `month` から取り、月・日は表示テキストのものをそのまま使う。** Zaimの月次一覧は
+ * その月の明細だけを返す想定だが、月をまたぐ表示があっても、この関数は表示された月を
+ * 信じるため誤った月にはならない（`month` の月とずれても、それ自体は不整合の兆候として
+ * 呼び出し側が気づける）。
+ */
+export function parseZaimMoneyDate(text: string, month: string): string | null {
+  const monthMatch = /^(\d{4})(\d{2})$/.exec(month);
+  if (!monthMatch) return null;
+  const [, year] = monthMatch as unknown as [string, string, string];
+
+  const dateMatch = MONEY_DATE_PATTERN.exec(text ?? "");
+  if (!dateMatch) return null;
+  const [, monthText, dayText] = dateMatch as unknown as [string, string, string];
+
+  const displayMonth = monthText.padStart(2, "0");
+  const day = dayText.padStart(2, "0");
+  const candidate = `${year}-${displayMonth}-${day}`;
+  return isValidCalendarDate(candidate) ? candidate : null;
+}
+
+/** `YYYY-MM-DD` が実在する日かを確かめる。`2026-02-31` のような値をそのまま通さない。 */
+function isValidCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split("-").map(Number) as [number, number, number];
+  const at = new Date(Date.UTC(year, month - 1, day));
+  return at.getUTCFullYear() === year && at.getUTCMonth() === month - 1 && at.getUTCDate() === day;
+}
+
+/**
+ * 一覧の生テキストを、金額を数値化しIDを取り出した明細一覧へ変換する。**純粋関数。**
+ *
+ * 日付・金額を読めなかった行は、壊れた明細として黙って落とす
+ * （落とさないと呼び出し側が `null` を個別にケアする必要が生まれる）。
+ */
+export function buildZaimMoneyList(raw: ZaimRawMoneyListResult): ZaimMoneyList {
+  const entries: ZaimMoneyEntry[] = [];
+  for (const entry of raw.entries) {
+    const amount = parseYenAmount(entry.amount);
+    const date = parseZaimMoneyDate(entry.date, raw.month);
+    if (amount === null || date === null) continue;
+
+    entries.push({
+      id: extractZaimMoneyId(entry.editUrl),
+      date,
+      amount,
+      category: collapseWhitespace(entry.category),
+      genre: collapseWhitespace(entry.genre),
+      account: collapseWhitespace(entry.account),
+      toAccount: collapseWhitespace(entry.toAccount),
+      place: collapseWhitespace(entry.place),
+      name: collapseWhitespace(entry.name),
+      comment: collapseWhitespace(entry.comment),
+    });
+  }
+  return { entries };
 }
