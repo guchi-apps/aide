@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { buildMimeMessage, formatFromAddress, loadGmailCredentials, loadImageMailAddresses, sendGmailMessage } from "./gmail.ts";
+import {
+  buildAlternativeMimeMessage,
+  buildMimeMessage,
+  formatFromAddress,
+  loadGmailCredentials,
+  loadImageMailAddresses,
+  loadNewsMailAddresses,
+  sendGmailAlternativeMessage,
+  sendGmailMessage,
+} from "./gmail.ts";
 
 /** 実際のGmail API・Google OAuthエンドポイントへは接続しない。すべて fetch をモックする。 */
 
@@ -11,6 +20,9 @@ const ENV_NAMES = [
   "AIDE_IMAGE_MAIL_TO",
   "AIDE_IMAGE_MAIL_BCC",
   "AIDE_IMAGE_MAIL_FROM",
+  "AIDE_NEWS_MAIL_TO",
+  "AIDE_NEWS_MAIL_BCC",
+  "AIDE_NEWS_MAIL_FROM",
 ] as const;
 
 afterEach(() => {
@@ -219,5 +231,126 @@ describe("sendGmailMessage", () => {
     const outcome = await sendGmailMessage(credentials, input, fetchImpl);
     assert.equal(outcome.ok, false);
     if (!outcome.ok) assert.equal(outcome.kind, "failed");
+  });
+});
+
+describe("loadNewsMailAddresses", () => {
+  it("TOが無ければ理由を返す（口が開かない）", () => {
+    const result = loadNewsMailAddresses();
+    assert.ok("error" in result);
+    assert.match(result.error, /AIDE_NEWS_MAIL_TO/);
+  });
+
+  it("画像メールとは別の環境変数を読む", () => {
+    process.env["AIDE_IMAGE_MAIL_TO"] = "image@example.com";
+    process.env["AIDE_NEWS_MAIL_TO"] = "news-a@example.com, news-b@example.com";
+    process.env["AIDE_NEWS_MAIL_BCC"] = "news-bcc@example.com";
+    const result = loadNewsMailAddresses();
+    assert.deepEqual(result, {
+      addresses: { from: null, to: ["news-a@example.com", "news-b@example.com"], bcc: ["news-bcc@example.com"] },
+    });
+  });
+
+  it("FROMの形式が不正なら理由を返し、実値は含めない", () => {
+    process.env["AIDE_NEWS_MAIL_TO"] = "a@example.com";
+    process.env["AIDE_NEWS_MAIL_FROM"] = "broken-address";
+    const result = loadNewsMailAddresses();
+    assert.ok("error" in result);
+    assert.match(result.error, /AIDE_NEWS_MAIL_FROM/);
+    assert.doesNotMatch(result.error, /broken-address/);
+  });
+});
+
+describe("buildAlternativeMimeMessage", () => {
+  it("件名をそのまま使い、テキストの後にHTMLパートを置く（multipart/alternative）", () => {
+    const raw = buildAlternativeMimeMessage({
+      to: ["to@example.com"],
+      bcc: ["bcc@example.com"],
+      subject: "[業界ニュース] テスト週報",
+      bodyText: "テキスト本文",
+      bodyHtml: "<p>HTML本文</p>",
+    });
+
+    assert.match(raw, /^To: to@example\.com\r\n/);
+    assert.match(raw, /Bcc: bcc@example\.com\r\n/);
+    assert.match(raw, /Content-Type: multipart\/alternative; boundary="([^"]+)"/);
+
+    const subjectMatch = /Subject: =\?UTF-8\?B\?([^?]+)\?=/.exec(raw);
+    assert.ok(subjectMatch);
+    assert.equal(Buffer.from(subjectMatch[1]!, "base64").toString("utf8"), "[業界ニュース] テスト週報");
+
+    const textIndex = raw.indexOf("Content-Type: text/plain");
+    const htmlIndex = raw.indexOf("Content-Type: text/html");
+    assert.ok(textIndex >= 0 && htmlIndex >= 0);
+    assert.ok(textIndex < htmlIndex, "text/plain パートが text/html より先に来ること");
+
+    const textMatch = /Content-Type: text\/plain[\s\S]*?\r\n\r\n([\s\S]+?)\r\n--/.exec(raw);
+    assert.ok(textMatch);
+    assert.equal(Buffer.from(textMatch[1]!.replace(/\r\n/g, ""), "base64").toString("utf8"), "テキスト本文");
+
+    const htmlMatch = /Content-Type: text\/html[\s\S]*?\r\n\r\n([\s\S]+?)\r\n--/.exec(raw);
+    assert.ok(htmlMatch);
+    assert.equal(Buffer.from(htmlMatch[1]!.replace(/\r\n/g, ""), "base64").toString("utf8"), "<p>HTML本文</p>");
+  });
+
+  it("From未指定ならFromヘッダを書かない", () => {
+    const raw = buildAlternativeMimeMessage({
+      to: ["to@example.com"],
+      bcc: [],
+      subject: "件名",
+      bodyText: "本文",
+      bodyHtml: "<p>本文</p>",
+    });
+    assert.doesNotMatch(raw, /^From:/m);
+  });
+
+  it("ASCIIのみで構成される（base64エンコードのため）", () => {
+    const raw = buildAlternativeMimeMessage({
+      to: ["to@example.com"],
+      bcc: [],
+      subject: "日本語件名",
+      bodyText: "日本語テキスト",
+      bodyHtml: "<p>日本語HTML</p>",
+    });
+    assert.ok(/^[\x00-\x7f]*$/.test(raw));
+  });
+});
+
+describe("sendGmailAlternativeMessage", () => {
+  const credentials = { clientId: "id", clientSecret: "secret", refreshToken: "token" };
+  const input = {
+    to: ["to@example.com"],
+    bcc: [],
+    subject: "[業界ニュース] テスト",
+    bodyText: "本文",
+    bodyHtml: "<p>本文</p>",
+  };
+
+  it("成功: token取得→送信の2段階を呼び、messageIdを返す", async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL) => {
+      calls.push(String(url));
+      if (String(url).includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "at" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ id: "msg-1" }), { status: 200 });
+    }) as typeof fetch;
+
+    const outcome = await sendGmailAlternativeMessage(credentials, input, fetchImpl);
+    assert.deepEqual(outcome, { ok: true, messageId: "msg-1" });
+    assert.equal(calls.length, 2);
+  });
+
+  it("送信が400: rejected", async () => {
+    const fetchImpl = (async (url: string | URL) => {
+      if (String(url).includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "at" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "invalid" }), { status: 400 });
+    }) as typeof fetch;
+
+    const outcome = await sendGmailAlternativeMessage(credentials, input, fetchImpl);
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) assert.equal(outcome.kind, "rejected");
   });
 });

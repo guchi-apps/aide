@@ -41,6 +41,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
+| `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 
 #### Zaimへの登録は条件1の例外（aide#37）
@@ -63,6 +64,15 @@ Research DeskのブラウザからGmail APIを直接叩くことも技術的に�
 改めて行った。** 条件2（別の資格情報）・条件3（作成のみ）は文言どおり満たす。
 
 詳細は[個人アプリ向けのZaim登録API](#個人アプリ向けのzaim登録api)。
+
+#### 業界ニュース週報メール送信も画像メールと同じ理由で条件1の例外（aide#257）
+
+`POST /api/news-mail/send` は画像メール（aide#230）と同じくGmail送信で、**画像メールの例外を
+前例として使わず**、この判断も同じ理由（Gmailの資格情報を1か所に閉じ込める）で行っている。
+認証は画像メールとは別の共有シークレット（`AIDE_NEWS_MAIL_TOKEN`）を使い、Gmail資格情報
+（`AIDE_GMAIL_*`）だけを共用する。条件2・3は画像メールと同じ理由で満たす。
+
+詳細は[個人アプリ向けの業界ニュース週報メール送信API](#個人アプリ向けの業界ニュース週報メール送信api)。
 
 #### MCP経由のZaim登録は条件1を満たす（aide#135）
 
@@ -204,11 +214,13 @@ src/
     read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary, GET /api/money/transactions）
     zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
     image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
+    news-mail.ts       業界ニュース週報メール送信API（POST /api/news-mail/send。#257）
     multipart.ts       multipart/form-data の最小パーサー
     secret.ts          /api 配下の共有シークレット認証
   core/
     connectors/        外部サービスからの取得
-      image-mail/       Gmail送信・冪等記録・履歴（#230）
+      image-mail/       Gmail送信（画像メール・業界ニュース週報メール共通）・画像メールの冪等記録・履歴（#230）
+      news-mail/         業界ニュース週報メールの冪等記録・履歴（#257）
     models/            共通データモデル
     views/             横断ビュー
   web/                 人間向けのHTMLページ（機能一覧・動作状況・共通知識）と共通レイアウト
@@ -2026,6 +2038,52 @@ Gmail APIへ渡すだけで、ディスクへは一度も書かない。
 
 Research Desk側のサーバーから直接届く必要があるため、`/api/money`・`/api/zaim` と違い
 [公開URLからの遮断](#公開urlからの遮断)のApache設定には `image-mail` を入れない。
+
+
+## 個人アプリ向けの業界ニュース週報メール送信API
+
+Research Desk（guchi-apps/research-desk#110）が、画面で組み立てた業界ニュースの週報を社用メールへ
+送信するための口。実装は `src/api/news-mail.ts`。[画像メール送信API](#個人アプリ向けの画像メール送信api)
+（aide#230）と同じ作りで、**添付ファイルではなくHTML/テキストの本文を受け取る**点だけが違う。
+
+**呼び出し元はResearch Desk**のサーバー**（guchi-apps/research-desk#111）で、ブラウザではない。**
+サーバー間通信のためCORS対応は不要——画像メールと同じ構図。
+
+| | |
+|---|---|
+| エンドポイント | `POST /api/news-mail/send`（`application/json`） |
+| 認証 | `Authorization: Bearer $AIDE_NEWS_MAIL_TOKEN`（Research Desk側の同名環境変数と同じ値。**`AIDE_IMAGE_MAIL_TOKEN` とは別の値**） |
+| 必要な設定 | 上のトークン、宛先（`AIDE_NEWS_MAIL_TO`）、Gmail OAuthの3つ（`AIDE_GMAIL_CLIENT_ID` ほか。画像メールと共用）。**1つでも欠ければ503**。送信元（`AIDE_NEWS_MAIL_FROM`）は任意 |
+| リクエストの項目 | `idempotencyKey`（200文字まで）・`subject`（先頭 `[業界ニュース] ` 込みでResearch Desk側が組み立て済み）・`bodyText`・`bodyHtml`・`articleCount`（ログ用の記事数） |
+
+### 件名はリクエストの値をそのまま使い、宛先・送信元だけAIDE側で固定する
+
+画像メールは件名を `[画像] {title}` としてAIDE側で組み立てるが、こちらは**件名をResearch Desk側で
+組み立て済みとして、そのまま使う**。宛先（`AIDE_NEWS_MAIL_TO`）・BCC（`AIDE_NEWS_MAIL_BCC`）・
+送信元（`AIDE_NEWS_MAIL_FROM`）はAIDE側の環境変数で固定し、リクエストに同じ項目があっても無視する
+（Research Desk側もそもそも送らない）。本文（`bodyText`・`bodyHtml`）はResearch Desk側で組み立て済みで、
+差し込み値はすべてエスケープ済みのため、AIDE側でHTMLのサニタイズは行わない。
+
+### `multipart/alternative` でテキストとHTMLの両方を送る
+
+`src/core/connectors/image-mail/gmail.ts` の `buildAlternativeMimeMessage()` / `sendGmailAlternativeMessage()`
+で組み立てる。`buildMimeMessage()`（画像メールの `multipart/mixed`）とは別の関数で、**テキストパートを
+HTMLパートより先に置く**（RFC 2046の「後のパートほど優先して表示される」規定により、HTML非対応の
+メールクライアントにもテキストを見せるため）。Gmail資格情報・送信元アドレスの検証（`formatFromAddress()`）は
+画像メールと共通の実装を使う。
+
+### 二重送信を止める・応答の意味・記録するもの
+
+考え方・実装（冪等記録・失敗の種類分け・応答ステータス）は
+[画像メール送信API](#個人アプリ向けの画像メール送信api)と同じで、状態は別ファイル
+（`src/core/connectors/news-mail/idempotency.ts` / `log.ts`）に持つ。記録するのは成功・失敗・
+記事数（`articleCount`）・HTML本文のバイト数・Gmail messageIdまでで、**件名・本文は記録しない**
+——記事の見出し・要約を平文ログへ溜めないため。
+
+### 公開URLからの遮断リストには入れない
+
+画像メールと同じ理由で、[公開URLからの遮断](#公開urlからの遮断)のApache設定には `news-mail` を
+入れない。
 
 
 ## ChatGPTからAsset Managerへ請求情報を取り込む（MCP）
