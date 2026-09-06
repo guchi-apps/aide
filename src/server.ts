@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
+import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
@@ -238,6 +239,14 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // には入れない——Research Desk側から直接届く必要があるため。
   if (path === "/api/image-mail/send") {
     await handleImageMailSend(req, res);
+    return;
+  }
+
+  // ---- 業界ニュース週報メール送信API（#257） ----
+  // Research Desk**のサーバー**からapplication/jsonで届くHTML/テキスト本文をGmailで送る。
+  // 画像メールと同じくサーバー間通信で、公開URLの遮断リストには入れない。
+  if (path === "/api/news-mail/send") {
+    await handleNewsMailSend(req, res);
     return;
   }
 

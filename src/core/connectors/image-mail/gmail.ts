@@ -42,7 +42,8 @@ export function loadGmailCredentials(): GmailCredentials | null {
   return { clientId, clientSecret, refreshToken };
 }
 
-export interface ImageMailAddresses {
+/** 送信元・宛先・BCC。画像メール（aide#230）・業界ニュース週報メール（aide#257）で共通の形。 */
+export interface MailAddresses {
   /** `From` に載せる値（組み立て済み）。未設定なら null で、Gmailが認可済みアカウントのアドレスで補完する。 */
   from: string | null;
   to: string[];
@@ -92,27 +93,37 @@ export function formatFromAddress(value: string): string | null {
 
 /**
  * 送信元・宛先・BCCを環境変数から読む。設定が足りない・形式が不正なら理由を返す
- * （呼び出し元はそのまま503のメッセージに使う）。
+ * （呼び出し元はそのまま503のメッセージに使う）。`envPrefix` は `AIDE_IMAGE_MAIL` /
+ * `AIDE_NEWS_MAIL` のように、口ごとに別の環境変数を参照するための接頭辞。
  */
-export function loadImageMailAddresses(): { addresses: ImageMailAddresses } | { error: string } {
-  const to = splitAddresses(process.env["AIDE_IMAGE_MAIL_TO"]);
+function loadMailAddresses(envPrefix: string): { addresses: MailAddresses } | { error: string } {
+  const to = splitAddresses(process.env[`${envPrefix}_TO`]);
   if (to.length === 0) {
-    return { error: "送信先（AIDE_IMAGE_MAIL_TO）が未設定のため利用できません" };
+    return { error: `送信先（${envPrefix}_TO）が未設定のため利用できません` };
   }
 
-  const rawFrom = (process.env["AIDE_IMAGE_MAIL_FROM"] ?? "").trim();
+  const rawFrom = (process.env[`${envPrefix}_FROM`] ?? "").trim();
   let from: string | null = null;
   if (rawFrom !== "") {
     from = formatFromAddress(rawFrom);
     if (from === null) {
       // 値そのものは出さない（設定ミスの指摘に実値は要らない）。
       return {
-        error: "送信元（AIDE_IMAGE_MAIL_FROM）の形式が不正です。user@example.com または 表示名 <user@example.com> の形で指定してください",
+        error: `送信元（${envPrefix}_FROM）の形式が不正です。user@example.com または 表示名 <user@example.com> の形で指定してください`,
       };
     }
   }
 
-  return { addresses: { from, to, bcc: splitAddresses(process.env["AIDE_IMAGE_MAIL_BCC"]) } };
+  return { addresses: { from, to, bcc: splitAddresses(process.env[`${envPrefix}_BCC`]) } };
+}
+
+export function loadImageMailAddresses(): { addresses: MailAddresses } | { error: string } {
+  return loadMailAddresses("AIDE_IMAGE_MAIL");
+}
+
+/** 業界ニュース週報メール（aide#257）の送信元・宛先・BCC。画像メールとは別の環境変数を使う。 */
+export function loadNewsMailAddresses(): { addresses: MailAddresses } | { error: string } {
+  return loadMailAddresses("AIDE_NEWS_MAIL");
 }
 
 type TokenOutcome = { ok: true; accessToken: string } | { ok: false; kind: "unauthorized" | "failed"; reason: string };
@@ -221,35 +232,72 @@ export function buildMimeMessage(input: BuildMimeMessageInput): string {
   return [headers.join("\r\n"), "", bodyPart, attachmentPart, `--${boundary}--`, ""].join("\r\n");
 }
 
+export interface BuildAlternativeMimeMessageInput {
+  /** 送信元（`formatFromAddress()` を通した値）。省略するとGmailが認可済みアカウントのアドレスで補完する。 */
+  from?: string | undefined;
+  to: string[];
+  bcc: string[];
+  /** 接頭辞を含め呼び出し元が組み立て済みの件名をそのまま使う（業界ニュース週報メール。aide#257）。 */
+  subject: string;
+  bodyText: string;
+  bodyHtml: string;
+}
+
+/**
+ * RFC 2822 のメッセージ本文（`multipart/alternative`）を組み立てる（業界ニュース週報メール。aide#257）。
+ *
+ * `buildMimeMessage()` の `multipart/mixed`（添付あり）とは違い、テキストとHTMLの2表現を
+ * 同じ内容として並べる。**HTMLより先にテキストを置く**——`multipart/alternative` はRFC 2046の
+ * 規定どおり「後のパートほど優先して表示される」ため、HTML非対応のメールクライアントに
+ * テキストを見せるにはこの順序にする必要がある。
+ */
+export function buildAlternativeMimeMessage(input: BuildAlternativeMimeMessageInput): string {
+  const boundary = `----aide-news-mail-${randomBytes(16).toString("hex")}`;
+  const headers = [
+    ...(input.from ? [`From: ${input.from}`] : []),
+    `To: ${input.to.join(", ")}`,
+    ...(input.bcc.length > 0 ? [`Bcc: ${input.bcc.join(", ")}`] : []),
+    `Subject: ${encodeWord(input.subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+  ];
+
+  const textPart = [
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    chunkBase64(Buffer.from(input.bodyText, "utf8").toString("base64")),
+  ].join("\r\n");
+
+  const htmlPart = [
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    chunkBase64(Buffer.from(input.bodyHtml, "utf8").toString("base64")),
+  ].join("\r\n");
+
+  return [headers.join("\r\n"), "", textPart, htmlPart, `--${boundary}--`, ""].join("\r\n");
+}
+
 export type GmailSendOutcome =
   | { ok: true; messageId: string }
   | { ok: false; kind: "unauthorized" | "rejected" | "failed"; reason: string };
 
 /**
- * Gmail APIでメッセージを送信する。
- *
- * `kind` の切り分けは呼び出し元（`send.ts`）の再送判断に使う。
- * - `unauthorized`: 資格情報そのものが無効。**送信されていないことが確実**
- * - `rejected`: Gmailが内容を拒んだ（400/403）。**送信されていないことが確実**
- * - `failed`: タイムアウト・5xx・429・通信断。**送信されたかどうか不明**
+ * トークン取得済みの状態から、組み立て済みのRFC 2822メッセージをGmail APIへ送る。
+ * `sendGmailMessage` と `sendGmailAlternativeMessage` の共通部分（`buildMimeMessage` /
+ * `buildAlternativeMimeMessage` のどちらで組み立てたかだけが違う）。
  */
-export async function sendGmailMessage(
-  credentials: GmailCredentials,
-  input: BuildMimeMessageInput,
-  fetchImpl: typeof fetch = fetch,
-): Promise<GmailSendOutcome> {
-  const token = await fetchAccessToken(credentials, fetchImpl);
-  if (!token.ok) return { ok: false, kind: token.kind, reason: token.reason };
-
-  const raw = Buffer.from(buildMimeMessage(input), "utf8").toString("base64url");
-
+async function sendRawMessage(accessToken: string, raw: string, fetchImpl: typeof fetch): Promise<GmailSendOutcome> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
   try {
     const response = await fetchImpl(SEND_URL, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${token.accessToken}`,
+        authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({ raw }),
@@ -281,4 +329,40 @@ export async function sendGmailMessage(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Gmail APIでメッセージを送信する（画像メール。`multipart/mixed`）。
+ *
+ * `kind` の切り分けは呼び出し元（`send.ts`）の再送判断に使う。
+ * - `unauthorized`: 資格情報そのものが無効。**送信されていないことが確実**
+ * - `rejected`: Gmailが内容を拒んだ（400/403）。**送信されていないことが確実**
+ * - `failed`: タイムアウト・5xx・429・通信断。**送信されたかどうか不明**
+ */
+export async function sendGmailMessage(
+  credentials: GmailCredentials,
+  input: BuildMimeMessageInput,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GmailSendOutcome> {
+  const token = await fetchAccessToken(credentials, fetchImpl);
+  if (!token.ok) return { ok: false, kind: token.kind, reason: token.reason };
+
+  const raw = Buffer.from(buildMimeMessage(input), "utf8").toString("base64url");
+  return sendRawMessage(token.accessToken, raw, fetchImpl);
+}
+
+/**
+ * Gmail APIでメッセージを送信する（業界ニュース週報メール。`multipart/alternative`。aide#257）。
+ * `kind` の意味は `sendGmailMessage()` と同じ。
+ */
+export async function sendGmailAlternativeMessage(
+  credentials: GmailCredentials,
+  input: BuildAlternativeMimeMessageInput,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GmailSendOutcome> {
+  const token = await fetchAccessToken(credentials, fetchImpl);
+  if (!token.ok) return { ok: false, kind: token.kind, reason: token.reason };
+
+  const raw = Buffer.from(buildAlternativeMimeMessage(input), "utf8").toString("base64url");
+  return sendRawMessage(token.accessToken, raw, fetchImpl);
 }
