@@ -2,6 +2,7 @@ import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runClaudeSessionsSync } from "./jobs/claude-sessions-sync.ts";
 import { runWeatherSync } from "./jobs/weather-sync.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
+import { runZaimMoneySync } from "./jobs/zaim-money-sync.ts";
 import { runZaimRefresh } from "./jobs/zaim-refresh.ts";
 import { runZaimSync } from "./jobs/zaim-sync.ts";
 import {
@@ -26,6 +27,7 @@ import { recordJobRun } from "./record.ts";
 const RUNNERS: Record<JobName, () => Promise<string>> = {
   "zaim-refresh": runZaimRefresh,
   "zaim-sync": runZaimSync,
+  "zaim-money-sync": runZaimMoneySync,
   "zaim-keep-alive": runZaimKeepAlive,
   "weather-sync": runWeatherSync,
   "claude-sessions-sync": runClaudeSessionsSync,
@@ -38,7 +40,12 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
  * その時点で解消している。ジョブ単位の復旧通知（`notifyJobRecovered`）では、12時間ごとの
  * `zaim-refresh` の失敗が30分ごとの `zaim-keep-alive` に直された場合を伝えられない（#191）。
  */
-const ZAIM_JOBS: readonly JobName[] = ["zaim-refresh", "zaim-sync", "zaim-keep-alive"];
+const ZAIM_JOBS: readonly JobName[] = [
+  "zaim-refresh",
+  "zaim-sync",
+  "zaim-money-sync",
+  "zaim-keep-alive",
+];
 
 const name = process.argv[2];
 if (!name || !(name in RUNNERS)) {

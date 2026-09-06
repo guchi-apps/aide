@@ -13,6 +13,8 @@ import { ZAIM_TIMEOUT_MS, zaimRequest, type ZaimOAuthCredentials } from "./oauth
  * 3つ目は制約でもある。銀行・カード・スマートレシート由来の**自動連携レコードはAPIから
  * 見えず、編集もできない**（Zaim APIの仕様）。既存レコードの口座付け替え・集計対象外化が
  * 要る場合はここではなくブラウザ操作の検討になる（asset-manager#153 Phase 5）。
+ * **読むだけなら `money-list.ts` が自動連携レコードも含めて取得できる**（aide#244。
+ * Zaim Web版の一覧画面をPlaywrightで読む）。
  *
  * カテゴリ・ジャンルの対応（「ガソリン代 → 自動車費/ガソリン」など）は**持たない**。
  * 呼び出し元が `categoryId` / `genreId` まで決めて渡す。AIDEにアプリ側のドメイン知識を

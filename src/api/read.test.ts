@@ -10,9 +10,10 @@ import { secretMatches } from "./secret.ts";
 // CACHE_DIR はモジュール読み込み時に確定するため、import より前に設定する必要がある。
 const cacheDir = await mkdtemp(join(tmpdir(), "aide-read-test-"));
 process.env["AIDE_CACHE_DIR"] = cacheDir;
-const { handleMoneySummary } = await import("./read.ts");
+const { handleMoneySummary, handleMoneyTransactions } = await import("./read.ts");
 const { writeCache } = await import("../core/cache/store.ts");
 const { ZAIM_CACHE_KEY } = await import("../worker/jobs/zaim-sync.ts");
+const { ZAIM_MONEY_CACHE_KEY } = await import("../worker/jobs/zaim-money-sync.ts");
 
 const SECRET = "test-only-read-secret";
 
@@ -48,9 +49,12 @@ function fakeReq(options: { method?: string; authorization?: string } = {}): Inc
   return { method: options.method ?? "GET", headers } as unknown as IncomingMessage;
 }
 
-async function call(options: Parameters<typeof fakeReq>[0] = {}): Promise<Captured> {
+async function call(
+  options: Parameters<typeof fakeReq>[0] = {},
+  handler: typeof handleMoneySummary = handleMoneySummary,
+): Promise<Captured> {
   const { res, captured } = fakeRes();
-  await handleMoneySummary(fakeReq(options), res);
+  await handler(fakeReq(options), res);
   return captured;
 }
 
@@ -134,6 +138,71 @@ describe("GET /api/money/summary", () => {
     assert.ok(!Number.isNaN(new Date(body.fetchedAt).getTime()));
     assert.ok(body.ageMinutes >= 0);
     // 呼び出し側が鮮度を判断できるよう、経過情報を必ず添える。
+    assert.equal(typeof body.stale, "boolean");
+  });
+});
+
+describe("GET /api/money/transactions", () => {
+  it("シークレット未設定なら503を返す（401とは分ける）", async () => {
+    const got = await call({ authorization: `Bearer ${SECRET}` }, handleMoneyTransactions);
+    assert.equal(got.status, 503);
+    assert.match(JSON.parse(got.body).error, /AIDE_READ_SECRET/);
+  });
+
+  it("Authorization が無ければ401", async () => {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    assert.equal((await call({}, handleMoneyTransactions)).status, 401);
+  });
+
+  it("GET / HEAD 以外は405で Allow を返す", async () => {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    const got = await call({ method: "POST", authorization: `Bearer ${SECRET}` }, handleMoneyTransactions);
+    assert.equal(got.status, 405);
+    assert.equal(got.headers["Allow"], "GET, HEAD");
+  });
+
+  it("キャッシュが空でも200で empty: true を返す", async () => {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    await rm(join(cacheDir, `${ZAIM_MONEY_CACHE_KEY}.json`), { force: true });
+
+    const got = await call({ authorization: `Bearer ${SECRET}` }, handleMoneyTransactions);
+    assert.equal(got.status, 200);
+    const body = JSON.parse(got.body);
+    assert.equal(body.empty, true);
+    assert.equal(body.fetchedAt, null);
+    assert.deepEqual(body.entries, []);
+  });
+
+  it("キャッシュがあれば明細一覧と取得時刻・経過分数を返す", async () => {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    await writeCache(ZAIM_MONEY_CACHE_KEY, "test", {
+      entries: [
+        {
+          id: 10228209053,
+          date: "2026-09-02",
+          amount: 1238,
+          category: "食費",
+          genre: "調理食品",
+          account: "スマートレシート",
+          toAccount: "",
+          place: "ライフ 高槻城西店",
+          name: "SS大盛りペペロ…",
+          comment: "",
+        },
+      ],
+    });
+
+    const got = await call({ authorization: `Bearer ${SECRET}` }, handleMoneyTransactions);
+    assert.equal(got.status, 200);
+    assert.equal(got.headers["Cache-Control"], "no-store");
+    assert.match(got.headers["Content-Type"] ?? "", /application\/json/);
+
+    const body = JSON.parse(got.body);
+    assert.equal(body.empty, false);
+    assert.equal(body.entries[0].id, 10228209053);
+    assert.equal(body.entries[0].account, "スマートレシート");
+    assert.ok(!Number.isNaN(new Date(body.fetchedAt).getTime()));
+    assert.ok(body.ageMinutes >= 0);
     assert.equal(typeof body.stale, "boolean");
   });
 });

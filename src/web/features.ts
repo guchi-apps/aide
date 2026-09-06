@@ -140,6 +140,12 @@ const ENDPOINTS: FeatureItem[] = [
       "個人アプリ向けの読み取りAPI。aide_money_summary と同じ内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数・月額固定費）をJSONで返す。読み取り専用の共有シークレットで認証する。",
   },
   {
+    name: "/api/money/transactions",
+    meta: "GET",
+    description:
+      "Zaim Web版の家計簿明細一覧（当月ぶん）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
+  },
+  {
     name: "/api/zaim/payment",
     meta: "POST",
     description:
