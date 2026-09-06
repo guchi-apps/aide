@@ -197,7 +197,7 @@ describe("POST /api/news-mail/send", () => {
   });
 
   it("正常系: リクエストのsubjectがそのまま使われ送信が成功する", async () => {
-    let raw: string | null = null;
+    let raw = "";
     globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
       if (String(url).includes("oauth2.googleapis.com")) {
         return new Response(JSON.stringify({ access_token: "at" }), { status: 200 });
@@ -212,7 +212,6 @@ describe("POST /api/news-mail/send", () => {
     const parsed = JSON.parse(result.body) as { ok: boolean; messageId: string };
     assert.equal(parsed.ok, true);
     assert.equal(parsed.messageId, "msg-mock");
-    assert.ok(raw);
     assert.ok(
       raw.includes(`Subject: =?UTF-8?B?${Buffer.from("[業界ニュース] 2026-09-01の週報", "utf8").toString("base64")}?=`),
     );
