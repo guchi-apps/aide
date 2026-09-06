@@ -1,5 +1,5 @@
 import { abandonImageMail, beginImageMail, completeImageMail } from "./idempotency.ts";
-import { type GmailCredentials, type ImageMailAddresses, sendGmailMessage } from "./gmail.ts";
+import { type GmailCredentials, type MailAddresses, sendGmailMessage } from "./gmail.ts";
 import { recordImageMailLog } from "./log.ts";
 
 /**
@@ -25,7 +25,7 @@ function buildBodyText(input: Pick<SendImageMailInput, "title" | "imageCount" | 
 
 export async function sendImageMail(
   credentials: GmailCredentials,
-  addresses: ImageMailAddresses,
+  addresses: MailAddresses,
   input: SendImageMailInput,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SendImageMailOutcome> {
