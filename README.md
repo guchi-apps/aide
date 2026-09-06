@@ -41,6 +41,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
+| `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 
 #### Zaimへの登録は条件1の例外（aide#37）
 
@@ -90,6 +91,20 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 読み書きの区別を持たないCookieで、権限を広げる操作は発生していない。条件3（作成のみ）は満たす。
 
 詳細は[Web版の入力画面からの登録](#web版の入力画面からの登録置き換えに載せるため)。
+
+#### 予定の作成は3条件を文言どおり満たす（aide#243）
+
+`aide_create_event` はDaySpan経由での予定（Googleカレンダー）の新規作成で、他の書き込みと違い
+**例外を根拠にしていない**——3条件を文言どおり満たす。
+
+1. **他のどこからも塞がっている経路。** aide-botが繋げるのは公開のリモートMCPサーバーのURLが
+   あるものだけで、Googleカレンダーには無い（[基準は「Claudeアプリにコネクタがあるか」ではない](#基準はclaudeアプリにコネクタがあるかではないaide173)）。`aide_schedule` と同じ理由
+2. **読み取りとは別の資格情報。** 読み取り用の `AIDE_DAYSPAN_TOKEN` とは別に
+   `AIDE_DAYSPAN_WRITE_TOKEN` を持つ。DaySpan側も読み取り用の `INTERNAL_API_KEY` とは別の
+   `INTERNAL_EVENTS_API_KEY` で守っており、片方が漏れてももう片方の経路は塞がったまま
+3. **作成だけ。** 編集・削除は持たない。動かす・消すにはDaySpanの画面から行う
+
+詳細は `src/core/connectors/dayspan/write.ts`。
 
 ## Core と MCP層の境界
 
@@ -249,6 +264,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
 | `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
 | `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今週の予定」「何時なら空いているか」に答えるためのもので、今日1日の見通しは `aide_daily_briefing` |
+| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細（起票に使えるラベルの候補を含む） |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
