@@ -1,0 +1,14 @@
+[Unit]
+Description=AIDE: Zaim家計簿明細一覧の巡回（1日2回・11:35/23:35 JST）
+
+[Timer]
+# subpc のシステムTZは UTC のため、JSTを明示する。
+# aide-zaim-sync.timer と同じ時刻に置く。ログイン状態（data/zaim/storage-state.json）は
+# aide-zaim-keep-alive・aide-zaim-refresh とも共有しており、既に同一分（10,22:30）で
+# 同時書き込みが起きる設計のため、ここで新たに時刻をずらす必要は無い。
+OnCalendar=*-*-* 11,23:35:00 Asia/Tokyo
+Persistent=true
+# RandomizedDelaySec は置かない（理由は aide-zaim-sync.timer と同じ）。
+
+[Install]
+WantedBy=timers.target
