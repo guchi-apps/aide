@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
-import { handleMoneySummary } from "./api/read.ts";
+import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
@@ -205,6 +205,11 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 読み取り側に書き込み権限を渡さないよう、受け口とはシークレットを分けている。
   if (path === "/api/money/summary") {
     await handleMoneySummary(req, res);
+    return;
+  }
+  // Zaim Web版の家計簿明細一覧（公式APIが返さない自動連携明細を含む）を読む口（#244）。
+  if (path === "/api/money/transactions") {
+    await handleMoneyTransactions(req, res);
     return;
   }
 

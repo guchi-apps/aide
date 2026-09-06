@@ -1,12 +1,16 @@
+export { fetchZaimMoneyList } from "./money-list.ts";
 export { refreshZaimOnlineAccounts } from "./refresh.ts";
 export { scrapeZaimSnapshot } from "./scrape.ts";
 export {
+  buildZaimMoneyList,
   buildZaimRefreshResult,
   buildZaimSnapshot,
   collapseWhitespace,
+  extractZaimMoneyId,
   findStaleZaimAccounts,
   parseYenAmount,
   parseZaimLastUpdatedAt,
+  parseZaimMoneyDate,
   toMatchKey,
 } from "./parse.ts";
 export { loadZaimOAuthCredentials } from "./oauth.ts";
@@ -28,6 +32,8 @@ export type {
 export type {
   ZaimBalance,
   ZaimHolding,
+  ZaimMoneyEntry,
+  ZaimMoneyList,
   ZaimOnlineAccount,
   ZaimRawScrapeResult,
   ZaimRefreshAccount,
