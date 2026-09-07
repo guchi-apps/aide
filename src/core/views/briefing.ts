@@ -100,7 +100,7 @@ export interface DailyBriefing {
   unavailable: { source: string; reason: string }[];
   /** 今日の予定・移動・タスク・日付リマインドと空き時間（DaySpan）。 */
   schedule: BriefingSection<ScheduleDay>;
-  /** 交通（trainroute）。 */
+  /** 交通。取得元は未定（trainrouteの廃止により白紙に戻った。guchi-apps/aide#265）。 */
   transit: PendingSection;
   /** 今日・明日の天気（Open-Meteo）。 */
   weather: BriefingSection<BriefingWeather>;
@@ -229,7 +229,7 @@ export function assembleBriefing(
 ): DailyBriefing {
   const entries = [
     { source: "dayspan", section: sections.schedule as BriefingSection<unknown> },
-    { source: "trainroute", section: sections.transit as BriefingSection<unknown> },
+    { source: "transit", section: sections.transit as BriefingSection<unknown> },
     { source: "open-meteo", section: sections.weather as BriefingSection<unknown> },
   ];
 
@@ -295,7 +295,7 @@ export async function buildDailyBriefing(now: Date = new Date()): Promise<DailyB
 
   return assembleBriefing(now, date, {
     schedule: summarizeScheduleSection(schedule, date, now),
-    transit: pendingSection("交通のコネクタが未実装（guchi-apps/aide#33 待ち）"),
+    transit: pendingSection("交通の取得元が未定（guchi-apps/aide#265 でtrainroute廃止に伴い白紙）"),
     weather: summarizeWeatherSection(weatherCache, date),
   });
 }

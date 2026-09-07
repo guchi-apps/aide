@@ -219,7 +219,7 @@ describe("assembleBriefing", () => {
     assert.equal(briefing.complete, false);
     assert.deepEqual(briefing.unavailable, [
       { source: "dayspan", reason: "予定のコネクタが未実装" },
-      { source: "trainroute", reason: "交通のコネクタが未実装" },
+      { source: "transit", reason: "交通のコネクタが未実装" },
     ]);
     // 天気は取れているので、そこだけは答えられる。
     assert.equal(briefing.weather.state, "ok");
