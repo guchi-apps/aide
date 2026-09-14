@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // 本番のキャッシュを汚さないよう、読み込み前に置き場を一時ディレクトリへ差し替える。
 // CACHE_DIR はモジュール読み込み時に確定するため、import より前に設定する必要がある。
@@ -63,12 +64,25 @@ after(async () => {
 });
 
 describe("worker からの取り込み", () => {
-  it("巡回結果を受け入れてキャッシュへ書く", async () => {
-    const captured = await post("zaim-snapshot", { source: "zaim", data: { balances: [] } });
+  it("Zaim残高・保有銘柄の巡回結果を受け入れてキャッシュへ書く", async () => {
+    const { ZAIM_CACHE_KEY } = await import("../worker/jobs/zaim-sync.ts");
+    const captured = await post(ZAIM_CACHE_KEY, { source: "zaim", data: { balances: [] } });
 
     assert.equal(captured.status, 200);
-    const cached = await readCache<{ balances: unknown[] }>("zaim-snapshot");
+    const cached = await readCache<{ balances: unknown[] }>(ZAIM_CACHE_KEY);
     assert.deepEqual(cached?.data, { balances: [] });
+  });
+
+  // ALLOWED_KEYS にキーが無く、送信のたびに404になっていた（#272。#108と同じ形）。
+  it("Zaim家計簿明細一覧の巡回結果を受け入れてキャッシュへ書く", async () => {
+    const { ZAIM_MONEY_CACHE_KEY } = await import("../worker/jobs/zaim-money-sync.ts");
+    const list = { month: "202609", entries: [] };
+
+    const captured = await post(ZAIM_MONEY_CACHE_KEY, { source: "zaim-money", data: list });
+
+    assert.equal(captured.status, 200);
+    const cached = await readCache<typeof list>(ZAIM_MONEY_CACHE_KEY);
+    assert.deepEqual(cached?.data, list);
   });
 
   // 記録もworkerから同じ経路で届く。ここで弾くと本番の /status が永久に「記録なし」になる（#89）。
@@ -119,6 +133,34 @@ describe("worker からの取り込み", () => {
     assert.equal(captured.status, 200);
     const cached = await readCache<typeof snapshot>(CLAUDE_SESSIONS_CACHE_KEY);
     assert.deepEqual(cached?.data, snapshot);
+  });
+
+  /**
+   * 個別のテスト（上記）はジョブを追加した人がここへも1件足すこと前提で、足し忘れると
+   * 検出できない。今回の漏れ（#272）もまさにその足し忘れで起きた。
+   *
+   * `worker/jobs/*.ts` が export する `*_CACHE_KEY` を実行時に集めて全件POSTする形にし、
+   * ジョブ側にキー定数さえ足せば、ALLOWED_KEYSへの追加漏れをこのテスト1件で拾えるようにする
+   * （#272の計画レビュー指摘）。
+   */
+  it("workerジョブが export する *_CACHE_KEY を漏れなく受け入れる", async () => {
+    const jobsDir = fileURLToPath(new URL("../worker/jobs/", import.meta.url));
+    const files = (await readdir(jobsDir)).filter(
+      (name) => name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "catalog.ts",
+    );
+
+    let checkedKeys = 0;
+    for (const file of files) {
+      const mod: Record<string, unknown> = await import(`../worker/jobs/${file}`);
+      for (const [name, value] of Object.entries(mod)) {
+        if (!name.endsWith("_CACHE_KEY") || typeof value !== "string") continue;
+        checkedKeys++;
+        const captured = await post(value, { source: "worker", data: { probe: true } });
+        assert.equal(captured.status, 200, `${file} の ${name}（${value}）がALLOWED_KEYSに無い`);
+      }
+    }
+    // 検出ロジック自体が壊れて0件チェックのまま緑になる事故を防ぐ。
+    assert.ok(checkedKeys > 0, "CACHE_KEYをexportするジョブが1件も見つからなかった");
   });
 
   it("未知のキーは404で弾く", async () => {
