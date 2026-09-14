@@ -40,6 +40,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
+| `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
@@ -101,6 +102,27 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 読み書きの区別を持たないCookieで、権限を広げる操作は発生していない。条件3（作成のみ）は満たす。
 
 詳細は[Web版の入力画面からの登録](#web版の入力画面からの登録置き換えに載せるため)。
+
+#### 既存明細のカテゴリ変更は条件3の例外（aide#273）
+
+`POST /api/zaim/payment/web/genre` は条件3（作成だけ・編集は持たない）の例外にあたる。**編集を
+一般には許さない方針は変えていない**——許すのは「カテゴリ・内訳を選び直す」ことだけで、金額・
+日付・口座・品目・お店・集計対象外はこの経路では変えられない（受け取ったJSONの検査
+`normalizeWebGenreEditInput()` がそもそもこれらの項目を受け取らない）。
+
+例外にした理由は、公式APIには**自動連携明細（カード・スマートレシート等）を編集する手段が
+そもそも無い**こと（Zaim APIの仕様。`write.ts` 冒頭のコメント）。asset-manager の「内訳の提案」
+（asset-manager#420）が算出した内訳を書き戻す先が無いと、提案機能そのものが「反映」を持てない。
+条件1（他に無い経路）・条件2（ログイン状態は新規登録と同じで、権限を広げていない）は #214 と
+同じ理由で満たす。
+
+**この例外を前例として使わない。** 金額・日付・口座などの他の項目や、削除・集計対象外の切り替えを
+持ち込むときは、この節を根拠にせず改めて判断する。
+
+開いた明細の日付・金額が本文と一致しない場合は、カテゴリを選ぶ前に検知して422で止める
+（別の明細を取り違えて変更してしまう事故を防ぐ）。
+
+詳細は[既存明細のカテゴリ・内訳の変更](#既存明細のカテゴリ内訳の変更aide273)。
 
 #### 予定の作成は3条件を文言どおり満たす（aide#243）
 
@@ -896,6 +918,64 @@ node --env-file-if-exists=.env src/core/connectors/zaim/scripts/web-payment.mjs
 **一時的な失敗をやり直さない**（`runZaimScript` の `retryTransient: false`）。巡回は何度実行しても
 結果が変わらないが、登録は変わる。セッション失効時の自動再ログインだけは従来どおり通す——
 失効はページを開いた時点で分かるため、送信より前で必ず起きる。
+
+
+### 既存明細のカテゴリ・内訳の変更（aide#273）
+
+asset-manager の「内訳の提案」（asset-manager#420）は、AIDEが巡回したZaim Web版の一覧
+（`money-list.ts`・#244）から自動連携明細（カード・スマートレシート等）の内訳が決まっていない
+ものを提案する。しかし提案をZaimへ書き戻す口が無かった。**公式APIは自動連携明細を編集できず**
+（`write.ts` 冒頭）、上の新規登録（`web-payment.ts`）も含め、既存明細を編集する経路がAIDEに
+無かったため。
+
+`POST /api/zaim/payment/web/genre` は、Web版の**編集画面**（`/money/<moneyId>/edit`）を
+Playwrightで操作し、**カテゴリ・内訳だけ**を選び直す。[条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることに注意——金額・日付・口座・品目・お店・集計対象外はこの経路では変えない。
+
+#### 呼び出し方
+
+```bash
+curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
+  -H "authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"requestId":"asset-manager:genre-suggestion:1","moneyId":10228209053,
+       "date":"2026-09-02","amount":1238,"categoryName":"食費","genreName":"調理食品"}'
+# => {"ok":true,"moneyId":10228209053,"duplicated":false,"requestId":"asset-manager:genre-suggestion:1"}
+```
+
+- `moneyId` は一覧の `id`（`GET /api/money/transactions`・#244）と同じ値。編集画面のURLに載る
+- カテゴリは新規登録と同じく**名前**で渡す（画面がIDを受け取らないため）
+- 冪等キーは asset-manager 側が `asset-manager:genre-suggestion:<ZaimGenreSuggestion.id>` の形で送る想定
+- **応答まで数十秒かかる**（ヘッドレスChromiumの起動を含む）。呼び出し元はタイムアウトを長く取ること
+- `"dryRun": true` を足すと**保存だけ行わず**、取り違えの検知とカテゴリの選択までを試す
+
+#### 取り違えの検知
+
+`moneyId` だけで開いた明細を信用せず、**開いた明細の `date`・`amount` が本文と一致するかを
+カテゴリを触る前に確認する**。一致しなければ、何も変えずに `rejected`（HTTP 422）で止める。
+
+これが無いと、呼び出し元が古い一覧から拾った `moneyId`（Zaim側で既に削除・統合された等）を
+渡した場合に、**意図しない別の明細のカテゴリを書き換えてしまう**。この経路は変更前の値を
+覚えておらず元に戻せないため、検知は保存の前に置く。
+
+#### 新規登録との共通点・違い
+
+| | 新規登録（`web-payment.ts`） | 既存明細の変更（`web-genre-edit.ts`） |
+|---|---|---|
+| 開く画面 | `/money/new` | `/money/<moneyId>/edit` |
+| 触る項目 | 全項目 | **カテゴリ・内訳だけ** |
+| 返せる `moneyId` | `null`（画面にIDが出ない） | **呼び出し元が渡した値をそのまま返す** |
+| 同時実行のロック | `web-screen-lock.ts` を共有 | 同左（storage stateのファイルが1つのため） |
+| 冪等の記録 | `data/zaim-web-payments.json` | `data/zaim-web-genre-edits.json`（`moneyId`も保持） |
+| 中継（VPS→サブPC） | 同じ受け口サーバーの別パス | 同左 |
+
+失敗の分類（`rejected`/`conflict`/`failed`の使い分け）・中継の考え方は新規登録と同じなので、
+上の「[中継が失敗したときにどちらへ倒すか](#中継が失敗したときにどちらへ倒すか)」を参照。
+
+**編集画面のDOM構造は、この実装の時点でZaimの実物では確認していない。** 新規登録画面
+（`/money/new`）の実物確認結果（上表）から類推して書いており、要素が見つからなければ必ず
+例外にして保存の手前で止まる作りにしてあるため誤った変更が入ることは無いが、**初めて実アクセス
+される時点で動かない可能性がある**。当たらなかった場合は `scripts/edit-genre.mjs` のセレクタを
+実物に合わせて直す。
 
 
 ## コネクタ: ops-dashboard

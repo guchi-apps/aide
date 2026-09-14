@@ -3,7 +3,12 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
-import { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } from "./api/zaim.ts";
+import {
+  handleZaimMaster,
+  handleZaimPayment,
+  handleZaimWebGenreEdit,
+  handleZaimWebPayment,
+} from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -226,6 +231,12 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // **Playwrightとログイン状態がある実行環境（サブPC）でだけ成立する。**
   if (path === "/api/zaim/payment/web") {
     await handleZaimWebPayment(req, res);
+    return;
+  }
+  // 既存明細（自動連携明細を含む）のカテゴリ・内訳だけを編集画面から変更する口（#273）。
+  // 上と同じくPlaywrightとログイン状態がある実行環境（サブPC）でだけ成立する。
+  if (path === "/api/zaim/payment/web/genre") {
+    await handleZaimWebGenreEdit(req, res);
     return;
   }
   if (path === "/api/zaim/master") {

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { handleZaimWebPayment, zaimWriteSecret } from "../api/zaim.ts";
+import { handleZaimWebGenreEdit, handleZaimWebPayment, zaimWriteSecret } from "../api/zaim.ts";
 import { zaimWebUpstreamUrl } from "../core/connectors/zaim/web-payment-forward.ts";
 
 /**
@@ -10,17 +10,19 @@ import { zaimWebUpstreamUrl } from "../core/connectors/zaim/web-payment-forward.
  * listen するので同じことができない）。
  */
 
-/** 待ち受けるパス。**この1本以外は開かない。** */
+/** 待ち受けるパス。**この2本以外は開かない。** */
 export const ZAIM_WEB_PAYMENT_PATH = "/api/zaim/payment/web";
+/** 既存明細のカテゴリ・内訳の変更（#273）。新規登録と同じ受け口・同じ画面操作の資格情報を使う。 */
+export const ZAIM_WEB_GENRE_EDIT_PATH = "/api/zaim/payment/web/genre";
 
-export type ZaimWebRoute = "health" | "payment" | "not-found";
+export type ZaimWebRoute = "health" | "payment" | "genre-edit" | "not-found";
 
 /**
  * パスから経路を決める。
  *
  * **MCPもOAuthも画面も載せない。** 本体（`src/server.ts`）をそのままサブPCで動かせば
  * 済むように見えるが、それだと認可サーバーとログイン画面がもう1組でき、`data/auth/` が
- * 二重になる。ここで要るのは「Zaimの画面を操作する」1経路だけなので、それだけを開く。
+ * 二重になる。ここで要るのは「Zaimの画面を操作する」経路だけなので、それだけを開く。
  *
  * `/health` は systemd と人が生死を見るためのもので、認証を通さない代わりに
  * **何の情報も載せない**（`ok` の1語だけ）。
@@ -28,6 +30,7 @@ export type ZaimWebRoute = "health" | "payment" | "not-found";
 export function routeZaimWeb(path: string): ZaimWebRoute {
   if (path === "/health") return "health";
   if (path === ZAIM_WEB_PAYMENT_PATH) return "payment";
+  if (path === ZAIM_WEB_GENRE_EDIT_PATH) return "genre-edit";
   return "not-found";
 }
 
@@ -79,6 +82,9 @@ export async function handleZaimWebRequest(
       return;
     case "payment":
       await handleZaimWebPayment(req, res);
+      return;
+    case "genre-edit":
+      await handleZaimWebGenreEdit(req, res);
       return;
     default:
       res.writeHead(404, { "Content-Type": "text/plain" }).end("not found\n");

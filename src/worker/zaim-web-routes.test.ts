@@ -8,8 +8,9 @@ afterEach(() => {
 });
 
 describe("routeZaimWeb", () => {
-  it("開くのは受け口1本と /health だけ", () => {
+  it("開くのは受け口2本と /health だけ", () => {
     assert.equal(routeZaimWeb("/api/zaim/payment/web"), "payment");
+    assert.equal(routeZaimWeb("/api/zaim/payment/web/genre"), "genre-edit");
     assert.equal(routeZaimWeb("/health"), "health");
   });
 
