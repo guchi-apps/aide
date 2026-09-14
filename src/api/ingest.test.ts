@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // 本番のキャッシュを汚さないよう、読み込み前に置き場を一時ディレクトリへ差し替える。
 // CACHE_DIR はモジュール読み込み時に確定するため、import より前に設定する必要がある。
@@ -63,8 +64,6 @@ after(async () => {
 });
 
 describe("worker からの取り込み", () => {
-  // zaim-sync.ts の import はPlaywrightを使う巡回本体まで読み込むため受け口ではリテラルで
-  // 持つが（#272）、テスト側は import して受け口のリテラルとキーが一致しているかを確かめる。
   it("Zaim残高・保有銘柄の巡回結果を受け入れてキャッシュへ書く", async () => {
     const { ZAIM_CACHE_KEY } = await import("../worker/jobs/zaim-sync.ts");
     const captured = await post(ZAIM_CACHE_KEY, { source: "zaim", data: { balances: [] } });
@@ -134,6 +133,34 @@ describe("worker からの取り込み", () => {
     assert.equal(captured.status, 200);
     const cached = await readCache<typeof snapshot>(CLAUDE_SESSIONS_CACHE_KEY);
     assert.deepEqual(cached?.data, snapshot);
+  });
+
+  /**
+   * 個別のテスト（上記）はジョブを追加した人がここへも1件足すこと前提で、足し忘れると
+   * 検出できない。今回の漏れ（#272）もまさにその足し忘れで起きた。
+   *
+   * `worker/jobs/*.ts` が export する `*_CACHE_KEY` を実行時に集めて全件POSTする形にし、
+   * ジョブ側にキー定数さえ足せば、ALLOWED_KEYSへの追加漏れをこのテスト1件で拾えるようにする
+   * （#272の計画レビュー指摘）。
+   */
+  it("workerジョブが export する *_CACHE_KEY を漏れなく受け入れる", async () => {
+    const jobsDir = fileURLToPath(new URL("../worker/jobs/", import.meta.url));
+    const files = (await readdir(jobsDir)).filter(
+      (name) => name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "catalog.ts",
+    );
+
+    let checkedKeys = 0;
+    for (const file of files) {
+      const mod: Record<string, unknown> = await import(`../worker/jobs/${file}`);
+      for (const [name, value] of Object.entries(mod)) {
+        if (!name.endsWith("_CACHE_KEY") || typeof value !== "string") continue;
+        checkedKeys++;
+        const captured = await post(value, { source: "worker", data: { probe: true } });
+        assert.equal(captured.status, 200, `${file} の ${name}（${value}）がALLOWED_KEYSに無い`);
+      }
+    }
+    // 検出ロジック自体が壊れて0件チェックのまま緑になる事故を防ぐ。
+    assert.ok(checkedKeys > 0, "CACHE_KEYをexportするジョブが1件も見つからなかった");
   });
 
   it("未知のキーは404で弾く", async () => {
