@@ -159,6 +159,7 @@ describe("本番の.envへの配線（deploy.yml）", () => {
     // 認証まわり（AIDE_AUTH_PASSWORD）は空だと起動しないので、あえて既定値を付けない。
     for (const name of [
       "AIDE_READ_SECRET",
+      "AIDE_STATUS_SECRET",
       "AIDE_OPS_DASHBOARD_TOKEN",
       "AIDE_SUBSCRIPTIONS_TOKEN",
       "AIDE_MYROOM_TOKEN",
