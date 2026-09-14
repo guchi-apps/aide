@@ -56,6 +56,9 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_ZAIM_WEB_PAYMENT_LOG_PATH:
     "Web版の入力画面からの登録の冪等記録の置き場（#214）。既定（data/zaim-web-payments.json）で足りる。" +
     "そもそもこの経路が動くのは storage state と Playwright があるサブPCだけで、VPSでは使わない",
+  AIDE_ZAIM_WEB_GENRE_EDIT_LOG_PATH:
+    "既存明細のカテゴリ変更の冪等記録の置き場（#273）。既定（data/zaim-web-genre-edits.json）で足りる。" +
+    "AIDE_ZAIM_WEB_PAYMENT_LOG_PATH と同じく、この経路が動くのはサブPCだけで、VPSでは使わない",
   AIDE_WORKER_STATE_DIR: "worker（サブPC）の記録の置き場",
   AIDE_ZAIM_WEB_HOST:
     "Web版登録の受け口（#215）が待ち受けるアドレス。常駐するのはサブPCだけで、" +

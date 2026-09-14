@@ -3,11 +3,14 @@ import { afterEach, describe, it } from "node:test";
 import {
   ZAIM_WEB_FORWARDED_HEADER,
   ZAIM_WEB_FORWARD_TIMEOUT_MS,
+  ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS,
+  forwardZaimWebGenreEdit,
   forwardZaimWebPayment,
   probeZaimWebUpstream,
   zaimWebUpstreamUrl,
 } from "./web-payment-forward.ts";
 import { WEB_PAYMENT_TIMEOUT_MS, type ZaimWebPaymentInput } from "./web-payment.ts";
+import { WEB_GENRE_EDIT_TIMEOUT_MS, type ZaimWebGenreEditInput } from "./web-genre-edit.ts";
 
 const INPUT: ZaimWebPaymentInput = {
   requestId: "asset-manager:receipt-item:1",
@@ -18,6 +21,15 @@ const INPUT: ZaimWebPaymentInput = {
   categoryName: "食費",
   genreName: "外食",
   fromAccountId: 21678522,
+};
+
+const GENRE_EDIT_INPUT: ZaimWebGenreEditInput = {
+  requestId: "asset-manager:genre-suggestion:1",
+  moneyId: 10228209053,
+  amount: 1238,
+  date: "2026-09-02",
+  categoryName: "食費",
+  genreName: "調理食品",
 };
 
 /** JSONを返すだけの `fetch` を作る。 */
@@ -201,6 +213,87 @@ describe("forwardZaimWebPayment", () => {
   it("読めない応答は failed に倒す（登録された可能性を消さない）", async () => {
     const broken = (async () => new Response("<html>502</html>", { status: 502 })) as unknown as typeof fetch;
     const outcome = await forwardZaimWebPayment(INPUT, { ...OPTIONS, fetchImpl: broken });
+    assert.equal(outcome.ok === false && outcome.kind, "failed");
+  });
+});
+
+describe("forwardZaimWebGenreEdit", () => {
+  it("中継先のURL・認証・ループ止めのヘッダを付けて送る", async () => {
+    let seen: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      seen = { url, init };
+      return new Response(JSON.stringify({ ok: true, moneyId: GENRE_EDIT_INPUT.moneyId, duplicated: false }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+
+    await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, { ...OPTIONS, fetchImpl });
+
+    assert.ok(seen);
+    const sent = seen as unknown as { url: string; init: RequestInit };
+    assert.equal(sent.url, "http://subpc:4748/api/zaim/payment/web/genre");
+    const headers = sent.init.headers as Record<string, string>;
+    assert.equal(headers["authorization"], "Bearer s3cret");
+    assert.equal(headers[ZAIM_WEB_FORWARDED_HEADER], "1");
+    assert.deepEqual(JSON.parse(sent.init.body as string), GENRE_EDIT_INPUT);
+  });
+
+  it("打ち切りは画面の操作より必ず長く待つ", () => {
+    assert.ok(ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS > WEB_GENRE_EDIT_TIMEOUT_MS);
+  });
+
+  it("成功をそのまま戻す。moneyId は相手の応答、無ければ渡した値", async () => {
+    const withMoneyId = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(200, { ok: true, moneyId: 999, duplicated: false }),
+    });
+    assert.deepEqual(withMoneyId, { ok: true, moneyId: 999, duplicated: false });
+
+    const withoutMoneyId = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(200, { ok: true, duplicated: true }),
+    });
+    assert.deepEqual(withoutMoneyId, { ok: true, moneyId: GENRE_EDIT_INPUT.moneyId, duplicated: true });
+  });
+
+  it("相手が返した kind を潰さない（conflict を再送可能な分類へ倒さない）", async () => {
+    const outcome = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(409, { ok: false, kind: "conflict", error: "結果が確定していません" }),
+    });
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.ok === false && outcome.kind, "conflict");
+    assert.equal(outcome.ok === false && outcome.reason, "結果が確定していません");
+  });
+
+  it("接続できなければ rejected（Zaimには何も変更されていない）", async () => {
+    const outcome = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: throwingFetch("ECONNREFUSED"),
+    });
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.ok === false && outcome.kind, "rejected");
+  });
+
+  it("打ち切り・応答待ちでの切断は failed（変更されたか分からない）", async () => {
+    const outcome = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: throwingFetch("ECONNRESET"),
+    });
+    assert.equal(outcome.ok === false && outcome.kind, "failed");
+  });
+
+  it("認証・設定の誤りは rejected（画面を開く前に断られている）", async () => {
+    const outcome = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(401, { error: "unauthorized" }),
+    });
+    assert.equal(outcome.ok === false && outcome.kind, "rejected");
+  });
+
+  it("読めない応答は failed に倒す（変更された可能性を消さない）", async () => {
+    const broken = (async () => new Response("<html>502</html>", { status: 502 })) as unknown as typeof fetch;
+    const outcome = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, { ...OPTIONS, fetchImpl: broken });
     assert.equal(outcome.ok === false && outcome.kind, "failed");
   });
 });

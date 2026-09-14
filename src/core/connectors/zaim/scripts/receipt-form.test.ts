@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import {
   amountDigits,
@@ -10,6 +10,7 @@ import {
   parseMonthHeader,
   pickGenreIndex,
   readMenuItems,
+  resolveReceiptEditUrl,
 } from "./receipt-form.mjs";
 
 /**
@@ -160,5 +161,20 @@ describe("amountDigits / parseAmountValue", () => {
   it("空欄は null（0と混ぜない）", () => {
     assert.equal(parseAmountValue(""), null);
     assert.equal(parseAmountValue(null), null);
+  });
+});
+
+describe("resolveReceiptEditUrl", () => {
+  afterEach(() => {
+    delete process.env.ZAIM_RECEIPT_EDIT_URL_BASE;
+  });
+
+  it("moneyIdから編集画面のURLを組み立てる", () => {
+    assert.equal(resolveReceiptEditUrl(10228209053), "https://zaim.net/money/10228209053/edit");
+  });
+
+  it("環境変数で基点URLを上書きできる", () => {
+    process.env.ZAIM_RECEIPT_EDIT_URL_BASE = "https://example.test/money";
+    assert.equal(resolveReceiptEditUrl(1), "https://example.test/money/1/edit");
   });
 });
