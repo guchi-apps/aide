@@ -44,6 +44,14 @@ AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
 `constructor(readonly x: string)`）・`enum`・`namespace`・実装付き `declare` など。
 フィールドは明示的に宣言する。
 
+**`src/core/connectors/zaim/scripts/*.mjs` の一部は、対になる手書きの `*.d.mts` で型を持つ**
+（例: `receipt-form.mjs` と `receipt-form.d.mts`）。`allowJs` を有効にしていないため、`.ts` から
+`.mjs` をimportしたとき、TypeScriptは対になる `.d.mts` があればそれだけを型情報として使い、
+`.mjs` の実装は一切読まない。**`.mjs` へ関数を追加してもエクスポート漏れには気づけず**、対の
+`.d.mts` に宣言を足し忘れると `tsc --noEmit` が「そんなエクスポートは無い」（類似名への
+サジェスト付き）とだけ報告する。実装を疑って探し回っても見つからないので、まず対の `.d.mts`
+の有無を確認する。
+
 `dependencies` は空で、`devDependencies` は `typescript` と `@types/node` の2つだけ。**実行時依存を
 増やさない方針**なので、依存を足す判断は下記「依存関係の追加」に従う。
 
