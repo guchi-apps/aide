@@ -63,12 +63,27 @@ after(async () => {
 });
 
 describe("worker からの取り込み", () => {
-  it("巡回結果を受け入れてキャッシュへ書く", async () => {
-    const captured = await post("zaim-snapshot", { source: "zaim", data: { balances: [] } });
+  // zaim-sync.ts の import はPlaywrightを使う巡回本体まで読み込むため受け口ではリテラルで
+  // 持つが（#272）、テスト側は import して受け口のリテラルとキーが一致しているかを確かめる。
+  it("Zaim残高・保有銘柄の巡回結果を受け入れてキャッシュへ書く", async () => {
+    const { ZAIM_CACHE_KEY } = await import("../worker/jobs/zaim-sync.ts");
+    const captured = await post(ZAIM_CACHE_KEY, { source: "zaim", data: { balances: [] } });
 
     assert.equal(captured.status, 200);
-    const cached = await readCache<{ balances: unknown[] }>("zaim-snapshot");
+    const cached = await readCache<{ balances: unknown[] }>(ZAIM_CACHE_KEY);
     assert.deepEqual(cached?.data, { balances: [] });
+  });
+
+  // ALLOWED_KEYS にキーが無く、送信のたびに404になっていた（#272。#108と同じ形）。
+  it("Zaim家計簿明細一覧の巡回結果を受け入れてキャッシュへ書く", async () => {
+    const { ZAIM_MONEY_CACHE_KEY } = await import("../worker/jobs/zaim-money-sync.ts");
+    const list = { month: "202609", entries: [] };
+
+    const captured = await post(ZAIM_MONEY_CACHE_KEY, { source: "zaim-money", data: list });
+
+    assert.equal(captured.status, 200);
+    const cached = await readCache<typeof list>(ZAIM_MONEY_CACHE_KEY);
+    assert.deepEqual(cached?.data, list);
   });
 
   // 記録もworkerから同じ経路で届く。ここで弾くと本番の /status が永久に「記録なし」になる（#89）。

@@ -28,13 +28,18 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
  * 記録側は失敗しても例外を投げない作りなので、404で弾いてもログ1行しか残らず気づけない。
  *
  * **データのキーは定義元から import する。** リテラルで再掲すると、ジョブを追加したときに
- * ここへの追加が漏れ、送信のたびに404になる（天気予報で実際に起きた。#108）。
- * 例外は巡回結果（`zaim-snapshot`）で、`worker/jobs/zaim-sync.ts` を import すると
- * Playwright を使う巡回本体まで読み込むため、受け口ではリテラルのまま持つ。
+ * ここへの追加が漏れ、送信のたびに404になる（天気予報で実際に起きた。#108。家計簿明細一覧
+ * でも同じ形で起きた。#272）。
+ * 例外は巡回結果（`zaim-snapshot`・`zaim-money-snapshot`）で、それぞれの定義元
+ * （`worker/jobs/zaim-sync.ts`・`worker/jobs/zaim-money-sync.ts`）を import すると
+ * `core/connectors/zaim/index.ts` 経由でPlaywrightを使う巡回本体まで読み込むため、
+ * 受け口ではリテラルのまま持つ。定義元とのキーの一致は `ingest.test.ts` 側で
+ * （そちらは import しても問題ないため）確認する。
  * 実行記録のキーはカタログから作り、ジョブを増やしたときの取りこぼしを防ぐ。
  */
 const ALLOWED_KEYS = new Set<string>([
   "zaim-snapshot",
+  "zaim-money-snapshot",
   WEATHER_CACHE_KEY,
   CLAUDE_SESSIONS_CACHE_KEY,
   ...JOB_CATALOG.map((job) => jobRecordKey(job.name)),
