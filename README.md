@@ -832,7 +832,7 @@ asset-manager（VPS）
 | | VPS（中継する側） | サブPC（画面を操作する側） |
 |---|---|---|
 | 動かすもの | 本体サーバー（PM2） | `src/worker/zaim-web-server.ts`（`aide-zaim-web.service`） |
-| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web` と `/health` だけ** |
+| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web`・`POST /api/zaim/payment/web/genre`（#273）と `/health` だけ** |
 | 要る設定 | `AIDE_ZAIM_WEB_UPSTREAM_URL` | `AIDE_ZAIM_WRITE_SECRET`・`AIDE_ZAIM_WEB_HOST` |
 | 冪等の記録 | 持たない | `data/zaim-web-payments.json` |
 

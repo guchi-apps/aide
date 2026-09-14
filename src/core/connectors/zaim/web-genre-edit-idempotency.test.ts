@@ -53,12 +53,11 @@ describe("beginWebGenreEdit", () => {
     assert.deepEqual(result, { status: "done", moneyId: 222, at: result.status === "done" ? result.at : "" });
   });
 
-  it("結果が確定していない再送は unresolved（勝手にやり直さない）", async () => {
+  it("結果が確定していない再送も new（新規登録と違い塞がない。べき等かつ取り違えを検知できるため）", async () => {
     await beginWebGenreEdit("stuck", 333);
 
     const result = await beginWebGenreEdit("stuck", 333);
-    assert.equal(result.status, "unresolved");
-    assert.ok("at" in result && result.at);
+    assert.deepEqual(result, { status: "new" });
   });
 });
 

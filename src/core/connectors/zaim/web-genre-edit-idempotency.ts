@@ -21,6 +21,26 @@ import { createRecordFile } from "../../record-file.ts";
  * **中身は `requestId`・`moneyId`・状態・時刻の4つだけ。** 変更後のカテゴリ・内訳・
  * 金額・日付は書かない。二重実行を防ぐのに要らないうえ、支出の中身そのものを持つと
  * AIDEの責務から外れる（`idempotency.ts` / `web-idempotency.ts` と同じ方針）。
+ *
+ * ## 結果不明の再送を、新規登録と違って塞がない
+ *
+ * `web-idempotency.ts`（新規登録）は結果が確定していない記録を `unresolved` として返し、
+ * 呼び出し元に**別の `requestId` での送り直し**を求める。新規作成は「やり直すと同じ内容の
+ * 明細がもう1件できる」ため、確定するまで再送を止める必要があるから。
+ *
+ * **ここでは同じ判断をしない。** この経路は
+ *
+ * 1. 対象がすでに存在する明細で、変更するのはカテゴリ・内訳だけ。同じ内容で2回実行しても
+ *    最終状態は変わらない（べき等）
+ * 2. 画面を開くたびに、開いた明細の日付・金額が本文と一致するかを確認してから変更する
+ *    （取り違えの検知）ため、記録が古くても誤った明細を変更する心配がない
+ *
+ * ため、結果不明のまま再送しても安全（新規登録のような二重作成が起きない）。
+ *
+ * asset-manager 側は `requestId` を `asset-manager:genre-suggestion:<ZaimGenreSuggestion.id>`
+ * のように**提案ごとに固定**する想定（#273）。新規登録と同じく「結果不明なら別のキーで
+ * 送り直す」を求めると、一度Chromiumが落ちる・応答待ちで打ち切られるなどが起きただけで、
+ * その提案は人が `data/` の記録を手で消すまで二度と反映できなくなる。
  */
 
 /** 保持する件数。呼び出し元は変更後に自分の側で済みを持つため、AIDE側は再送の窓だけ持てばよい。 */
@@ -44,12 +64,10 @@ export interface WebGenreEditRecord {
 }
 
 export type BeginWebGenreEditResult =
-  /** 未変更。画面を操作してよい。 */
+  /** 未変更、または前回の結果が不明。画面を操作してよい（べき等なので再送は安全）。 */
   | { status: "new" }
   /** 変更済み。もう一度変更しない。 */
-  | { status: "done"; moneyId: number; at: string }
-  /** 前回の結果が不明。**勝手にやり直さない**（二重実行になりうるため人がZaimを確認する）。 */
-  | { status: "unresolved"; at: string };
+  | { status: "done"; moneyId: number; at: string };
 
 const file = createRecordFile<WebGenreEditRecord>(WEB_GENRE_EDIT_LOG_PATH, MAX_RECORDS);
 
@@ -57,7 +75,10 @@ const file = createRecordFile<WebGenreEditRecord>(WEB_GENRE_EDIT_LOG_PATH, MAX_R
  * 変更してよいかを判定し、通す場合は「結果不明」の記録を先に置く。
  *
  * **画面を触る前に記録するのが要点。** 送信の直後に打ち切られた場合、後から記録する作りだと
- * 何も残らず、再送で二重実行になる。先に置いておけば、結果が確定しなかったことが次回に伝わる。
+ * 何も残らず、実行中かどうかが次回に伝わらない（同時実行は `web-screen-lock.ts` が別途防ぐ）。
+ *
+ * **確定済み（`done`）以外は常に `new` を返す。** 前回が `sending` のまま（結果不明）でも、
+ * この経路はべき等かつ取り違えを検知できるため再送してよい（このファイル冒頭のコメント参照）。
  */
 export function beginWebGenreEdit(
   requestId: string,
@@ -66,17 +87,17 @@ export function beginWebGenreEdit(
 ): Promise<BeginWebGenreEditResult> {
   return file.update<BeginWebGenreEditResult>((records) => {
     const existing = records.find((record) => record.requestId === requestId);
-    if (existing) {
-      return {
-        result:
-          existing.state === "done"
-            ? ({ status: "done", moneyId: existing.moneyId, at: existing.at } as const)
-            : ({ status: "unresolved", at: existing.at } as const),
-        write: false,
-      };
+    if (existing?.state === "done") {
+      return { result: { status: "done", moneyId: existing.moneyId, at: existing.at }, write: false };
     }
-    records.push({ requestId, moneyId, state: "sending", at: now.toISOString() });
-    return { result: { status: "new" } as const, write: true };
+    if (existing) {
+      existing.moneyId = moneyId;
+      existing.state = "sending";
+      existing.at = now.toISOString();
+    } else {
+      records.push({ requestId, moneyId, state: "sending", at: now.toISOString() });
+    }
+    return { result: { status: "new" }, write: true };
   });
 }
 

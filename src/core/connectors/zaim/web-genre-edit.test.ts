@@ -185,15 +185,20 @@ describe("createZaimWebGenreEdit", () => {
     assert.equal(outcome.moneyId, VALID.moneyId);
   });
 
-  it("結果が確定していない再送は conflict で止める", async () => {
+  it("結果が確定していない再送は、新規登録と違い塞がずに画面を開いて送り直せる（べき等なため）", async () => {
     const failing = stubDeps([new Error("ZAIM_RECEIPT_SUBMITTED:確認できませんでした")]);
-    await createZaimWebGenreEdit({ ...VALID, requestId: "conflict-1" }, failing);
+    const first = await createZaimWebGenreEdit({ ...VALID, requestId: "retry-1" }, failing);
+    assert.ok(!first.ok && first.kind === "failed");
 
-    const retry = stubDeps([]);
-    const outcome = await createZaimWebGenreEdit({ ...VALID, requestId: "conflict-1" }, retry);
-    assert.deepEqual(retry.calls, [], "結果が不明なまま送り直さない");
-    assert.equal(outcome.ok, false);
-    assert.ok(!outcome.ok && outcome.kind === "conflict");
+    const retry = stubDeps([SCRIPT_OK]);
+    const outcome = await createZaimWebGenreEdit({ ...VALID, requestId: "retry-1" }, retry);
+    assert.deepEqual(retry.calls, ["edit-genre.mjs"], "結果不明でも画面を開いて送り直せること");
+    assert.ok(outcome.ok);
+    assert.equal(outcome.duplicated, false);
+    assert.equal(outcome.moneyId, VALID.moneyId);
+
+    const record = (await readRecords()).find((item) => item.requestId === "retry-1");
+    assert.equal(record?.state, "done");
   });
 
   it("開いた明細が一致しない（取り違え）も送信前の失敗として記録を消す", async () => {

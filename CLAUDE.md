@@ -178,6 +178,10 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
   `scripts/web-payment.mjs`）。**この経路は削除を持たない**ので、間違って作った明細は人が
   Zaim の画面から手で消すことになる。画面の当て方を確かめる必要があるときは、送信を行わない
   `ZAIM_WEB_PAYMENT_DRY_RUN=1` を必ず付ける（#214）
+- **Zaim の既存明細のカテゴリを実際に変更すること**（`POST /api/zaim/payment/web/genre` ・
+  `scripts/edit-genre.mjs`）。**この経路は変更前の値を覚えておらず元に戻せない**ので、
+  画面の当て方を確かめる必要があるときは、保存を行わない `ZAIM_WEB_GENRE_EDIT_DRY_RUN=1`
+  を必ず付ける（#273）
 - **サブPCで動いている受け口（`aide-zaim-web.service` / `npm run zaim-web-server`）を止める・
   再起動すること**（#215）。VPSからのZaim登録がその間ずっと届かなくなる。手元で挙動を
   確かめるときは `AIDE_ZAIM_WEB_PORT` を空きポートにして別に起動する
