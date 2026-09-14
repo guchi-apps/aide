@@ -3,6 +3,7 @@ import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } 
 import { loadZaimOAuthCredentials } from "../core/connectors/zaim/oauth.ts";
 import {
   ZAIM_WEB_FORWARDED_HEADER,
+  forwardZaimWebGenreEdit,
   forwardZaimWebPayment,
   zaimWebUpstreamUrl,
 } from "../core/connectors/zaim/web-payment-forward.ts";
@@ -12,6 +13,12 @@ import {
   type CreateWebPaymentOutcome,
   type ZaimWebPaymentInput,
 } from "../core/connectors/zaim/web-payment.ts";
+import {
+  createZaimWebGenreEdit,
+  normalizeWebGenreEditInput,
+  type CreateWebGenreEditOutcome,
+  type ZaimWebGenreEditInput,
+} from "../core/connectors/zaim/web-genre-edit.ts";
 import {
   createZaimPayment,
   fetchZaimMaster,
@@ -267,6 +274,88 @@ export async function handleZaimWebPayment(req: IncomingMessage, res: ServerResp
     duplicated: outcome.duplicated,
     requestId: normalized.input.requestId,
     registered: outcome.registered,
+  });
+}
+
+/**
+ * 中継するか、自分のところで画面を操作するかを決めて実行する（#273）。`runOrForwardWebPayment`
+ * と同じ考え方で、同じ `AIDE_ZAIM_WEB_UPSTREAM_URL` を見る（受け口は新規登録と既存明細の変更の
+ * どちらも同じマシン・同じサーバーで受ける）。
+ */
+async function runOrForwardWebGenreEdit(
+  req: IncomingMessage,
+  input: ZaimWebGenreEditInput,
+): Promise<CreateWebGenreEditOutcome> {
+  const upstream = zaimWebUpstreamUrl();
+  if (!upstream) return createZaimWebGenreEdit(input);
+
+  if (req.headers[ZAIM_WEB_FORWARDED_HEADER] === "1") {
+    console.warn(
+      "[zaim-api] 中継されたリクエストに AIDE_ZAIM_WEB_UPSTREAM_URL が設定されています。" +
+        "受け口側では設定しないでください。ここでは中継せず画面の操作を試みます。",
+    );
+    return createZaimWebGenreEdit(input);
+  }
+
+  const secret = zaimWriteSecret();
+  if (!secret) return { ok: false, kind: "rejected", reason: "AIDE_ZAIM_WRITE_SECRET が未設定です" };
+
+  console.log(`[zaim-api] Web版の変更を中継: requestId=${input.requestId}`);
+  return forwardZaimWebGenreEdit(input, { baseUrl: upstream, secret });
+}
+
+/**
+ * `POST /api/zaim/payment/web/genre`
+ *
+ * **Web版の編集画面を操作して**既存明細（自動連携明細を含む）のカテゴリ・内訳だけを変更する（#273）。
+ * 公式APIは自動連携明細を編集できず、新規登録（`/api/zaim/payment/web`）とは別に、既存の明細を
+ * 対象にした経路として設ける。
+ *
+ * 上の `POST /api/zaim/payment/web` との違い。
+ *
+ * | | `/api/zaim/payment/web` | `/api/zaim/payment/web/genre` |
+ * |---|---|---|
+ * | 対象 | 新規の明細を作る | **既存の明細（`moneyId` で指定）を変更する** |
+ * | 触る項目 | 全項目 | **カテゴリ・内訳だけ** |
+ * | 返す `moneyId` | 常に `null` | **渡した `moneyId` をそのまま** |
+ * | 取り違えの検知 | 無し | **開いた明細の `date`・`amount` が一致しなければ422で止める** |
+ *
+ * 中継・同時実行ロックの考え方は上と同じ。呼び出し元はタイムアウトを長く取ること。
+ */
+export async function handleZaimWebGenreEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method !== "POST") {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+  if (!(await authorize(req, res, "POST /api/zaim/payment/web/genre"))) return;
+
+  const body = await readBody(req, res);
+  if (body === null) return;
+
+  const normalized = normalizeWebGenreEditInput(body);
+  if ("error" in normalized) {
+    json(res, 400, { ok: false, kind: "invalid", error: normalized.error });
+    return;
+  }
+
+  const outcome = await runOrForwardWebGenreEdit(req, normalized.input);
+  if (!outcome.ok) {
+    json(res, statusFor(outcome.kind), {
+      ok: false,
+      kind: outcome.kind,
+      error: outcome.reason,
+      requestId: normalized.input.requestId,
+    });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    moneyId: outcome.moneyId,
+    duplicated: outcome.duplicated,
+    requestId: normalized.input.requestId,
   });
 }
 

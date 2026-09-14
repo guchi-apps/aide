@@ -3,7 +3,13 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
-import { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } from "./api/zaim.ts";
+import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
+import {
+  handleZaimMaster,
+  handleZaimPayment,
+  handleZaimWebGenreEdit,
+  handleZaimWebPayment,
+} from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -88,6 +94,13 @@ registry.register(researchDeskImportWeeklyReportTool);
 registry.register(createNotificationTool);
 registry.register(createTaskCandidateTool);
 registry.register(saveDailyBriefTool);
+
+// ops-dashboard向けの動作状況JSON API（#276）。/status 画面と同じ入力を buildHealth() へ渡す。
+const statusApiOptions: StatusApiOptions = {
+  authConfig,
+  supabase: supabaseAuthConfig,
+  registry,
+};
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
@@ -214,6 +227,18 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
+  // ---- ops-dashboard向けの動作状況API（#276） ----
+  // /status（ブラウザ向け）と同じ buildHealth() をサーバー間で読める形で出す。
+  // AIDE_READ_SECRET とは別のシークレット（AIDE_STATUS_SECRET）で認証する。
+  if (path === "/api/status") {
+    await handleStatusApi(req, res, statusApiOptions);
+    return;
+  }
+  if (path === "/api/status/checks") {
+    await handleStatusApiChecks(req, res, statusApiOptions);
+    return;
+  }
+
   // ---- 個人アプリ向けのZaim登録API ----
   // Zaimの資格情報をAIDEだけに持たせるための口（#37）。上の2つとはさらに別のシークレットで、
   // 残高を読みたいだけのアプリへZaimへの書き込み権限を渡さない。
@@ -226,6 +251,12 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // **Playwrightとログイン状態がある実行環境（サブPC）でだけ成立する。**
   if (path === "/api/zaim/payment/web") {
     await handleZaimWebPayment(req, res);
+    return;
+  }
+  // 既存明細（自動連携明細を含む）のカテゴリ・内訳だけを編集画面から変更する口（#273）。
+  // 上と同じくPlaywrightとログイン状態がある実行環境（サブPC）でだけ成立する。
+  if (path === "/api/zaim/payment/web/genre") {
+    await handleZaimWebGenreEdit(req, res);
     return;
   }
   if (path === "/api/zaim/master") {

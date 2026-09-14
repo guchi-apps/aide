@@ -146,6 +146,18 @@ const ENDPOINTS: FeatureItem[] = [
       "Zaim Web版の家計簿明細一覧（当月ぶん）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
   },
   {
+    name: "/api/status",
+    meta: "GET",
+    description:
+      "ops-dashboard向けの動作状況API。/status 画面と同じ判定（health）とMCPツール名一覧（tools）をJSONで返す。動作状況専用の共有シークレットで認証する。",
+  },
+  {
+    name: "/api/status/checks",
+    meta: "POST",
+    description:
+      "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/status/checks（ブラウザ向け）と同じ判定を使う。",
+  },
+  {
     name: "/api/zaim/payment",
     meta: "POST",
     description:
@@ -156,6 +168,12 @@ const ENDPOINTS: FeatureItem[] = [
     meta: "POST",
     description:
       "Zaim Web版の入力画面を操作して品目明細を1件登録する。公式APIで作った明細は「レシート置き換え」の候補にならないため、置き換えに載せたいものはこちらを通す。応答まで数十秒かかり、レコードIDは返らない。画面の操作が成立するのはログイン状態のあるサブPCだけなので、VPSのサーバーはそこへ中継する。",
+  },
+  {
+    name: "/api/zaim/payment/web/genre",
+    meta: "POST",
+    description:
+      "Zaim Web版の編集画面を操作して、既存明細（自動連携明細を含む）のカテゴリ・内訳だけを変更する。金額・日付・口座・品目・お店・集計対象外は変えない。開いた明細の日付・金額が本文と一致しなければ何も変えずに止める。応答まで数十秒かかり、渡した moneyId をそのまま返す。画面の操作が成立するのはログイン状態のあるサブPCだけなので、VPSのサーバーはそこへ中継する。",
   },
   {
     name: "/api/zaim/master",

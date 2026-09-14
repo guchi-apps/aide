@@ -32,6 +32,15 @@ export function resolveReceiptUrl() {
 }
 
 /**
+ * 既存明細の編集画面のURL（`/money/<id>/edit`）。moneyIdはWeb版の一覧の編集リンク
+ * （`parse.ts` の `extractZaimMoneyId()`）が取り出すのと同じ値。
+ */
+export function resolveReceiptEditUrl(moneyId) {
+    const base = process.env.ZAIM_RECEIPT_EDIT_URL_BASE || "https://zaim.net/money"
+    return `${base}/${moneyId}/edit`
+}
+
+/**
  * 「2026年8月」から年月を読む。日付ピッカーの見出しに使う。
  * 読めなければ null（＝Zaim側の表示が変わったので失敗させる）。
  */

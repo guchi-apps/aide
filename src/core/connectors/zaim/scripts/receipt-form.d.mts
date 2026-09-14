@@ -21,6 +21,8 @@ export interface ZaimMenuItem {
 
 export declare function resolveReceiptUrl(): string;
 
+export declare function resolveReceiptEditUrl(moneyId: number): string;
+
 export declare function parseMonthHeader(text: string | null | undefined): ZaimYearMonth | null;
 
 export declare function monthsBetween(from: ZaimYearMonth, to: ZaimYearMonth): number;

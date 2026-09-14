@@ -9,7 +9,9 @@ import { after, beforeEach, describe, it } from "node:test";
 const dir = await mkdtemp(join(tmpdir(), "aide-zaim-api-test-"));
 process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
 process.env["AIDE_ZAIM_WEB_PAYMENT_LOG_PATH"] = join(dir, "zaim-web-payments.json");
-const { handleZaimMaster, handleZaimPayment, handleZaimWebPayment } = await import("./zaim.ts");
+process.env["AIDE_ZAIM_WEB_GENRE_EDIT_LOG_PATH"] = join(dir, "zaim-web-genre-edits.json");
+const { handleZaimMaster, handleZaimPayment, handleZaimWebGenreEdit, handleZaimWebPayment } =
+  await import("./zaim.ts");
 const { resetRateLimits } = await import("../auth/ratelimit.ts");
 
 /**
@@ -239,5 +241,70 @@ describe("POST /api/zaim/payment/web", () => {
   it("JSONとして読めなければ400", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
     assert.equal((await postWeb("{壊れた")).status, 400);
+  });
+});
+
+/**
+ * `POST /api/zaim/payment/web/genre`（#273）。
+ *
+ * こちらも上と同じくZaimへ届く前に決まるところだけを見る。既存明細を対象にするため
+ * `moneyId` が必須で、`name`・`place`・`fromAccountId` は受け取らない。
+ */
+async function postWebGenre(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Promise<Captured> {
+  const { res, captured } = fakeRes();
+  await handleZaimWebGenreEdit(
+    fakeReq("POST", typeof body === "string" ? body : JSON.stringify(body), authorization),
+    res,
+  );
+  return captured;
+}
+
+const VALID_WEB_GENRE_BODY = {
+  requestId: "test:genre:1",
+  moneyId: 10228209053,
+  amount: 1238,
+  date: "2026-09-02",
+  categoryName: "食費",
+  genreName: "調理食品",
+};
+
+describe("POST /api/zaim/payment/web/genre", () => {
+  it("シークレット未設定なら503", async () => {
+    delete process.env["AIDE_ZAIM_WRITE_SECRET"];
+    assert.equal((await postWebGenre(VALID_WEB_GENRE_BODY)).status, 503);
+  });
+
+  it("シークレットが違えば401", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await postWebGenre(VALID_WEB_GENRE_BODY, "Bearer wrong")).status, 401);
+  });
+
+  it("POST以外は405（認証より先に見る）", async () => {
+    const { res, captured } = fakeRes();
+    await handleZaimWebGenreEdit(fakeReq("GET", "", null), res);
+    assert.equal(captured.status, 405);
+  });
+
+  it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    setOAuthEnv(false);
+    const result = await postWebGenre({ ...VALID_WEB_GENRE_BODY, categoryName: undefined });
+    assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
+    assert.match(result.body, /categoryName/);
+  });
+
+  it("入力が不正なら400で、何が足りないかを返す", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+
+    for (const key of ["moneyId", "date", "amount", "categoryName", "genreName"]) {
+      const result = await postWebGenre({ ...VALID_WEB_GENRE_BODY, [key]: undefined });
+      assert.equal(result.status, 400, `${key} が無くても通ってしまいます`);
+      assert.match(result.body, new RegExp(key));
+    }
+  });
+
+  it("JSONとして読めなければ400", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await postWebGenre("{壊れた")).status, 400);
   });
 });

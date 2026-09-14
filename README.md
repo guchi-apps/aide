@@ -40,6 +40,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
+| `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
@@ -101,6 +102,27 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 読み書きの区別を持たないCookieで、権限を広げる操作は発生していない。条件3（作成のみ）は満たす。
 
 詳細は[Web版の入力画面からの登録](#web版の入力画面からの登録置き換えに載せるため)。
+
+#### 既存明細のカテゴリ変更は条件3の例外（aide#273）
+
+`POST /api/zaim/payment/web/genre` は条件3（作成だけ・編集は持たない）の例外にあたる。**編集を
+一般には許さない方針は変えていない**——許すのは「カテゴリ・内訳を選び直す」ことだけで、金額・
+日付・口座・品目・お店・集計対象外はこの経路では変えられない（受け取ったJSONの検査
+`normalizeWebGenreEditInput()` がそもそもこれらの項目を受け取らない）。
+
+例外にした理由は、公式APIには**自動連携明細（カード・スマートレシート等）を編集する手段が
+そもそも無い**こと（Zaim APIの仕様。`write.ts` 冒頭のコメント）。asset-manager の「内訳の提案」
+（asset-manager#420）が算出した内訳を書き戻す先が無いと、提案機能そのものが「反映」を持てない。
+条件1（他に無い経路）・条件2（ログイン状態は新規登録と同じで、権限を広げていない）は #214 と
+同じ理由で満たす。
+
+**この例外を前例として使わない。** 金額・日付・口座などの他の項目や、削除・集計対象外の切り替えを
+持ち込むときは、この節を根拠にせず改めて判断する。
+
+開いた明細の日付・金額が本文と一致しない場合は、カテゴリを選ぶ前に検知して422で止める
+（別の明細を取り違えて変更してしまう事故を防ぐ）。
+
+詳細は[既存明細のカテゴリ・内訳の変更](#既存明細のカテゴリ内訳の変更aide273)。
 
 #### 予定の作成は3条件を文言どおり満たす（aide#243）
 
@@ -212,6 +234,7 @@ src/
   api/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
     read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary, GET /api/money/transactions）
+    status.ts          ops-dashboard向けの動作状況API（GET /api/status, POST /api/status/checks。#276）
     zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
     image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
     news-mail.ts       業界ニュース週報メール送信API（POST /api/news-mail/send。#257）
@@ -503,6 +526,42 @@ rm data/auth/status-session-key   # 画面のログインを全部失効させ�
 総当たり対策は認可画面と同じ仕組み（`src/auth/ratelimit.ts`）を共有する。守っている
 パスワードが同じである以上、片方だけ無制限に試せると回数制限が意味を失う。
 
+### ops-dashboard向けの動作状況API（aide#276）
+
+`GET /status` の判定を、同じVPS上の ops-dashboard がサーバー間で読める形でも出している
+（起点 guchi-apps/ops-dashboard#237）。実装は `src/api/status.ts`。ops-dashboard はこれを
+「AIDE」タブに表示する。**`/status` 画面はこのIssueでは廃止しない**（タブで足りると確かめてから
+別Issueで行う）。
+
+| | |
+|---|---|
+| エンドポイント | `GET /api/status` |
+| 返す内容 | `{ health, tools }`。`health` は `/status` と同じ `buildHealth()` の戻り値そのまま、`tools` はMCP接続カードのチップに使うツール名一覧（`registry.list()`） |
+| 認証 | `Authorization: Bearer $AIDE_STATUS_SECRET` |
+
+```bash
+curl -s -H "Authorization: Bearer $AIDE_STATUS_SECRET" http://127.0.0.1:3114/api/status
+```
+
+疎通確認（`/status/checks` と同じ `runProbes()`）も同じシークレットで叩ける。押されたときだけ
+外部の接続先へ問い合わせる。
+
+| | |
+|---|---|
+| エンドポイント | `POST /api/status/checks` |
+| 返す内容 | `{ results }`（`runProbes()` の戻り値） |
+| 認証 | `Authorization: Bearer $AIDE_STATUS_SECRET`（`/api/status` と同じ値） |
+
+**`AIDE_READ_SECRET` とは別の値にする。** 読み取りAPIのシークレットを流用すると、動作状況を
+見たいだけの ops-dashboard に残高（`/api/money/*`）を読む権限まで渡すことになる。値の正は
+ops-dashboard側にあり、`AIDE_OPS_DASHBOARD_TOKEN` と同じ扱いで複製せずそちらの `op://` を
+そのまま参照する（`.github/secrets-manifest.tsv`）。未設定なら503、シークレット不一致なら401
+（`src/api/read.ts` の `authorize()` と同じ分け方）。
+
+**`health.server.baseUrl` / `mcpUrl` はリクエストのHostからではなく `AIDE_BASE_URL` だけから
+組み立てる。** ops-dashboard は `http://127.0.0.1:3114` で直接叩くため、リクエストのHostを使うと
+MCP接続先が内部アドレスのまま表示されてしまう。
+
 
 ## 共通知識ページ
 
@@ -683,9 +742,9 @@ Zaimは未ログインでもHTTPエラーを返さず、SSO（`id.kufu.jp`）の
 | 完了判定 | Zaim側に完了のシグナルは無い。口座ごとの「最終更新」が進んだかで判定する。反映まで5〜15分、遅い口座は約35分 |
 | 打ち切り | 連携設定が壊れている口座は何度押しても進まないため、全口座の完了は待てない。**しばらくどの口座も進まなくなったら打ち切る**（最短40分・静穏3分・上限45分） |
 
-**「最短40分」は遅い口座の実測に合わせた値**（#178）。早い口座が5〜8分で出揃ったあと、遅い口座が進むまで30分近くどの口座も動かない。静穏だけで打ち切ると毎回そこで抜けてしまうため、静穏の判定は40分を過ぎてから効かせている。上限（`ZAIM_REFRESH_MAX_WAIT_MS`）を縮めるときは、`refresh.ts` の `REFRESH_TIMEOUT_MS`・`aide-zaim-refresh.service` の `TimeoutStartSec`・`aide-zaim-sync.timer` との65分の間隔もあわせて見直す。
+**「最短40分」は遅い口座の実測に合わせた値**（#178）。早い口座が5〜8分で出揃ったあと、遅い口座が進むまで30分近くどの口座も動かない。静穏だけで打ち切ると毎回そこで抜けてしまうため、静穏の判定は40分を過ぎてから効かせている。上限（`ZAIM_REFRESH_MAX_WAIT_MS`）を縮めるときは、`refresh.ts` の `REFRESH_TIMEOUT_MS`・`aide-zaim-refresh.service` の `TimeoutStartSec`・`aide-zaim-sync.timer` との60分の間隔もあわせて見直す。
 
-**一括更新だけは、やり直しに全体の上限（`totalTimeout`）を掛ける。** 巡回とセッション延長は1回が数十秒なので3回やり直しても次の定期実行に食い込まないが、一括更新は1回で最大45分待つ。上限が無いと、やり直した回が `TimeoutStartSec`（55分）に掛かって systemd から殺され、押下の結果すら受け取れない。残り時間が2分を切ったらやり直さず、**元のセッション失効エラーをそのまま投げる**（タイムアウトのエラーで上書きすると通知の分類が壊れる）。逆に2分あればやり直す価値がある——反映を待ち切れなくても、「データを更新する」さえ押せていれば65分後の巡回は新しい残高を読める。
+**一括更新だけは、やり直しに全体の上限（`totalTimeout`）を掛ける。** 巡回とセッション延長は1回が数十秒なので3回やり直しても次の定期実行に食い込まないが、一括更新は1回で最大45分待つ。上限が無いと、やり直した回が `TimeoutStartSec`（55分）に掛かって systemd から殺され、押下の結果すら受け取れない。残り時間が2分を切ったらやり直さず、**元のセッション失効エラーをそのまま投げる**（タイムアウトのエラーで上書きすると通知の分類が壊れる）。逆に2分あればやり直す価値がある——反映を待ち切れなくても、「データを更新する」さえ押せていれば60分後の巡回は新しい残高を読める。
 
 **`zaim-refresh` と `zaim-keep-alive` の重なりは直していない。** 両者は同じ storage state を読み書きし、タイマーの都合で必ず重なる（keep-alive は30分ごとなので、45分走る一括更新の最中に2〜3回起動する）。失効で落ちた回だけを見ると並行アクセスが原因に見えるが、**成功した回もまったく同じように重なっている**（2026-08-28 22:30・08-29 10:30 の成功回でも、開始の1分後に keep-alive が起動している）。ロックや排他を足しても失効は防げないので、直すべきなのは落ちた側が自力で回復することのほう。
 
@@ -810,7 +869,7 @@ asset-manager（VPS）
 | | VPS（中継する側） | サブPC（画面を操作する側） |
 |---|---|---|
 | 動かすもの | 本体サーバー（PM2） | `src/worker/zaim-web-server.ts`（`aide-zaim-web.service`） |
-| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web` と `/health` だけ** |
+| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web`・`POST /api/zaim/payment/web/genre`（#273）と `/health` だけ** |
 | 要る設定 | `AIDE_ZAIM_WEB_UPSTREAM_URL` | `AIDE_ZAIM_WRITE_SECRET`・`AIDE_ZAIM_WEB_HOST` |
 | 冪等の記録 | 持たない | `data/zaim-web-payments.json` |
 
@@ -896,6 +955,64 @@ node --env-file-if-exists=.env src/core/connectors/zaim/scripts/web-payment.mjs
 **一時的な失敗をやり直さない**（`runZaimScript` の `retryTransient: false`）。巡回は何度実行しても
 結果が変わらないが、登録は変わる。セッション失効時の自動再ログインだけは従来どおり通す——
 失効はページを開いた時点で分かるため、送信より前で必ず起きる。
+
+
+### 既存明細のカテゴリ・内訳の変更（aide#273）
+
+asset-manager の「内訳の提案」（asset-manager#420）は、AIDEが巡回したZaim Web版の一覧
+（`money-list.ts`・#244）から自動連携明細（カード・スマートレシート等）の内訳が決まっていない
+ものを提案する。しかし提案をZaimへ書き戻す口が無かった。**公式APIは自動連携明細を編集できず**
+（`write.ts` 冒頭）、上の新規登録（`web-payment.ts`）も含め、既存明細を編集する経路がAIDEに
+無かったため。
+
+`POST /api/zaim/payment/web/genre` は、Web版の**編集画面**（`/money/<moneyId>/edit`）を
+Playwrightで操作し、**カテゴリ・内訳だけ**を選び直す。[条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることに注意——金額・日付・口座・品目・お店・集計対象外はこの経路では変えない。
+
+#### 呼び出し方
+
+```bash
+curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
+  -H "authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"requestId":"asset-manager:genre-suggestion:1","moneyId":10228209053,
+       "date":"2026-09-02","amount":1238,"categoryName":"食費","genreName":"調理食品"}'
+# => {"ok":true,"moneyId":10228209053,"duplicated":false,"requestId":"asset-manager:genre-suggestion:1"}
+```
+
+- `moneyId` は一覧の `id`（`GET /api/money/transactions`・#244）と同じ値。編集画面のURLに載る
+- カテゴリは新規登録と同じく**名前**で渡す（画面がIDを受け取らないため）
+- 冪等キーは asset-manager 側が `asset-manager:genre-suggestion:<ZaimGenreSuggestion.id>` の形で送る想定
+- **応答まで数十秒かかる**（ヘッドレスChromiumの起動を含む）。呼び出し元はタイムアウトを長く取ること
+- `"dryRun": true` を足すと**保存だけ行わず**、取り違えの検知とカテゴリの選択までを試す
+
+#### 取り違えの検知
+
+`moneyId` だけで開いた明細を信用せず、**開いた明細の `date`・`amount` が本文と一致するかを
+カテゴリを触る前に確認する**。一致しなければ、何も変えずに `rejected`（HTTP 422）で止める。
+
+これが無いと、呼び出し元が古い一覧から拾った `moneyId`（Zaim側で既に削除・統合された等）を
+渡した場合に、**意図しない別の明細のカテゴリを書き換えてしまう**。この経路は変更前の値を
+覚えておらず元に戻せないため、検知は保存の前に置く。
+
+#### 新規登録との共通点・違い
+
+| | 新規登録（`web-payment.ts`） | 既存明細の変更（`web-genre-edit.ts`） |
+|---|---|---|
+| 開く画面 | `/money/new` | `/money/<moneyId>/edit` |
+| 触る項目 | 全項目 | **カテゴリ・内訳だけ** |
+| 返せる `moneyId` | `null`（画面にIDが出ない） | **呼び出し元が渡した値をそのまま返す** |
+| 同時実行のロック | `web-screen-lock.ts` を共有 | 同左（storage stateのファイルが1つのため） |
+| 冪等の記録 | `data/zaim-web-payments.json` | `data/zaim-web-genre-edits.json`（`moneyId`も保持） |
+| 中継（VPS→サブPC） | 同じ受け口サーバーの別パス | 同左 |
+
+失敗の分類（`rejected`/`conflict`/`failed`の使い分け）・中継の考え方は新規登録と同じなので、
+上の「[中継が失敗したときにどちらへ倒すか](#中継が失敗したときにどちらへ倒すか)」を参照。
+
+**編集画面のDOM構造は、この実装の時点でZaimの実物では確認していない。** 新規登録画面
+（`/money/new`）の実物確認結果（上表）から類推して書いており、要素が見つからなければ必ず
+例外にして保存の手前で止まる作りにしてあるため誤った変更が入ることは無いが、**初めて実アクセス
+される時点で動かない可能性がある**。当たらなかった場合は `scripts/edit-genre.mjs` のセレクタを
+実物に合わせて直す。
 
 
 ## コネクタ: ops-dashboard
@@ -1597,11 +1714,11 @@ Zaimの認証Cookieは**約2時間**で失効し、アクセスのたびにそ�
 |---|---|---|---|
 | `zaim-keep-alive` | 30分ごと（揺らぎ2分） | 32分 | 有効期間2時間に対し、**3回続けて失敗しても間に合う**余裕を取る |
 | `zaim-refresh` | 1日2回 10:30 / 22:30 JST | — | 押してから反映まで5〜15分、遅い口座は約35分かかる。24時までにその日の最終データを確定させるための逆算 |
-| `zaim-sync` | 1日2回 11:35 / 23:35 JST | — | `zaim-refresh` の完了を見込んだ時刻に置き、夜の1回で**その日のうちに**当日の値を確定させる |
+| `zaim-sync` | 1日2回 11:30 / 23:30 JST | — | `zaim-refresh` の完了を見込んだ時刻に置き、夜の1回で**その日のうちに**当日の値を確定させる |
 
 「最悪間隔」は `RandomizedDelaySec` を含めた実際の空き時間。**`zaim-keep-alive` はここを2時間より十分短く保つことが要件**で、毎時（最悪1時間5分）では1回失敗しただけで超えていた（#63）。Zaimの2つは巡回そのものが目的なので、この制約は掛からない。
 
-**`zaim-sync` は以前05:00 JSTだった。** 「issue-deckの並行ビルドと競合せず、朝の時点で当日のデータが揃う」ことが理由だったが、その時刻では更新ボタンを押した当日ぶんが翌日のキャッシュにしか載らない。23:35へ移しても朝には前夜23:35のデータ（経過8時間ほど）があり、当日ぶんが揃っているという条件は満たせるため移した（#62）。
+**`zaim-sync` は以前05:00 JSTだった。** 「issue-deckの並行ビルドと競合せず、朝の時点で当日のデータが揃う」ことが理由だったが、その時刻では更新ボタンを押した当日ぶんが翌日のキャッシュにしか載らない。23:30へ移しても朝には前夜23:30のデータ（経過8時間ほど）があり、当日ぶんが揃っているという条件は満たせるため移した（#62）。
 
 **さらに昼の1回を足して1日2回にした（#165）。** 日次1回だと日中に残高を尋ねても前夜の値しか返らず、キャッシュの経過が最大24時間になる。**夜の1回は動かしていない**ので、#62 の「その日のうちに当日ぶんを確定させる」条件はそのまま保たれる。頻度に合わせて次の3つも詰めてある。
 
@@ -1614,6 +1731,8 @@ Zaimの認証Cookieは**約2時間**で失効し、アクセスのたびにそ�
 最後の1つは**必須**。更新漏れは「最終更新が当日（JST）か」で見るため、昼の時点では前夜に更新できた口座まで当日でない側に入る。判定したままにすると、昼で「警告」・夜で「復旧」を毎日往復する通知になる。**通知の抑制では塞げない**（全口座が当日になった時点で記録ごと消えるため、次の警告は窓に関係なく無条件で届く）。
 
 **さらに押下を 10:30 / 22:30 へ45分前倒しし、反映を待つ時間も最大45分へ延ばした（#178）。** 押下から巡回までが20分しかなく、反映に約35分かかる口座（SBI証券・楽天証券・Ponta・MUFGカード）が毎晩間に合っていなかった。巡回の 11:35 / 23:35 は動かしていないので、#62 の「23:59までにその日ぶんを確定させる」条件はそのまま保たれる。**押下と巡回の65分の間隔が、この修正の根拠そのもの**なので、どちらかの時刻を動かすときは必ず両方を見る。
+
+**巡回を 11:30 / 23:30 へ5分早めた（#278）。** 押下（10:30 / 22:30）は動かしていないため、間隔は65分→60分に縮まる。反映に最も時間がかかる口座（SBI証券など）でも約35分であり、60分の間隔でも十分な余裕が残るため実害はない。
 
 あわせて**更新漏れの判定を押下側（`zaim-refresh`）から巡回側（`zaim-sync`）へ移した**。押した直後には反映の遅い口座がまだ進んでおらず、押下側で判定すると「更新できない口座」と「反映が遅いだけの口座」を区別できないため（判定の境目である20時はそのまま流用している）。
 
@@ -1634,7 +1753,7 @@ systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導�
 systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-money-sync.timer  # 初回のみ（未導入のユニット）
-systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
+systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer aide-zaim-money-sync.timer
 systemctl --user list-timers 'aide-*'
 ```
 
@@ -1668,7 +1787,7 @@ URLに含まれる `channel_id` が宛先の識別子そのもの（Webhook自�
 - **失敗**: ジョブ名・失敗理由・発生時刻・実行ホストを載せる。`ZAIM_SESSION_EXPIRED` はタイトルと「対応」欄で他の失敗と区別する。**失効はさらに3通りに書き分ける**（下記）
 - **復旧**: 失敗が記録されている状態で成功したときに1回だけ
 - **セッション回復（ジョブ横断）**: Zaimのジョブが成功したとき、**他のZaimジョブに残っている失効の失敗**へ1回だけ。ジョブ単位の復旧通知では、12時間ごとの `zaim-refresh` の失効を30分ごとの `zaim-keep-alive` が直しても次の `zaim-refresh` まで伝わらない（#191）。消すのは失効の記録だけで、別の理由で失敗しているジョブの記録は残す
-- **一部失敗**: `zaim-sync` の巡回時点で最終更新が当日でない口座があるとき。**ジョブ自体は成功扱いのまま**（押下も巡回も成功しており、AIDE側では直せない）。署名は「更新できなかった口座名の集合」なので、同じ口座が落ち続けている間は静かになり、別の口座が落ちたときは抑制せずに届く。記録は `<ジョブ名>:stale-accounts` としてジョブ自体の失敗とは別に持つ。**判定するのはその日の最後の巡回（23:35）だけ**（#165 / #178。理由は上の「実行間隔の制約」）
+- **一部失敗**: `zaim-sync` の巡回時点で最終更新が当日でない口座があるとき。**ジョブ自体は成功扱いのまま**（押下も巡回も成功しており、AIDE側では直せない）。署名は「更新できなかった口座名の集合」なので、同じ口座が落ち続けている間は静かになり、別の口座が落ちたときは抑制せずに届く。記録は `<ジョブ名>:stale-accounts` としてジョブ自体の失敗とは別に持つ。**判定するのはその日の最後の巡回（23:30）だけ**（#165 / #178。理由は上の「実行間隔の制約」）
 
 **失効の通知は「自動で直る見込みがあるか」で書き分ける**（#191）。かつては失効＝手動ログインでしか直らなかったが、いまは自動再ログイン（#63）があり、多くは次の `zaim-keep-alive` が勝手に直す。それでも「手動でログインし直すまで失敗し続けます」と送っていたため、受け取った側が手動対応の要否を判断できなかった（2026-08-29 22:32 の `zaim-refresh` の失敗は、4秒後の `zaim-keep-alive` が自動再ログインして復旧している）。判定は失敗の中身と資格情報の有無だけで行い、資格情報の**値は読まない**。
 

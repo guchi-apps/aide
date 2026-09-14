@@ -4,6 +4,8 @@ import type {
   ZaimWebPaymentRegistered,
 } from "./web-payment.ts";
 import { WEB_PAYMENT_TIMEOUT_MS } from "./web-payment.ts";
+import type { CreateWebGenreEditOutcome, ZaimWebGenreEditInput } from "./web-genre-edit.ts";
+import { WEB_GENRE_EDIT_TIMEOUT_MS } from "./web-genre-edit.ts";
 
 /**
  * Web版の入力画面からの登録を、**それが成立するマシンへ中継する**（#215）。
@@ -47,6 +49,9 @@ export const ZAIM_WEB_FORWARDED_HEADER = "x-aide-zaim-web-forwarded";
  * 「登録されたか分からない」状態を自分で作る。
  */
 export const ZAIM_WEB_FORWARD_TIMEOUT_MS = WEB_PAYMENT_TIMEOUT_MS + 30_000;
+
+/** 既存明細のカテゴリ変更（#273）の中継の上限。考え方は上と同じ。 */
+export const ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS = WEB_GENRE_EDIT_TIMEOUT_MS + 30_000;
 
 /**
  * 接続そのものが確立できなかったことを示すエラーコード。
@@ -235,5 +240,94 @@ export async function forwardZaimWebPayment(
     reason:
       `Zaim Web版の登録を行うマシンの応答を読めませんでした（HTTP ${response.status}）。` +
       "登録されたかどうかは分かりません。Zaimの画面で確認してください。",
+  };
+}
+
+/**
+ * 既存明細のカテゴリ・内訳の変更（#273）を中継する。考え方は `forwardZaimWebPayment` と同じで、
+ * 判定に使う定数（`NOT_DELIVERED_CODES`・`NOT_STARTED_STATUSES`・`KNOWN_KINDS`）もそのまま使い回す。
+ *
+ * **`moneyId` は呼び出し元が渡した値をそのまま返す**（新規登録と違い `null` にならない）。
+ * 相手の応答に載っていればそちらを、読めなければ入力の `moneyId` を使う。
+ */
+export async function forwardZaimWebGenreEdit(
+  input: ZaimWebGenreEditInput,
+  options: ZaimWebForwardOptions,
+): Promise<CreateWebGenreEditOutcome> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const url = `${options.baseUrl.replace(/\/$/, "")}/api/zaim/payment/web/genre`;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${options.secret}`,
+        "content-type": "application/json",
+        [ZAIM_WEB_FORWARDED_HEADER]: "1",
+      },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(options.timeoutMs ?? ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS),
+    });
+  } catch (cause) {
+    const code = errorCode(cause);
+    if (code !== null && NOT_DELIVERED_CODES.has(code)) {
+      return {
+        ok: false,
+        kind: "rejected",
+        reason:
+          `Zaim Web版の変更を行うマシンへ接続できませんでした（${code}）。` +
+          "Zaimには何も変更されていません。受け口が起動しているかを確認してください。",
+      };
+    }
+    const name = cause instanceof Error ? cause.name : "Error";
+    return {
+      ok: false,
+      kind: "failed",
+      reason:
+        `Zaim Web版の変更を行うマシンとの通信が途切れました（${code ?? name}）。` +
+        "変更されたかどうかは分かりません。Zaimの画面で確認してください。",
+    };
+  }
+
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await response.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+
+  if (response.ok && body?.["ok"] === true) {
+    const moneyId = typeof body["moneyId"] === "number" ? body["moneyId"] : input.moneyId;
+    return { ok: true, moneyId, duplicated: body["duplicated"] === true };
+  }
+
+  const kind = typeof body?.["kind"] === "string" ? (body["kind"] as string) : null;
+  const reason = typeof body?.["error"] === "string" ? (body["error"] as string) : null;
+
+  if (kind !== null && KNOWN_KINDS.has(kind)) {
+    return {
+      ok: false,
+      kind: kind as "invalid" | "conflict" | "rejected" | "failed",
+      reason: reason ?? `Zaim Web版の変更に失敗しました（${kind}）`,
+    };
+  }
+
+  if (NOT_STARTED_STATUSES.has(response.status)) {
+    return {
+      ok: false,
+      kind: "rejected",
+      reason:
+        `Zaim Web版の変更を行うマシンが受け付けませんでした（HTTP ${response.status}）。` +
+        `Zaimには何も変更されていません。${reason ?? ""}`.trimEnd(),
+    };
+  }
+
+  return {
+    ok: false,
+    kind: "failed",
+    reason:
+      `Zaim Web版の変更を行うマシンの応答を読めませんでした（HTTP ${response.status}）。` +
+      "変更されたかどうかは分かりません。Zaimの画面で確認してください。",
   };
 }
