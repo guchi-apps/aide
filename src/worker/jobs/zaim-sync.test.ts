@@ -13,15 +13,15 @@ import { decideStaleAccountCheck, isFinalSyncOfDay } from "./zaim-sync.ts";
  * まだ進んでおらず、遅いだけの口座を毎晩警告していたため巡回側へ移した（#178）。
  */
 describe("その日の最後の巡回かの判定", () => {
-  it("23:35 JST の巡回では判定する", () => {
-    // UTC 14:35 は JST 23:35（deploy/systemd/aide-zaim-sync.timer の夜の1回）。
-    assert.equal(isFinalSyncOfDay(new Date("2026-08-16T14:35:00.000Z")), true);
+  it("23:30 JST の巡回では判定する", () => {
+    // UTC 14:30 は JST 23:30（deploy/systemd/aide-zaim-sync.timer の夜の1回）。
+    assert.equal(isFinalSyncOfDay(new Date("2026-08-16T14:30:00.000Z")), true);
   });
 
-  it("11:35 JST の巡回では判定しない", () => {
-    // UTC 02:35 は JST 11:35（同じタイマーの昼の1回）。ここで判定すると、前夜に
+  it("11:30 JST の巡回では判定しない", () => {
+    // UTC 02:30 は JST 11:30（同じタイマーの昼の1回）。ここで判定すると、前夜に
     // 更新できた口座まで「更新できなかった」になり、夜の実行で復旧が届く。
-    assert.equal(isFinalSyncOfDay(new Date("2026-08-16T02:35:00.000Z")), false);
+    assert.equal(isFinalSyncOfDay(new Date("2026-08-16T02:30:00.000Z")), false);
   });
 
   it("巡回が長引いて時刻がずれても、夜の実行は判定側のまま", () => {
@@ -45,10 +45,10 @@ describe("その日の最後の巡回かの判定", () => {
  * `null` を返し、通知を呼ばせない。
  */
 describe("更新漏れを判定するかの決め方", () => {
-  // UTC 14:35 は JST 23:35（その日の最後の巡回）。
-  const 夜の巡回 = new Date("2026-08-16T14:35:00.000Z");
-  // UTC 02:35 は JST 11:35（昼の巡回）。
-  const 昼の巡回 = new Date("2026-08-16T02:35:00.000Z");
+  // UTC 14:30 は JST 23:30（その日の最後の巡回）。
+  const 夜の巡回 = new Date("2026-08-16T14:30:00.000Z");
+  // UTC 02:30 は JST 11:30（昼の巡回）。
+  const 昼の巡回 = new Date("2026-08-16T02:30:00.000Z");
 
   const 当日 = { name: "三菱UFJ銀行", lastUpdatedAt: "2026-08-16T22:31:00+09:00" };
   const 前日 = { name: "SBI 証券", lastUpdatedAt: "2026-08-15T23:50:43+09:00" };
