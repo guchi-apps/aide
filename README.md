@@ -234,6 +234,7 @@ src/
   api/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
     read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary, GET /api/money/transactions）
+    status.ts          ops-dashboard向けの動作状況API（GET /api/status, POST /api/status/checks。#276）
     zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
     image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
     news-mail.ts       業界ニュース週報メール送信API（POST /api/news-mail/send。#257）
@@ -524,6 +525,42 @@ rm data/auth/status-session-key   # 画面のログインを全部失効させ�
 
 総当たり対策は認可画面と同じ仕組み（`src/auth/ratelimit.ts`）を共有する。守っている
 パスワードが同じである以上、片方だけ無制限に試せると回数制限が意味を失う。
+
+### ops-dashboard向けの動作状況API（aide#276）
+
+`GET /status` の判定を、同じVPS上の ops-dashboard がサーバー間で読める形でも出している
+（起点 guchi-apps/ops-dashboard#237）。実装は `src/api/status.ts`。ops-dashboard はこれを
+「AIDE」タブに表示する。**`/status` 画面はこのIssueでは廃止しない**（タブで足りると確かめてから
+別Issueで行う）。
+
+| | |
+|---|---|
+| エンドポイント | `GET /api/status` |
+| 返す内容 | `{ health, tools }`。`health` は `/status` と同じ `buildHealth()` の戻り値そのまま、`tools` はMCP接続カードのチップに使うツール名一覧（`registry.list()`） |
+| 認証 | `Authorization: Bearer $AIDE_STATUS_SECRET` |
+
+```bash
+curl -s -H "Authorization: Bearer $AIDE_STATUS_SECRET" http://127.0.0.1:3114/api/status
+```
+
+疎通確認（`/status/checks` と同じ `runProbes()`）も同じシークレットで叩ける。押されたときだけ
+外部の接続先へ問い合わせる。
+
+| | |
+|---|---|
+| エンドポイント | `POST /api/status/checks` |
+| 返す内容 | `{ results }`（`runProbes()` の戻り値） |
+| 認証 | `Authorization: Bearer $AIDE_STATUS_SECRET`（`/api/status` と同じ値） |
+
+**`AIDE_READ_SECRET` とは別の値にする。** 読み取りAPIのシークレットを流用すると、動作状況を
+見たいだけの ops-dashboard に残高（`/api/money/*`）を読む権限まで渡すことになる。値の正は
+ops-dashboard側にあり、`AIDE_OPS_DASHBOARD_TOKEN` と同じ扱いで複製せずそちらの `op://` を
+そのまま参照する（`.github/secrets-manifest.tsv`）。未設定なら503、シークレット不一致なら401
+（`src/api/read.ts` の `authorize()` と同じ分け方）。
+
+**`health.server.baseUrl` / `mcpUrl` はリクエストのHostからではなく `AIDE_BASE_URL` だけから
+組み立てる。** ops-dashboard は `http://127.0.0.1:3114` で直接叩くため、リクエストのHostを使うと
+MCP接続先が内部アドレスのまま表示されてしまう。
 
 
 ## 共通知識ページ

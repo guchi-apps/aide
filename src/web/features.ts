@@ -146,6 +146,18 @@ const ENDPOINTS: FeatureItem[] = [
       "Zaim Web版の家計簿明細一覧（当月ぶん）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
   },
   {
+    name: "/api/status",
+    meta: "GET",
+    description:
+      "ops-dashboard向けの動作状況API。/status 画面と同じ判定（health）とMCPツール名一覧（tools）をJSONで返す。動作状況専用の共有シークレットで認証する。",
+  },
+  {
+    name: "/api/status/checks",
+    meta: "POST",
+    description:
+      "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/status/checks（ブラウザ向け）と同じ判定を使う。",
+  },
+  {
     name: "/api/zaim/payment",
     meta: "POST",
     description:

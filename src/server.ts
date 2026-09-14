@@ -3,6 +3,7 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
+import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
   handleZaimMaster,
   handleZaimPayment,
@@ -93,6 +94,13 @@ registry.register(researchDeskImportWeeklyReportTool);
 registry.register(createNotificationTool);
 registry.register(createTaskCandidateTool);
 registry.register(saveDailyBriefTool);
+
+// ops-dashboard向けの動作状況JSON API（#276）。/status 画面と同じ入力を buildHealth() へ渡す。
+const statusApiOptions: StatusApiOptions = {
+  authConfig,
+  supabase: supabaseAuthConfig,
+  registry,
+};
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
@@ -216,6 +224,18 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // Zaim Web版の家計簿明細一覧（公式APIが返さない自動連携明細を含む）を読む口（#244）。
   if (path === "/api/money/transactions") {
     await handleMoneyTransactions(req, res);
+    return;
+  }
+
+  // ---- ops-dashboard向けの動作状況API（#276） ----
+  // /status（ブラウザ向け）と同じ buildHealth() をサーバー間で読める形で出す。
+  // AIDE_READ_SECRET とは別のシークレット（AIDE_STATUS_SECRET）で認証する。
+  if (path === "/api/status") {
+    await handleStatusApi(req, res, statusApiOptions);
+    return;
+  }
+  if (path === "/api/status/checks") {
+    await handleStatusApiChecks(req, res, statusApiOptions);
     return;
   }
 
