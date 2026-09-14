@@ -11,9 +11,12 @@ Description=AIDE: Zaimの巡回（1日2回・11:30/23:30 JST）
 # 11:30 は12時間ずらした1回で、キャッシュの最大経過を24時間から12時間へ縮める（#165）。
 OnCalendar=*-*-* 11,23:30:00 Asia/Tokyo
 Persistent=true
-# RandomizedDelaySec は置かない。aide-zaim-refresh との65分の間隔が「更新の反映を待つ」
+# RandomizedDelaySec は置かない。aide-zaim-refresh との60分の間隔が「更新の反映を待つ」
 # 根拠そのもので、両方に揺らぎを入れると順序が入れ替わりうる。1日2回なのでZaim側への
 # アクセスが集中する心配もない。
+# 11,23:30 は aide-zaim-keep-alive（*:00,30）とも同じ分になる（#278）。ログイン状態
+# （data/zaim/storage-state.json）の同時書き込みは aide-zaim-refresh（10,22:30）との
+# 間で元から許容している設計のため、ここでも問題ない。
 
 [Install]
 WantedBy=timers.target

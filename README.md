@@ -683,9 +683,9 @@ Zaimは未ログインでもHTTPエラーを返さず、SSO（`id.kufu.jp`）の
 | 完了判定 | Zaim側に完了のシグナルは無い。口座ごとの「最終更新」が進んだかで判定する。反映まで5〜15分、遅い口座は約35分 |
 | 打ち切り | 連携設定が壊れている口座は何度押しても進まないため、全口座の完了は待てない。**しばらくどの口座も進まなくなったら打ち切る**（最短40分・静穏3分・上限45分） |
 
-**「最短40分」は遅い口座の実測に合わせた値**（#178）。早い口座が5〜8分で出揃ったあと、遅い口座が進むまで30分近くどの口座も動かない。静穏だけで打ち切ると毎回そこで抜けてしまうため、静穏の判定は40分を過ぎてから効かせている。上限（`ZAIM_REFRESH_MAX_WAIT_MS`）を縮めるときは、`refresh.ts` の `REFRESH_TIMEOUT_MS`・`aide-zaim-refresh.service` の `TimeoutStartSec`・`aide-zaim-sync.timer` との65分の間隔もあわせて見直す。
+**「最短40分」は遅い口座の実測に合わせた値**（#178）。早い口座が5〜8分で出揃ったあと、遅い口座が進むまで30分近くどの口座も動かない。静穏だけで打ち切ると毎回そこで抜けてしまうため、静穏の判定は40分を過ぎてから効かせている。上限（`ZAIM_REFRESH_MAX_WAIT_MS`）を縮めるときは、`refresh.ts` の `REFRESH_TIMEOUT_MS`・`aide-zaim-refresh.service` の `TimeoutStartSec`・`aide-zaim-sync.timer` との60分の間隔もあわせて見直す。
 
-**一括更新だけは、やり直しに全体の上限（`totalTimeout`）を掛ける。** 巡回とセッション延長は1回が数十秒なので3回やり直しても次の定期実行に食い込まないが、一括更新は1回で最大45分待つ。上限が無いと、やり直した回が `TimeoutStartSec`（55分）に掛かって systemd から殺され、押下の結果すら受け取れない。残り時間が2分を切ったらやり直さず、**元のセッション失効エラーをそのまま投げる**（タイムアウトのエラーで上書きすると通知の分類が壊れる）。逆に2分あればやり直す価値がある——反映を待ち切れなくても、「データを更新する」さえ押せていれば65分後の巡回は新しい残高を読める。
+**一括更新だけは、やり直しに全体の上限（`totalTimeout`）を掛ける。** 巡回とセッション延長は1回が数十秒なので3回やり直しても次の定期実行に食い込まないが、一括更新は1回で最大45分待つ。上限が無いと、やり直した回が `TimeoutStartSec`（55分）に掛かって systemd から殺され、押下の結果すら受け取れない。残り時間が2分を切ったらやり直さず、**元のセッション失効エラーをそのまま投げる**（タイムアウトのエラーで上書きすると通知の分類が壊れる）。逆に2分あればやり直す価値がある——反映を待ち切れなくても、「データを更新する」さえ押せていれば60分後の巡回は新しい残高を読める。
 
 **`zaim-refresh` と `zaim-keep-alive` の重なりは直していない。** 両者は同じ storage state を読み書きし、タイマーの都合で必ず重なる（keep-alive は30分ごとなので、45分走る一括更新の最中に2〜3回起動する）。失効で落ちた回だけを見ると並行アクセスが原因に見えるが、**成功した回もまったく同じように重なっている**（2026-08-28 22:30・08-29 10:30 の成功回でも、開始の1分後に keep-alive が起動している）。ロックや排他を足しても失効は防げないので、直すべきなのは落ちた側が自力で回復することのほう。
 
@@ -1636,7 +1636,7 @@ systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導�
 systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-money-sync.timer  # 初回のみ（未導入のユニット）
-systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer
+systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer aide-zaim-money-sync.timer
 systemctl --user list-timers 'aide-*'
 ```
 
