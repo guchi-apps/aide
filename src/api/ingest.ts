@@ -3,6 +3,8 @@ import { writeCache } from "../core/cache/store.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { CLAUDE_SESSIONS_CACHE_KEY } from "../worker/jobs/claude-sessions-sync.ts";
 import { WEATHER_CACHE_KEY } from "../worker/jobs/weather-sync.ts";
+import { ZAIM_MONEY_CACHE_KEY } from "../worker/jobs/zaim-money-sync.ts";
+import { ZAIM_CACHE_KEY } from "../worker/jobs/zaim-sync.ts";
 import { jobRecordKey } from "../worker/record.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
@@ -28,13 +30,19 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
  * 記録側は失敗しても例外を投げない作りなので、404で弾いてもログ1行しか残らず気づけない。
  *
  * **データのキーは定義元から import する。** リテラルで再掲すると、ジョブを追加したときに
- * ここへの追加が漏れ、送信のたびに404になる（天気予報で実際に起きた。#108）。
- * 例外は巡回結果（`zaim-snapshot`）で、`worker/jobs/zaim-sync.ts` を import すると
- * Playwright を使う巡回本体まで読み込むため、受け口ではリテラルのまま持つ。
+ * ここへの追加が漏れ、送信のたびに404になる（天気予報で実際に起きた。#108。家計簿明細一覧
+ * でも同じ形で起きた。#272）。
+ * Zaimの巡回結果（`zaim-snapshot`・`zaim-money-snapshot`）も例外ではない。参照側
+ * （`core/views/money.ts`・`core/views/money-transactions.ts`）がworker側の定義元
+ * （`worker/jobs/zaim-sync.ts`・`worker/jobs/zaim-money-sync.ts`）を既にimportしており、
+ * サーバー起動時にはどのみち読み込まれる。Playwright本体は `.mjs` スクリプト側でのみ
+ * importされる（`core/connectors/zaim/scripts/playwright-loader.mjs`）ため、
+ * TypeScript側のimportチェーンに乗らない（#272の計画レビューで指摘）。
  * 実行記録のキーはカタログから作り、ジョブを増やしたときの取りこぼしを防ぐ。
  */
 const ALLOWED_KEYS = new Set<string>([
-  "zaim-snapshot",
+  ZAIM_CACHE_KEY,
+  ZAIM_MONEY_CACHE_KEY,
   WEATHER_CACHE_KEY,
   CLAUDE_SESSIONS_CACHE_KEY,
   ...JOB_CATALOG.map((job) => jobRecordKey(job.name)),
