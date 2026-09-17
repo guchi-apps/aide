@@ -282,5 +282,5 @@ export function buildZaimMoneyList(raw: ZaimRawMoneyListResult): ZaimMoneyList {
       comment: collapseWhitespace(entry.comment),
     });
   }
-  return { entries };
+  return { entries, months: [raw.month] };
 }
