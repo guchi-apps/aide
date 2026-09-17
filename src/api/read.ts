@@ -81,8 +81,8 @@ export async function handleMoneySummary(req: IncomingMessage, res: ServerRespon
 /**
  * `GET /api/money/transactions`
  *
- * Zaim Web版の家計簿明細一覧（当月ぶん）をキャッシュから返す。公式API（`GET /v2/home/money`）が
- * 返さない自動連携明細（スマートレシート等）も含む（aide#244）。
+ * Zaim Web版の家計簿明細一覧（当月＋先月ぶん、JST）をキャッシュから返す。公式API
+ * （`GET /v2/home/money`）が返さない自動連携明細（スマートレシート等）も含む（aide#244・aide#286）。
  */
 export async function handleMoneyTransactions(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD") {

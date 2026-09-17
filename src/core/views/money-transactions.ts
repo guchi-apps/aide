@@ -53,7 +53,7 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
   const notes = [NAME_TRUNCATION_NOTE];
   if (stale) {
     notes.push(
-      `このデータは ${Math.round(cached.ageMinutes / 60)} 時間前のもので、当月の最新明細を反映していない可能性がある。`,
+      `このデータは ${Math.round(cached.ageMinutes / 60)} 時間前のもので、最新の明細を反映していない可能性がある。`,
     );
   }
 
