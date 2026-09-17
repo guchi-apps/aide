@@ -1914,7 +1914,7 @@ Playwrightでそのまま読むため、公式APIに現れない明細もここ�
 | | |
 |---|---|
 | エンドポイント | `GET /api/money/transactions` |
-| 返す内容 | 当月ぶんの明細一覧（`buildMoneyTransactions()`） |
+| 返す内容 | 当月＋先月（JST）ぶんの明細一覧（`buildMoneyTransactions()`） |
 | 認証 | `Authorization: Bearer $AIDE_READ_SECRET`（`/api/money/summary` と同じ値） |
 | 取得ジョブ | `zaim-money-sync`（1日2回。実体は `src/core/connectors/zaim/money-list.ts`） |
 
@@ -1928,6 +1928,7 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
   "fetchedAt": "2026-09-02T14:35:00.000Z",
   "ageMinutes": 30,
   "stale": false,
+  "months": ["202608", "202609"],
   "entries": [
     { "id": 10228209053, "date": "2026-09-02", "amount": 1238,
       "category": "食費", "genre": "調理食品", "account": "スマートレシート",
@@ -1946,8 +1947,12 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 （`item_name` / `genre_id` / `amount`）が埋め込まれているが、これは明細ごとに追加のページ遷移が要るため
 今回のクロール（一覧の1回読み）には含めていない。全品目が必須になった場合はそちらを実装する。
 
-**対象は「当月（JST）ぶん」のみ。** 月をまたぐキャッシュの保持や、任意の年月を指定する口はまだ無い
-（Issueの要求が「読める経路を作る」段階だったため）。
+**対象は「当月＋先月（JST）ぶん」。** 月初直後に先月のカード連携明細が候補から漏れないよう、
+`zaim-money-sync` が2か月ぶんを取得して1つのキャッシュにまとめる（aide#286）。`months` に実際に
+読んだ月（`YYYYMM`）を返す。**先月分だけの取得に失敗した場合は当月のみで保存し、`months` も
+当月だけになる**（当月分の取得に失敗した場合はジョブ全体が失敗し、キャッシュは更新されない）。
+デプロイ直後、`months` を持たない旧キャッシュを返す場合は応答からこの項目自体を省く。呼び出し側は
+`months` が無ければ従来どおり `fetchedAt` の月だけを読んだものとして扱う。
 
 ### キャッシュを素で返さない理由
 

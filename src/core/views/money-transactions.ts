@@ -11,6 +11,11 @@ export interface MoneyTransactionsView {
   fetchedAt: string | null;
   ageMinutes: number | null;
   stale: boolean;
+  /**
+   * 実際に読んだ月（`YYYYMM`の配列）。デプロイ直後、`months`を持たない旧キャッシュを読んだ
+   * 場合は省略する（asset-manager側は、無ければ`fetchedAt`の月だけを読んだものとして扱う）。
+   */
+  months?: string[];
   entries: ZaimMoneyEntry[];
   note: string;
 }
@@ -48,7 +53,7 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
   const notes = [NAME_TRUNCATION_NOTE];
   if (stale) {
     notes.push(
-      `このデータは ${Math.round(cached.ageMinutes / 60)} 時間前のもので、当月の最新明細を反映していない可能性がある。`,
+      `このデータは ${Math.round(cached.ageMinutes / 60)} 時間前のもので、最新の明細を反映していない可能性がある。`,
     );
   }
 
@@ -57,6 +62,7 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
     fetchedAt: cached.fetchedAt,
     ageMinutes: cached.ageMinutes,
     stale,
+    ...(cached.data.months ? { months: cached.data.months } : {}),
     entries: cached.data.entries,
     note: notes.join(" "),
   };

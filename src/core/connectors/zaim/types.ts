@@ -165,4 +165,6 @@ export interface ZaimMoneyEntry {
 
 export interface ZaimMoneyList {
   entries: ZaimMoneyEntry[];
+  /** 実際に読んだ月（`YYYYMM`）。1件の取得結果なら1要素、複数月をまとめた結果なら複数要素になる。 */
+  months: string[];
 }

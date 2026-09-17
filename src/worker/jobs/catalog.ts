@@ -54,7 +54,7 @@ export const JOB_CATALOG = [
   {
     name: "zaim-money-sync",
     description:
-      "Zaim Web版の家計簿明細一覧（当月ぶん）を巡回し、キャッシュを更新する。公式APIが返さない" +
+      "Zaim Web版の家計簿明細一覧（当月＋先月ぶん、JST）を巡回し、キャッシュを更新する。公式APIが返さない" +
       "自動連携明細（スマートレシート等）もこの経路なら読める。Playwrightを使うため重い。",
     interval: "1日2回（11:30 / 23:30 JST）",
     staleAfterMinutes: 18 * 60,

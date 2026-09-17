@@ -421,6 +421,7 @@ describe("buildZaimMoneyList", () => {
                 comment: "",
             },
         ])
+        assert.deepEqual(list.months, ["202609"])
     })
 
     it("金額・日付を読めない行は落とす", () => {
