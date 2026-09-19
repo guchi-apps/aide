@@ -168,6 +168,7 @@ describe("本番の.envへの配線（deploy.yml）", () => {
       "AIDE_OPS_DASHBOARD_TOKEN",
       "AIDE_SUBSCRIPTIONS_TOKEN",
       "AIDE_MYROOM_TOKEN",
+      "AIDE_MYROOM_CONTROL_TOKEN",
       "AIDE_DAYSPAN_TOKEN",
       "AIDE_DAYSPAN_WRITE_TOKEN",
       "AIDE_GITHUB_TOKEN",

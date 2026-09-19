@@ -12,6 +12,7 @@ import {
 } from "./tools/notifications.ts";
 import { opsStatusTool } from "./tools/ops.ts";
 import { pingTool } from "./tools/ping.ts";
+import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
 import { roomStatusTool } from "./tools/room.ts";
 import { scheduleTool } from "./tools/schedule.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
@@ -34,6 +35,9 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(utilityBillsTool);
   registry.register(opsStatusTool);
   registry.register(roomStatusTool);
+  // 照明などの操作（#317）。**一覧と押すを分けている**（Zaimと同じ理由）。
+  registry.register(roomButtonsTool);
+  registry.register(roomPressTool);
   registry.register(dailyBriefingTool);
   registry.register(scheduleTool);
   // 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。

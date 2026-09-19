@@ -46,6 +46,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
+| `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（AIDEはAsset Managerから読み取らないため、取り込み専用） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
@@ -142,6 +143,23 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 3. **作成だけ。** 編集・削除は持たない。動かす・消すにはDaySpanの画面から行う
 
 詳細は `src/core/connectors/dayspan/write.ts`。
+
+#### 照明などの操作は条件3の例外（aide#317）
+
+`aide_room_press` は myroom に登録済みの Nature Remo のボタン（照明のON/OFFなど）を押す。
+**部屋の機器の状態を変える操作で、「作成だけ」ではない。** それでも持つのは、押したボタンは逆のボタン
+（「消す」に対する「点ける」）を押せば戻せる、取り返しのつく操作だから（Issueでユーザーが決定）。
+
+1. **他のどこからも塞がっている経路。** myroom の操作APIはログインしたブラウザ専用で、
+   Claude / ChatGPT から部屋の機器へ届く経路は他に無い
+2. **読み取りとは別の資格情報。** 読み取り用の `AIDE_MYROOM_TOKEN` とは別に
+   `AIDE_MYROOM_CONTROL_TOKEN` を持つ。myroom側も読み取り用の `INTERNAL_API_KEY` とは別の
+   `INTERNAL_CONTROL_API_KEY` で守る（[myroom#419](https://github.com/guchi-apps/myroom/issues/419)）
+3. **例外。** 押せるのは myroom の画面で登録済みのボタンだけで、Nature Remo の signal を直接送る口や
+   エアコンの設定変更は持たない
+
+誤操作の防ぎ方は[照明などの操作](#照明などの操作aide317)。**この例外を前例として使わない。**
+状態を変える書き込みを次に持ち込むときは、この節を根拠にせずIssueで改めて決める。
 
 #### ChatGPTのスケジュールからの取り込みは条件1・2を満たす（#199・aide#205・aide#211）
 
@@ -355,6 +373,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
 | `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
+| `aide_room_buttons` | 照明など、AIDEから押せる機器のボタンの一覧（myroom に登録済みの Nature Remo のボタン）。読み取りだけ |
+| `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで） |
 | `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
 | `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「明日の予定」「今週の予定」「何時なら空いているか」に答えるためのもので（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）、今日1日の見通しは `aide_daily_briefing` |
 | `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
@@ -1163,6 +1183,7 @@ Frankfurter のレートで計算した参考値で、取得できていなけ�
 src/core/connectors/myroom/
   types.ts   myroom のレスポンスのうち、AIDEが使うフィールドだけを再宣言
   index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
+  control.ts 照明などの操作（ボタンの一覧と押す。aide#317）
 src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
 ```
 
@@ -1175,6 +1196,7 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 |---|---|---|
 | `AIDE_MYROOM_URL` | `http://127.0.0.1:8000` | そのURLへ問い合わせる |
 | `AIDE_MYROOM_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+| `AIDE_MYROOM_CONTROL_TOKEN` | 操作ツールは「未設定」を返し、myroom へ何も送らない | 操作用の内部APIを `Authorization: Bearer` で叩く |
 
 トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**。1Passwordでは値を複製せず
 提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで丸める
@@ -1183,6 +1205,34 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 **myroom の読み取りAPIは元々 Supabase のユーザーログイン必須**で、サーバー間から読める口が無い。
 内部APIは [myroom#161](https://github.com/guchi-apps/myroom/issues/161) で追加する。**未実装の
 バージョンに対しては 404 が返り、`unavailable` に「内部APIが未実装のバージョン」として出る。**
+
+### 照明などの操作（aide#317）
+
+操作そのものは myroom が持っている（`backend/remote.py`。Nature Remo へ赤外線の送信を依頼する）。
+**AIDEは Nature Remo を直接叩かず、myroom の画面で登録済みのボタンをIDで押すだけにする。**
+直接叩くとボタンの定義・表示名が myroom と二重になり、Nature Remo のレート制限（30回/5分）も
+両者で食い合う。対象は Nature Remo のボタンだけで、エアコン（白くまくん）の操作は持たない。
+
+| myroom の内部API | 使うツール |
+|---|---|
+| `GET /api/internal/remote/buttons` | `aide_room_buttons`（`aide_room_press` も押す前に引く） |
+| `POST /api/internal/remote/buttons/{id}/send` | `aide_room_press` |
+
+どちらも `INTERNAL_CONTROL_API_KEY`（AIDE側は `AIDE_MYROOM_CONTROL_TOKEN`）で通る、操作専用の口で
+[myroom#419](https://github.com/guchi-apps/myroom/issues/419) で追加する。**未実装のバージョンに対しては
+404 が返り、`unsupported` として出る。**
+
+誤操作は次の3つで防ぐ。
+
+- **IDと名前の両方を受け取り、押す直前に myroom の今の登録と突き合わせる。** 一致しなければ押さずに
+  `mismatch` を返す。Claudeが取り違えたIDや、myroom側で登録し直されたIDをそのまま押さないため
+- **同じボタンを30秒以内に続けて押さない**（`allowRepeat: true` で明示したときだけ押す）。赤外線の
+  「電源」のようなトグルは2回押すと元に戻るため、再試行で利用者の意図と逆の状態になる
+- **押す前に、押すボタンの名前を利用者に確認する**よう、ツールの説明文でClaudeに求める
+
+**結果は「myroom が Nature Remo へ送信を依頼できたか」まで。** 赤外線は片方向で、機器が反応したかは
+返ってこない（myroom#106）。応答を待ちきれなかったときは送れたか分からないため `unknown` を返し、
+再送せずに利用者へ確かめるよう案内する。照明なら `aide_room_status` の照度の変化でも確かめられる。
 
 ### 鮮度と判定
 

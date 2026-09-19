@@ -10,6 +10,7 @@ import { readCache, type CachedValue } from "../cache/store.ts";
 import { REPO_ROOT } from "../paths.ts";
 import { readDaySpanConfig } from "../connectors/dayspan/index.ts";
 import { readGitHubConfig, readGitHubWriteConfig } from "../connectors/github/index.ts";
+import { readMyRoomControlConfig } from "../connectors/myroom/control.ts";
 import { readMyRoomConfig } from "../connectors/myroom/index.ts";
 import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
 import { readSubscriptionsConfig } from "../connectors/subscriptions/index.ts";
@@ -276,6 +277,15 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       configured: readMyRoomConfig() !== null,
       probeable: true,
       note: "部屋の状態（室温・湿度・CO2・エアコン）の取得元（aide_room_status）。",
+    },
+    {
+      key: "myroom-control",
+      label: "myroom（操作）",
+      side: "server",
+      // 読み取り用とは別のトークン（#317）。読み取りだけ設定されていても、ここは未設定になる。
+      configured: readMyRoomControlConfig() !== null,
+      probeable: false,
+      note: "照明などの操作用トークン（aide_room_buttons / aide_room_press）。部屋の機器を動かす経路のため、ここからは確認しない。",
     },
     {
       key: "dayspan",
