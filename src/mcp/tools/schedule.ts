@@ -29,6 +29,55 @@ const MAX_DAYS = 14;
 /** 期限切れタスクを遡る日数（`includeOverdueTasks` を指定したとき）。DaySpan側の既定と同じ。 */
 const OVERDUE_DAYS = 30;
 
+/**
+ * `offsetDays` で指定できる範囲。「先週の◯曜」「来月頭」までを想定し、それ以上は日付で指定させる。
+ * 範囲外は丸める（拒否すると、ほぼ同じ問いで答えが返らなくなる）。
+ */
+const MIN_OFFSET_DAYS = -31;
+const MAX_OFFSET_DAYS = 90;
+
+/**
+ * 「今日」を決めるタイムゾーン。**DaySpanの設定タイムゾーンの既定と同じ値**にしている。
+ * `offsetDays` だけが指定されたときに、起点の日付をこちらで作る必要があるため。
+ */
+const TODAY_TIMEZONE = "Asia/Tokyo";
+
+/**
+ * `YYYY-MM-DD` をn日ずらす。暦日の計算なのでUTCで足し引きする（タイムゾーンに依らない）。
+ *
+ * **実在しない日付なら null。** `2026-02-30` は `Date` が黙って3月2日へ繰り上げるため、
+ * 読み戻して一致するかで確かめる。ずらした結果がもっともらしい別の日になるより、
+ * 元の日付のままDaySpanに400を返させたほうが誤りに気づける。
+ */
+export function shiftDate(date: string, days: number): string | null {
+  const at = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== date) return null;
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+}
+
+/**
+ * 起点の日付を決める。**純粋関数。**
+ *
+ * `offsetDays` は `date`（省略時は今日）からずらす日数で、「明日」なら1、「昨日」なら-1。
+ * 呼び出し側のAIが今日の日付を取り違えても「明日」を正しく引けるようにするためのもの（#325）。
+ * `offsetDays` が無ければ、`date` の省略は従来どおりDaySpan側の「今日」に任せる（undefined を返す）。
+ */
+export function resolveDate(args: Record<string, unknown>, now: Date): string | undefined {
+  const rawDate = typeof args["date"] === "string" ? args["date"].trim() : "";
+  // 形式だけ見て通す。実在しない日付（2026-02-30 等）の判定はDaySpan側が持っており、
+  // こちらで二重に持つと基準が食い違う。
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : undefined;
+
+  const rawOffset = args["offsetDays"];
+  if (typeof rawOffset !== "number" || !Number.isInteger(rawOffset) || rawOffset === 0) return date;
+  const offset = Math.min(Math.max(rawOffset, MIN_OFFSET_DAYS), MAX_OFFSET_DAYS);
+
+  const base =
+    date ?? new Intl.DateTimeFormat("en-CA", { timeZone: TODAY_TIMEZONE }).format(now);
+  return shiftDate(base, offset) ?? date;
+}
+
 /** `HH:MM` として読めるものだけ通す。読めない値は既定へ倒す。 */
 function clock(value: unknown): string | null {
   return typeof value === "string" && parseClock(value) !== null ? value : null;
@@ -55,6 +104,8 @@ export const scheduleTool: Tool = {
     "「今日の予定は」「今週の予定は」「明日は空いているか」「何時なら空いているか」" +
     "「◯日に予定を入れられるか」を尋ねられたときに呼ぶ。" +
     "date（既定は今日）と days（既定1・最大14）で範囲を指定する。" +
+    "**「明日」「明後日」「昨日」のような相対的な日は offsetDays（明日なら1）で指定し、" +
+    "日付を自分で計算しないこと。** 返った range.from で実際に引いた日付を確認できる。" +
     "**予定の出どころはDaySpanで、Googleカレンダーの予定とNotionのタスク・日付リマインドが" +
     "統合済みのものが返る。** タスクの詳細な編集や検索はNotion側の役割で、ここでは扱わない。" +
     "freeSlots は freeWindow（既定 08:00〜22:00・freeFrom / freeTo で変えられる）の範囲で、" +
@@ -74,6 +125,13 @@ export const scheduleTool: Tool = {
         description:
           "起点の日付（YYYY-MM-DD）。省略すると今日（DaySpanの設定タイムゾーンでの暦日）。" +
           "**呼び出し側で時差を考えて日付を作り直さないこと。**",
+      },
+      offsetDays: {
+        type: "integer",
+        minimum: MIN_OFFSET_DAYS,
+        maximum: MAX_OFFSET_DAYS,
+        description:
+          "date（省略時は今日）から何日ずらすか。明日なら1、明後日なら2、昨日なら-1。既定は0。",
       },
       days: {
         type: "integer",
@@ -99,10 +157,7 @@ export const scheduleTool: Tool = {
     additionalProperties: false,
   },
   handler: async (args) => {
-    const rawDate = typeof args["date"] === "string" ? args["date"].trim() : "";
-    // 形式だけ見て通す。実在しない日付（2026-02-30 等）の判定はDaySpan側が持っており、
-    // こちらで二重に持つと基準が食い違う。
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : undefined;
+    const date = resolveDate(args, new Date());
 
     const rawDays = args["days"];
     const days =
