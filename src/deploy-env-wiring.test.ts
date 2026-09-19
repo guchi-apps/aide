@@ -33,7 +33,8 @@ const SRC_DIR = fileURLToPath(new URL("./", import.meta.url));
  */
 const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_AUTH_DISABLED: "認証を切る開発用のスイッチ。本番では設定しない",
-  AIDE_AUTH_STATE_PATH: "OAuthの状態ファイルの置き場（テストが本番の状態を汚さないための差し替え）。既定（data/auth/oauth-state.json）で足りる",
+  AIDE_AUTH_STATE_PATH:
+    "OAuthの状態（トークン等）の置き場。テストが本番の状態を汚さないための差し替えで、既定（data/auth/oauth-state.json）で足りる",
   AIDE_CACHE_DIR: "既定（リポジトリ基準の data/cache）で足りる",
   AIDE_CLAUDE_SESSIONS_DIR:
     "Claude Code のセッション台帳の置き場。読むのはサブPCのworkerだけで、既定（~/.claude/sessions）で足りる",

@@ -18,7 +18,7 @@ import type { AccessToken, AuthCode, AuthState, OAuthClient } from "./types.ts";
  * 上書きして消してしまう（`core/record-file.ts` と同じ問題）。
  */
 
-/** テストが本番の状態を汚さないよう差し替えられるようにしている（`AIDE_MCP_ACCESS_LOG_PATH` と同じ考え方）。 */
+/** テストが本番の状態（トークン等）を汚さないよう差し替えられるようにしている（`AIDE_MCP_ACCESS_LOG_PATH` と同じ考え方）。 */
 const STORE_PATH = process.env["AIDE_AUTH_STATE_PATH"]
   ? resolve(process.env["AIDE_AUTH_STATE_PATH"])
   : join(DATA_DIR, "auth", "oauth-state.json");
@@ -87,13 +87,25 @@ function mutate<R>(task: (state: AuthState) => { next: AuthState | null; result:
   return done;
 }
 
-/** 期限切れの認可コード・トークンを落とす。保存のたびに呼ぶ。 */
+/**
+ * リフレッシュトークンの失効時刻。`refreshExpiresAt` を持たない古いレコードは、
+ * 従来どおりアクセストークンと同時に切れるものとして扱う（保存済みの状態を巻き込んで落とさないため）。
+ */
+function refreshExpiryOf(token: AccessToken): number {
+  return token.refreshExpiresAt ?? token.expiresAt;
+}
+
+/**
+ * 期限切れの認可コード・トークンを落とす。保存のたびに呼ぶ。
+ * トークンのレコードはアクセストークンとリフレッシュトークンの両方を持つため、
+ * 後者の期限（アクセストークンより長い）が切れるまで残す。
+ */
 function prune(state: AuthState): AuthState {
   const now = Date.now();
   return {
     clients: state.clients,
     codes: state.codes.filter((c) => c.expiresAt > now),
-    tokens: state.tokens.filter((t) => t.expiresAt > now),
+    tokens: state.tokens.filter((t) => refreshExpiryOf(t) > now),
   };
 }
 
@@ -137,7 +149,11 @@ export function consumeRefreshToken(refreshToken: string): Promise<AccessToken |
     const found = state.tokens.find((t) => t.refreshToken === refreshToken) ?? null;
     if (!found) return { next: null, result: null };
     // 使ったリフレッシュトークンは無効化し、新しい組を発行させる（ローテーション）。
-    return { next: { ...state, tokens: state.tokens.filter((t) => t !== found) }, result: found };
+    // 期限切れでも消す（同じ値でもう一度試されても通らないようにするため）。
+    return {
+      next: { ...state, tokens: state.tokens.filter((t) => t !== found) },
+      result: refreshExpiryOf(found) > Date.now() ? found : null,
+    };
   });
 }
 
@@ -153,13 +169,16 @@ export interface AuthSummary {
 
 export async function readAuthSummary(): Promise<AuthSummary> {
   const state = prune(await load());
-  const nearest = state.tokens.reduce<number | null>(
+  // 保存済みのレコードにはアクセストークンが切れてリフレッシュ待ちのものも含まれるため、数えるのは期限内だけ。
+  const now = Date.now();
+  const live = state.tokens.filter((t) => t.expiresAt > now);
+  const nearest = live.reduce<number | null>(
     (earliest, token) => (earliest === null || token.expiresAt < earliest ? token.expiresAt : earliest),
     null,
   );
   return {
     clients: state.clients.length,
-    tokens: state.tokens.length,
+    tokens: live.length,
     nearestExpiryAt: nearest === null ? null : new Date(nearest).toISOString(),
   };
 }
