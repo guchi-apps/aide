@@ -73,7 +73,7 @@ export interface McpAccessEntry {
  * 数が多く、他の行を押し流すメソッド。
  *
  * 接続確認（`ping`）と一覧の取得はClaudeが定期的に投げてくる。見たいのは
- * 「どのツールがいつ呼ばれたか」なので、既定では畳んで表示する（`src/web/status.ts`）。
+ * 「どのツールがいつ呼ばれたか」なので、既定では畳んで表示する（表示は ops-dashboard の「AIDE」タブ）。
  */
 const QUIET_METHODS = new Set([
   "ping",
@@ -335,7 +335,7 @@ export function summarizeMcpAccess(
   };
 }
 
-/** 動作状況ページ（`/status`）へ出す集計。 */
+/** 動作状況（`/api/status`）へ出す集計。 */
 export async function readMcpAccessSummary(now: Date = new Date()): Promise<McpAccessSummary> {
   return summarizeMcpAccess(await readMcpAccessLog(), now);
 }

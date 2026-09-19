@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 /**
- * 動作状況ページ（`/status`）のGoogleログイン。
+ * 画面（アプリ連携 `/map`）のGoogleログイン。
  *
  * **MCPのOAuth（`src/auth/oauth.ts`）とは別系統。** あちらはClaudeアプリという機械を
  * このサーバーへ接続させるための認可で、利用者の身元は問わない（パスワード1本）。
@@ -91,7 +91,7 @@ export function loadSupabaseAuthConfig(
   if (missing.length === 3) return null;
   if (missing.length > 0) {
     throw new Error(
-      `動作状況ページのGoogleログインの設定が足りません: ${missing.join(", ")}。` +
+      `画面のGoogleログインの設定が足りません: ${missing.join(", ")}。` +
         "3つすべてを設定するか、3つとも未設定にしてください（未設定ならパスワードでのログインになります）。",
     );
   }

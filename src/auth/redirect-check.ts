@@ -132,8 +132,7 @@ export async function checkRedirectAllowed(
  * 起動時に一度だけ確かめ、結果をログへ出す。**起動は止めない。**
  *
  * Supabaseを設定している間、画面は許可メールのGoogleログインだけで開く
- * （パスワードでのログインは塞がる）。壊れていると `/status` に入れず、画面側の疎通確認
- * （`POST /status/checks`）にも辿り着けないため、**入れなくても気づける場所はログしかない。**
+ * （パスワードでのログインは塞がる）。壊れていると画面に入れないため、**入れなくても気づける場所はログしかない。**
  */
 export async function logRedirectCheck(
   config: SupabaseAuthConfig,

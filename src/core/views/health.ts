@@ -27,9 +27,9 @@ import { STALE_AFTER_MINUTES } from "./money.ts";
  *
  * 材料はすべて手元にあるもので、**この関数は外部サービスへ問い合わせない**。
  * ページを開くたびに GitHub や ops-dashboard を叩くと、相手が落ちているだけで画面が
- * 開かなくなる。疎通の確認は利用者が押したときだけ走らせる（`src/web/status.ts`）。
+ * 開かなくなる。疎通の確認は押されたときだけ走らせる（`src/api/status.ts` の `runProbes()`）。
  *
- * 判定の基準はここに集める。表示側（`src/web/status.ts`）は色と並べ方だけを決める。
+ * 判定の基準はここに集める。表示は ops-dashboard の「AIDE」タブが `/api/status` を読んで行う。
  */
 
 export type HealthSeverity = "ok" | "warn" | "danger" | "unknown";

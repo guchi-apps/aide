@@ -157,7 +157,7 @@ export function consumeRefreshToken(refreshToken: string): Promise<AccessToken |
   });
 }
 
-/** 動作状況ページ（`/status`）へ出す集計。**トークンの値そのものは返さない。** */
+/** 動作状況（`/api/status`）へ出す集計。**トークンの値そのものは返さない。** */
 export interface AuthSummary {
   /** 動的登録されたクライアントの数。 */
   clients: number;

@@ -64,7 +64,7 @@ try {
   await notifyJobRecovered(name);
   // Zaimのジョブが成功したなら、他のZaimジョブの失効も直っている（#191）。
   if (ZAIM_JOBS.includes(name as JobName)) await notifyZaimSessionRecovered(name);
-  // 通知が流れて消えるのに対し、記録は残る。動作状況ページ（/status）はこちらを読む。
+  // 通知が流れて消えるのに対し、記録は残る。動作状況（/api/status → ops-dashboard）はこちらを読む。
   await recordJobRun({ job: name, ok: true, startedAt, seconds: elapsed(), message });
 } catch (cause) {
   // 失敗は握りつぶさず終了コードに出す。スケジューラ側から検知できるようにするため。
