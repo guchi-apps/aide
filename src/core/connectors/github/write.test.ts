@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildBody, CreationGuard, FOOTNOTE, normalizeRepo, selectExistingLabels } from "./write.ts";
+import {
+  buildBody,
+  CREATION_MAX,
+  CREATION_WINDOW_MS,
+  CreationGuard,
+  FOOTNOTE,
+  normalizeRepo,
+  selectExistingLabels,
+} from "./write.ts";
 
 /**
  * 起票そのもの（`createIssue`）はGitHubへのHTTPが本体なのでここでは扱わない。
@@ -101,6 +109,23 @@ describe("CreationGuard", () => {
     const rejected = guard.admit("aide 同じ話", 1_000);
     assert.ok(rejected);
     assert.match(rejected, /重複/);
+  });
+
+  it("既定は1時間あたり100件（#319）", () => {
+    assert.equal(CREATION_WINDOW_MS, 60 * 60 * 1000);
+    assert.equal(CREATION_MAX, 100);
+
+    const guard = new CreationGuard(CREATION_WINDOW_MS, CREATION_MAX);
+    for (let i = 0; i < CREATION_MAX; i++) {
+      assert.equal(guard.admit(`aide ${i}件目`, i * 1_000), null);
+    }
+
+    const rejected = guard.admit("aide 101件目", 100_000);
+    assert.ok(rejected);
+    assert.match(rejected, /60分あたり100件/);
+
+    // 最初の1件が窓から外れれば、また通る。
+    assert.equal(guard.admit("aide 窓の後", CREATION_WINDOW_MS), null);
   });
 
   it("断ったぶんは上限に数えない", () => {
