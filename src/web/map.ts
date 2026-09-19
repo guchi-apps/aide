@@ -63,6 +63,8 @@ export const CALLERS: Caller[] = [
       "aide_money_summary",
       "aide_ops_status",
       "aide_room_status",
+      "aide_room_buttons",
+      "aide_room_press",
       "aide_daily_briefing",
       "aide_schedule",
       "aide_create_event",
@@ -165,7 +167,13 @@ export const GROUPS: DestinationGroup[] = [
   {
     name: "暮らし",
     apps: [
-      { id: "myroom", name: "myroom", dir: "read", what: "部屋の室温・CO2・エアコン", uses: ["aide_room_status"] },
+      {
+        id: "myroom",
+        name: "myroom",
+        dir: "both",
+        what: "部屋の室温・CO2・エアコン／照明などを操作",
+        uses: ["aide_room_status", "aide_room_buttons", "aide_room_press"],
+      },
       { id: "open-meteo", name: "Open-Meteo", dir: "read", what: "今日・明日の天気", uses: ["aide_daily_briefing"] },
     ],
   },
