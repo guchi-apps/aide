@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { after, before, describe, it } from "node:test";
-import { describeFetchError, isRetriableStatus, publish, retryDelayMs } from "./sink.ts";
+import { CLAUDE_SESSIONS_PUBLISH } from "./jobs/claude-sessions-sync.ts";
+import { WEATHER_PUBLISH } from "./jobs/weather-sync.ts";
+import { RECORD_PUBLISH } from "./record.ts";
+import {
+  type PublishOptions,
+  describeFetchError,
+  isRetriableStatus,
+  publish,
+  retryDelayMs,
+  worstCasePublishMs,
+} from "./sink.ts";
 
 const saved = {
   url: process.env["AIDE_INGEST_URL"],
@@ -73,7 +84,7 @@ describe("publish の再試行", () => {
     const fake = scriptedFetch([new Response('{"error":"未知のキー"}', { status: 404 })]);
     await assert.rejects(
       publish("zaim-snapshot", "zaim", {}, {}, { fetch: fake.fetch, sleep: noSleep }),
-      /送信に失敗しました: 404 \{"error":"未知のキー"\}/,
+      /送信に失敗しました（zaim-snapshot）: 404 \{"error":"未知のキー"\}/,
     );
     assert.equal(fake.calls(), 1);
   });
@@ -83,7 +94,7 @@ describe("publish の再試行", () => {
     await assert.rejects(
       publish("zaim-snapshot", "zaim", {}, {}, { fetch: fake.fetch, sleep: noSleep }),
       {
-        message: "送信に失敗しました（3回試行）: fetch failed（UND_ERR_CONNECT_TIMEOUT）",
+        message: "送信に失敗しました（zaim-snapshot・3回試行）: fetch failed（UND_ERR_CONNECT_TIMEOUT）",
       },
     );
     assert.equal(fake.calls(), 3);
@@ -93,7 +104,7 @@ describe("publish の再試行", () => {
     const fake = scriptedFetch([connectTimeout()]);
     await assert.rejects(
       publish("job-zaim-sync", "worker", {}, { attempts: 1 }, { fetch: fake.fetch, sleep: noSleep }),
-      { message: "送信に失敗しました: fetch failed（UND_ERR_CONNECT_TIMEOUT）" },
+      { message: "送信に失敗しました（job-zaim-sync）: fetch failed（UND_ERR_CONNECT_TIMEOUT）" },
     );
     assert.equal(fake.calls(), 1);
   });
@@ -128,5 +139,34 @@ describe("fetch の例外の要約", () => {
   it("cause が無ければメッセージだけを返す", () => {
     const timeout = new DOMException("The operation was aborted due to timeout", "TimeoutError");
     assert.equal(describeFetchError(timeout), "The operation was aborted due to timeout");
+  });
+});
+
+/** ユニットファイルの `TimeoutStartSec`（`1min` / `30min` / `90s` の形だけを読む）。 */
+async function timeoutStartMs(unit: string): Promise<number> {
+  const text = await readFile(new URL(`../../deploy/systemd/${unit}`, import.meta.url), "utf8");
+  const match = /^TimeoutStartSec=(\d+)(min|s)?$/m.exec(text);
+  assert.ok(match, `${unit} に TimeoutStartSec が無い`);
+  return Number(match[1]) * (match[2] === "min" ? 60_000 : 1_000);
+}
+
+describe("送信が長引いても systemd に止められない", () => {
+  // 止められると通知も記録も残らない。失敗時は本体の送信のあとに記録の送信が続くため、
+  // その合計が上限の3/4に収まることを確かめる（残りは取得処理そのものの時間）。
+  const cases: Array<[string, PublishOptions]> = [
+    ["aide-zaim-sync.service", {}],
+    ["aide-zaim-money-sync.service", {}],
+    ["aide-weather-sync.service", WEATHER_PUBLISH],
+    ["aide-claude-sessions-sync.service", CLAUDE_SESSIONS_PUBLISH],
+  ];
+  for (const [unit, options] of cases) {
+    it(unit, async () => {
+      const worst = worstCasePublishMs(options) + worstCasePublishMs(RECORD_PUBLISH);
+      assert.ok(worst <= (await timeoutStartMs(unit)) * 0.75, `${unit}: 最悪 ${worst}ms`);
+    });
+  }
+
+  it("既定は 30秒 × 3回 + 待ち 20秒", () => {
+    assert.equal(worstCasePublishMs(), 110_000);
   });
 });

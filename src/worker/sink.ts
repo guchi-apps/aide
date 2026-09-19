@@ -30,6 +30,22 @@ const RETRY_DELAYS_MS = [5_000, 15_000] as const;
 export interface PublishOptions {
   /** 試す回数（初回を含む）。1なら再試行しない。 */
   attempts?: number;
+  /** 1回の送信で待つ上限（ミリ秒）。既定は `SEND_TIMEOUT_MS`。 */
+  timeoutMs?: number;
+}
+
+/**
+ * 送信が最も長引いたときの所要（ミリ秒）。毎回タイムアウトまで待たされ、回数を使い切った場合。
+ *
+ * systemd の `TimeoutStartSec` を超えるとプロセスごと止められ、失敗の通知も記録も
+ * 残らない。ジョブの送信と、失敗時に続く実行記録の送信の合計がそこへ収まるように
+ * 回数を決める（`sink.test.ts` で確かめている）。
+ */
+export function worstCasePublishMs(options: PublishOptions = {}): number {
+  const attempts = Math.max(1, options.attempts ?? DEFAULT_PUBLISH_ATTEMPTS);
+  let total = attempts * (options.timeoutMs ?? SEND_TIMEOUT_MS);
+  for (let attempt = 1; attempt < attempts; attempt++) total += retryDelayMs(attempt);
+  return total;
 }
 
 /** テストで差し替えるための依存。 */
@@ -78,7 +94,7 @@ export async function publish(
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
       body,
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      signal: AbortSignal.timeout(options.timeoutMs ?? SEND_TIMEOUT_MS),
     }).catch((cause: unknown) => describeFetchError(cause));
 
     let failure: string;
@@ -92,13 +108,15 @@ export async function publish(
       failure = `${response.status} ${await response.text()}`;
       // 4xx は認証や未知のキーなど、やり直しても同じ結果になる失敗。
       if (!isRetriableStatus(response.status)) {
-        throw new Error(`送信に失敗しました: ${failure}`);
+        throw new Error(`送信に失敗しました（${key}）: ${failure}`);
       }
     }
 
     if (attempt >= attempts) {
-      const tried = attempts > 1 ? `（${attempts}回試行）` : "";
-      throw new Error(`送信に失敗しました${tried}: ${failure}`);
+      // キーと回数は揺れないので載せてよい。通知の抑制は理由を署名にしており、
+      // 揺れる値（アドレス・ミリ秒）を入れると抑制が効かなくなる（`notify.ts`）。
+      const tried = attempts > 1 ? `・${attempts}回試行` : "";
+      throw new Error(`送信に失敗しました（${key}${tried}）: ${failure}`);
     }
     await wait(retryDelayMs(attempt));
   }

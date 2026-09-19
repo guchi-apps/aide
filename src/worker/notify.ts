@@ -146,8 +146,22 @@ export function summarizeFailure(
     sessionExpiry,
     // 失効は文面（URLや行番号が混ざる）ではなく行き先で束ねる。行き先が変われば署名も変わり、
     // 「自動で直る見込み」から「手動が要る」へ悪化したときは抑制されずに届く。
-    signature: sessionExpiry ? `${SESSION_EXPIRED_SIGNATURE}:${sessionExpiry}` : reason,
+    signature: sessionExpiry
+      ? `${SESSION_EXPIRED_SIGNATURE}:${sessionExpiry}`
+      : stripFetchFailureDetail(reason),
   };
+}
+
+/**
+ * 署名から `fetch failed` の中身（`UND_ERR_CONNECT_TIMEOUT` など）を外す。
+ *
+ * 中身は通知の理由として読む価値があるが、同じ通信断でも回ごとに
+ * `UND_ERR_CONNECT_TIMEOUT`・`ECONNRESET`・`ETIMEDOUT` などと揺れる。署名に残すと
+ * 「理由が変わった」と見なされて抑制が効かず、2分ごとの claude-sessions-sync が
+ * 通信断のあいだ通知を送り続ける（#295）。送信先のキーは揺れないので署名に残す。
+ */
+export function stripFetchFailureDetail(reason: string): string {
+  return reason.replace(/fetch failed（[^）]*）/g, "fetch failed");
 }
 
 /** 失効の記録か（ジョブ横断の回復通知が拾う対象）。 */

@@ -1,8 +1,13 @@
 import { collectClaudeCodeSessions } from "../../core/connectors/claude-code/index.ts";
-import { publish } from "../sink.ts";
+import { type PublishOptions, publish } from "../sink.ts";
 
 /** Claude Code セッションのキャッシュキー。参照側（横断ビュー）と受け口（ingest）が共有する。 */
 export const CLAUDE_SESSIONS_CACHE_KEY = "claude-sessions";
+
+/**
+ * 2分ごとに走り `TimeoutStartSec=1min` なので再試行しない。次の実行がやり直しになる（#295）。
+ */
+export const CLAUDE_SESSIONS_PUBLISH: PublishOptions = { attempts: 1 };
 
 /**
  * サブPCで動いている Claude Code のセッションを集めてキャッシュを更新する。
@@ -16,10 +21,12 @@ export const CLAUDE_SESSIONS_CACHE_KEY = "claude-sessions";
  */
 export async function runClaudeSessionsSync(): Promise<string> {
   const snapshot = await collectClaudeCodeSessions();
-  // 2分ごとに走り `TimeoutStartSec=1min` なので再試行しない。次の実行がやり直しになる（#295）。
-  const destination = await publish(CLAUDE_SESSIONS_CACHE_KEY, "claude-code", snapshot, {
-    attempts: 1,
-  });
+  const destination = await publish(
+    CLAUDE_SESSIONS_CACHE_KEY,
+    "claude-code",
+    snapshot,
+    CLAUDE_SESSIONS_PUBLISH,
+  );
 
   // **セッション名・作業ディレクトリ・リモートコントロールURLはログに出さない。**
   // URLは開けばそのセッションを操作できるもので、systemd のジャーナルへ残す粒度ではない。

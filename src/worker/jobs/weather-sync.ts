@@ -1,8 +1,11 @@
 import { fetchWeatherForecast, readWeatherConfig } from "../../core/connectors/weather/index.ts";
-import { publish } from "../sink.ts";
+import { type PublishOptions, publish } from "../sink.ts";
 
 /** 天気予報キャッシュのキー。参照側（横断ビュー）と共有する。 */
 export const WEATHER_CACHE_KEY = "weather-forecast";
+
+/** `TimeoutStartSec=2min` に収まるよう再試行は1回まで（#295）。 */
+export const WEATHER_PUBLISH: PublishOptions = { attempts: 2 };
 
 /**
  * Open-Meteo から今日・明日の予報を取得してキャッシュを更新する。
@@ -16,8 +19,7 @@ export const WEATHER_CACHE_KEY = "weather-forecast";
  */
 export async function runWeatherSync(): Promise<string> {
   const forecast = await fetchWeatherForecast(readWeatherConfig());
-  // `TimeoutStartSec=2min` に収まるよう再試行は1回まで（最悪 30秒 × 2 + 5秒）（#295）。
-  const destination = await publish(WEATHER_CACHE_KEY, "open-meteo", forecast, { attempts: 2 });
+  const destination = await publish(WEATHER_CACHE_KEY, "open-meteo", forecast, WEATHER_PUBLISH);
   // 座標は自宅の位置にあたるので、ログにも通知にも出さない（日数と天気だけを出す）。
   const summary = forecast.days.map((day) => `${day.date} ${day.summary}`).join(" / ");
   return `${forecast.days.length}日ぶんの予報（${summary}）を取得し、${destination}`;

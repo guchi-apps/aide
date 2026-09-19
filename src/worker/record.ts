@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import { publish } from "./sink.ts";
+import { type PublishOptions, publish } from "./sink.ts";
 
 /**
  * ジョブの実行結果の記録。
@@ -21,6 +21,15 @@ import { publish } from "./sink.ts";
 
 /** キャッシュキーの接頭辞。`[a-z0-9][a-z0-9-]*` の制約に収まる形にしてある。 */
 const KEY_PREFIX = "job-";
+
+/**
+ * 記録の送信は再試行せず、待つのも10秒まで。
+ *
+ * 失敗時はジョブ本体の送信が粘ったあとにこれが続く。ここでも粘ると、間隔の短いジョブ
+ * （claude-sessions-sync の `TimeoutStartSec=1min`）が systemd に止められ、通知も記録も
+ * 残らなくなる。記録は小さく、次の実行で上書きされるため、1回落としても失うものは小さい（#295）。
+ */
+export const RECORD_PUBLISH: PublishOptions = { attempts: 1, timeoutMs: 10_000 };
 
 export function jobRecordKey(job: string): string {
   return `${KEY_PREFIX}${job}`;
@@ -47,15 +56,7 @@ export interface JobRecord {
  */
 export async function recordJobRun(record: Omit<JobRecord, "host">): Promise<void> {
   try {
-    // 記録は再試行しない。ジョブ本体の送信が再試行で粘ったあとにここでも粘ると、
-    // 間隔の短いジョブ（claude-sessions-sync の `TimeoutStartSec=1min`）が systemd に
-    // 止められる。記録は次の実行で上書きされるため、1回落としても失うものは小さい（#295）。
-    await publish(
-      jobRecordKey(record.job),
-      "worker",
-      { ...record, host: hostname() },
-      { attempts: 1 },
-    );
+    await publish(jobRecordKey(record.job), "worker", { ...record, host: hostname() }, RECORD_PUBLISH);
   } catch (cause) {
     console.error(
       `[record] 実行記録を残せませんでした: ${cause instanceof Error ? cause.message : cause}`,

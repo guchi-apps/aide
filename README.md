@@ -1838,9 +1838,12 @@ worker ──POST /api/cache/:key──▶ サーバー ──▶ data/cache/
 |---|---|---|
 | 既定（`zaim-sync` など） | 3回（間隔5秒・15秒） | 1日2回のジョブは1回落ちると12時間古いまま残る |
 | `weather-sync` | 2回 | `TimeoutStartSec=2min` に収める |
-| `claude-sessions-sync`・実行記録 | 1回 | 2分ごと・`TimeoutStartSec=1min`。次の実行がやり直しになる |
+| `claude-sessions-sync` | 1回 | 2分ごと・`TimeoutStartSec=1min`。次の実行がやり直しになる |
+| 実行記録（`recordJobRun`） | 1回・待つのは10秒まで | 失敗時は本体の送信のあとに続くため、ここで粘ると systemd に止められる |
 
-4xx（認証・未知のキー）はやり直しても変わらないため即座に失敗させる。**失敗理由には `fetch failed` の中身（`UND_ERR_CONNECT_TIMEOUT`・`ENOTFOUND` など）を添える。** Node の fetch は通信の失敗をすべて `fetch failed` の1語で投げ、理由は `cause` にしか無い。以前はメッセージだけを残していたため、通知からも記録からも何が起きたのかを辿れなかった。
+**systemd の `TimeoutStartSec` を超えるとプロセスごと止められ、失敗の通知も記録も残らない。** 回数を増やすときは、本体の送信と記録の送信の最悪の合計がユニットの上限の3/4に収まるかを `sink.test.ts` が確かめている。
+
+4xx（認証・未知のキー）はやり直しても変わらないため即座に失敗させる。**失敗理由には `fetch failed` の中身（`UND_ERR_CONNECT_TIMEOUT`・`ENOTFOUND` など）を添える。** Node の fetch は通信の失敗をすべて `fetch failed` の1語で投げ、理由は `cause` にしか無い。以前はメッセージだけを残していたため、通知からも記録からも何が起きたのかを辿れなかった。**ただし通知の抑制の署名からはこの中身を外す**（`stripFetchFailureDetail`）。同じ通信断でも `UND_ERR_CONNECT_TIMEOUT`・`ECONNRESET` などと揺れるため、署名に残すと「理由が変わった」扱いで抑制が効かなくなる。
 
 **両方とも未設定の場合は失敗しない。** 開発機ではそれが正しい挙動だが、**サブPCで設定を落とすとジョブは成功したままVPSのキャッシュだけが止まる。** 実際、サブPCの `.env` にこの2つが無く、巡回結果がサブPC側の `data/cache/` にだけ書かれ続け、本番のキャッシュが3日ぶん古いままになっていた（#89）。サーバー側からは worker の `.env` を見られない（[worker 側の設定は「未設定」と断定しない](#worker-側の設定は未設定と断定しない)）ため、**サブPC側で確かめる。**
 
