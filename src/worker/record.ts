@@ -47,7 +47,15 @@ export interface JobRecord {
  */
 export async function recordJobRun(record: Omit<JobRecord, "host">): Promise<void> {
   try {
-    await publish(jobRecordKey(record.job), "worker", { ...record, host: hostname() });
+    // 記録は再試行しない。ジョブ本体の送信が再試行で粘ったあとにここでも粘ると、
+    // 間隔の短いジョブ（claude-sessions-sync の `TimeoutStartSec=1min`）が systemd に
+    // 止められる。記録は次の実行で上書きされるため、1回落としても失うものは小さい（#295）。
+    await publish(
+      jobRecordKey(record.job),
+      "worker",
+      { ...record, host: hostname() },
+      { attempts: 1 },
+    );
   } catch (cause) {
     console.error(
       `[record] 実行記録を残せませんでした: ${cause instanceof Error ? cause.message : cause}`,

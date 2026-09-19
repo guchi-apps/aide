@@ -16,7 +16,8 @@ export const WEATHER_CACHE_KEY = "weather-forecast";
  */
 export async function runWeatherSync(): Promise<string> {
   const forecast = await fetchWeatherForecast(readWeatherConfig());
-  const destination = await publish(WEATHER_CACHE_KEY, "open-meteo", forecast);
+  // `TimeoutStartSec=2min` に収まるよう再試行は1回まで（最悪 30秒 × 2 + 5秒）（#295）。
+  const destination = await publish(WEATHER_CACHE_KEY, "open-meteo", forecast, { attempts: 2 });
   // 座標は自宅の位置にあたるので、ログにも通知にも出さない（日数と天気だけを出す）。
   const summary = forecast.days.map((day) => `${day.date} ${day.summary}`).join(" / ");
   return `${forecast.days.length}日ぶんの予報（${summary}）を取得し、${destination}`;

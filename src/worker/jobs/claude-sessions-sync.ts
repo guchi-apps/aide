@@ -16,7 +16,10 @@ export const CLAUDE_SESSIONS_CACHE_KEY = "claude-sessions";
  */
 export async function runClaudeSessionsSync(): Promise<string> {
   const snapshot = await collectClaudeCodeSessions();
-  const destination = await publish(CLAUDE_SESSIONS_CACHE_KEY, "claude-code", snapshot);
+  // 2分ごとに走り `TimeoutStartSec=1min` なので再試行しない。次の実行がやり直しになる（#295）。
+  const destination = await publish(CLAUDE_SESSIONS_CACHE_KEY, "claude-code", snapshot, {
+    attempts: 1,
+  });
 
   // **セッション名・作業ディレクトリ・リモートコントロールURLはログに出さない。**
   // URLは開けばそのセッションを操作できるもので、systemd のジャーナルへ残す粒度ではない。
