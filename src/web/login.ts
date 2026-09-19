@@ -13,7 +13,7 @@ import {
   type SupabaseAuthConfig,
 } from "../auth/supabase.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
-import { escapeHtml, isSiteNavPath, renderPage } from "./layout.ts";
+import { escapeHtml, isSiteNavPath, renderPage, siteNavLabel } from "./layout.ts";
 import {
   clearHandshakeCookie,
   handshakeCookie,
@@ -30,7 +30,8 @@ import {
 } from "./session.ts";
 
 /**
- * 画面のログイン。ログインの内側にある画面（いまはアプリ連携 `/map`）の関門をここ1か所で持つ。
+ * 画面のログイン。ログインの内側にある画面（アプリ連携 `/map`・機能一覧 `/features`）の関門を
+ * ここ1か所で持つ。
  *
  * **受け口のパスが `/status/...` のままなのは、Supabaseに登録した戻り先を変えないため。**
  * 以前はここに動作状況の画面（`GET /status`）があり、ログインはその付属だった。画面そのものは
@@ -140,7 +141,8 @@ export function renderLoginPage(options: {
 }): string {
   const error = options.error ? `<p class="err">${escapeHtml(options.error)}</p>` : "";
   const next = safeLanding(options.next);
-  const heading = "アプリ連携を見る";
+  // 開こうとした画面の名前を見出しにする。名前が引けなければ既定の画面（アプリ連携）の名前になる。
+  const heading = `${siteNavLabel(next) ?? "アプリ連携"}を見る`;
 
   const body = options.google
     ? `<div class="box">
@@ -175,6 +177,22 @@ function html(
   res
     .writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...headers })
     .end(body);
+}
+
+/**
+ * ログインの内側の画面を返す。**ログインの内側に画面を足すときは、必ずここを通す。**
+ * 未ログインなら `path` へ戻る前提のログイン画面を、ログイン済みなら `render` の結果を返す。
+ * 画面ごとに `currentSession` の判定を書くと、片方だけ条件が古くなって素通しの入口になる。
+ */
+export async function handleGatedPage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: LoginOptions,
+  path: string,
+  render: (session: StatusSession) => string,
+): Promise<void> {
+  const session = await currentSession(req, options);
+  html(res, 200, session ? render(session) : renderLoginPage({ google: options.supabase !== null, next: path }));
 }
 
 /** ログイン後の既定の戻り先。 */

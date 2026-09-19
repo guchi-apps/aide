@@ -16,7 +16,7 @@ import type { OpenMeteoDailyResponse, WeatherForecast } from "./types.ts";
  *
  * **利用条件（無料枠）**: 非商用に限る／1日10,000回未満／CC BY 4.0 の帰属表示。
  * 個人利用なので前2つは満たす。帰属表示は `WeatherForecast.attribution` に載せ、
- * 機能一覧ページ（`/features`）にも出している。
+ * 機能一覧ページ（`/features`。ログインの内側）にも出している。
  */
 
 const ENDPOINT = "https://api.open-meteo.com/v1/forecast";

@@ -1,7 +1,8 @@
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
+import { accountAction, handleGatedPage, type LoginOptions } from "./login.ts";
 
 /**
  * 機能一覧ページ（`GET /features`）。
@@ -9,15 +10,14 @@ import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
  * 「このAIDEで今なにが使えるか」をブラウザから確認するための人間向けページ。
  * `src/api/`（機械向けのJSON）とは用途が違うため層を分けている。
  *
- * **このページは認証なしで公開される。** 載せてよいのは、どんな機能が存在するかという
- * 静的なカタログだけに限る。具体的には次を載せない。
+ * **このページはログインの内側にある**（アプリ連携 `/map` と同じ関門。#332）。以前は認証なしで
+ * 公開していたが、どのツール・エンドポイントを持つかの一覧は利用状況を読み取れる材料になる。
+ * 載せてよいのは、どんな機能が存在するかという静的なカタログだけに限る。具体的には次を載せない。
  *
  * - キャッシュの中身・取得時刻などの実データや稼働状況
- * - 環境変数の値、シークレットの設定有無、認証の有効・無効
+ * - 環境変数の値、シークレットの設定有無（認証が無効な環境で出す警告だけは例外）
  *
  * 稼働状況は ops-dashboard の「AIDE」タブ（`/api/status` を読む）が答える。
- * アプリ連携の画面（`/map`）は見た目は共通（`src/web/layout.ts`）だがログインの内側にあり、
- * 公開範囲は混ぜない。
  *
  * MCPツールは登録簿（`src/mcp/registry.ts`）から自動生成するため、ツールを増やせば
  * 何もしなくてもここに出る。HTTPエンドポイントだけは静的な宣言（`ENDPOINTS`）なので、
@@ -43,8 +43,9 @@ export interface FeatureSection {
  * 外部データの帰属表示。
  *
  * Open-Meteo の無料利用は **CC BY 4.0 の帰属表示が条件**（非商用・1日10,000回未満と併せて3つ）。
- * 天気予報そのものは認証の内側（キャッシュ・横断ビュー）にしか出ないため、**誰でも見られる
- * このページを表示場所と決めている**。取得元を増やしたらここへ足す。
+ * 天気予報そのものは認証の内側（キャッシュ・横断ビュー）にしか出ず、帰属表示は天気のデータにも
+ * 同梱している（`WeatherForecast.attribution`）。このページは天気を見られる人（ログインした人）
+ * だけが開けるため、そこへ載せておけば条件は満たせる。取得元を増やしたらここへ足す。
  *
  * リンクは踏むまで外部へリクエストが飛ばないので、レイアウトの「外部を読み込まない」方針
  * （`src/web/layout.ts`）とは両立する。
@@ -81,7 +82,7 @@ export const ENDPOINTS: FeatureItem[] = [
   {
     name: "/features",
     meta: "GET",
-    description: "このページ。認証は不要。",
+    description: "このページ。ログインが要る（/map と同じ。許可されたGoogleアカウント、未設定の環境ではパスワード）。",
   },
   {
     name: "/manifest.webmanifest",
@@ -234,11 +235,26 @@ function renderSection(section: FeatureSection): string {
   });
 }
 
+export interface FeaturesPageOptions {
+  /** ヘッダー右端（ログイン中の表示・ログアウト）。 */
+  headerAction?: string;
+  /** 認証が無効な環境か。無効なら画面の先頭で警告する。 */
+  authDisabled?: boolean;
+}
+
 /** ページのHTMLを組み立てる純粋関数。テストはここに当てる。 */
-export function renderFeaturesPage(sections: FeatureSection[], baseUrl: string): string {
+export function renderFeaturesPage(
+  sections: FeatureSection[],
+  baseUrl: string,
+  options: FeaturesPageOptions = {},
+): string {
+  const warning = options.authDisabled
+    ? `<p class="notice">認証が無効です（AIDE_AUTH_DISABLED=1）。この画面もMCPも誰でも開けます。</p>`
+    : "";
   const body = `<section class="hero">
 <div class="hero-top"><h1>機能一覧</h1></div>
 <p class="lead">生活情報まわりの共通バックエンド／ハブ。このサーバーで使える機能の一覧です。</p>
+${warning}
 <dl class="connect">
   <dt>MCP接続先</dt>
   <dd><span class="mono">${escapeHtml(baseUrl)}/mcp</span></dd>
@@ -253,13 +269,21 @@ ${sections.map(renderSection).join("\n")}
   return renderPage({
     title: "AIDE の機能一覧",
     nav: siteNav("features"),
+    headerAction: options.headerAction ?? "",
     body,
-    footer: `このページには機能の一覧だけを載せています（実データ・設定値は含みません）。各アプリとのつながりはログイン後の「アプリ連携」で図にしています。<br>${ATTRIBUTION_HTML}`,
+    footer: `このページには機能の一覧だけを載せています（実データ・設定値は含みません）。各アプリとのつながりは「アプリ連携」で図にしています。<br>${ATTRIBUTION_HTML}`,
   });
 }
 
-export function handleFeaturesPage(res: ServerResponse, registry: ToolRegistry, baseUrl: string): void {
-  res
-    .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-    .end(renderFeaturesPage(buildSections(registry), baseUrl));
+export async function handleFeaturesPage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: LoginOptions,
+): Promise<void> {
+  await handleGatedPage(req, res, options, "/features", (session) =>
+    renderFeaturesPage(buildSections(options.registry), options.baseUrl, {
+      headerAction: accountAction(session, options.authConfig.enabled),
+      authDisabled: !options.authConfig.enabled,
+    }),
+  );
 }
