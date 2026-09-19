@@ -255,6 +255,173 @@ describe("asset_manager_import_payment", () => {
     }
   });
 
+  it("外貨・概算の4項目を加工せずそのまま送る", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        source: "gmail",
+        gmailMessageId: "message-fx-1",
+        confidence: 0.93,
+        date: "2026-09-12",
+        amount: 1500,
+        name: "クラウドストレージ",
+        amountApproximate: true,
+        amountNote: "USD 9.99 を 1ドル=150.2円で換算",
+        originalAmount: 9.99,
+        originalCurrency: "USD",
+      });
+      return new Response(JSON.stringify({ status: "confirmed", receiptId: "receipt-fx-1", zaimMoneyId: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    try {
+      assert.deepEqual(
+        parsed(await assetManagerImportPaymentTool.handler({
+          gmailMessageId: "message-fx-1",
+          confidence: 0.93,
+          date: "2026-09-12",
+          amount: 1500,
+          name: "クラウドストレージ",
+          amountApproximate: true,
+          amountNote: "USD 9.99 を 1ドル=150.2円で換算",
+          originalAmount: 9.99,
+          originalCurrency: "USD",
+        }, { sessionId: null })),
+        { status: "confirmed", receiptId: "receipt-fx-1", zaimMoneyId: null },
+      );
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("外貨・概算の項目を省いた呼び出しは、payloadにその項目を含めない", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      for (const field of ["amountApproximate", "amountNote", "originalAmount", "originalCurrency"]) {
+        assert.equal(field in body, false, `${field} は送られないはず`);
+      }
+      return new Response(JSON.stringify({ status: "imported" }), { status: 200 });
+    });
+
+    try {
+      await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-fx-2", confidence: 0.9, amount: 1280 }, { sessionId: null });
+      assert.equal(fetchMock.mock.callCount(), 1);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("amountApproximate: false もそのまま送る（省略と区別する）", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      assert.equal((JSON.parse(String(init?.body)) as Record<string, unknown>)["amountApproximate"], false);
+      return new Response(JSON.stringify({ status: "imported" }), { status: 200 });
+    });
+
+    try {
+      await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-fx-3", confidence: 0.9, amountApproximate: false }, { sessionId: null });
+      assert.equal(fetchMock.mock.callCount(), 1);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("外貨・概算の項目の不正な値は、送信せずにエラーにする", async () => {
+    const fetchMock = mock.method(globalThis, "fetch");
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ amountApproximate: "true" }, "amountApproximate は true / false で指定してください"],
+      [{ amountNote: 150 }, "amountNote は文字列で指定してください"],
+      [{ amountNote: "a".repeat(192) }, "amountNote は 191文字以内で指定してください"],
+      [{ originalAmount: "9.99" }, "originalAmount は正の数で指定してください"],
+      [{ originalAmount: 0 }, "originalAmount は正の数で指定してください"],
+      [{ originalAmount: -1 }, "originalAmount は正の数で指定してください"],
+      [{ originalAmount: Infinity }, "originalAmount は正の数で指定してください"],
+      [{ originalCurrency: "US" }, "originalCurrency は USD のような3文字の通貨コードで指定してください"],
+      [{ originalCurrency: "USDX" }, "originalCurrency は USD のような3文字の通貨コードで指定してください"],
+      [{ originalCurrency: "U5D" }, "originalCurrency は USD のような3文字の通貨コードで指定してください"],
+      [{ originalCurrency: 840 }, "originalCurrency は USD のような3文字の通貨コードで指定してください"],
+    ];
+
+    try {
+      for (const [extra, reason] of cases) {
+        assert.deepEqual(
+          parsed(await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-fx-ng", confidence: 0.9, ...extra }, { sessionId: null })),
+          { status: "error", reason },
+          JSON.stringify(extra),
+        );
+      }
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("amountNoteは191文字ちょうどなら通り、小文字の通貨コードも受け付ける", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      assert.equal((body["amountNote"] as string).length, 191);
+      // 大文字化はAsset Manager側の役目で、AIDEは値を加工しない。
+      assert.equal(body["originalCurrency"], "usd");
+      return new Response(JSON.stringify({ status: "imported" }), { status: 200 });
+    });
+
+    try {
+      await assetManagerImportPaymentTool.handler(
+        { gmailMessageId: "message-fx-4", confidence: 0.9, amountNote: "a".repeat(191), originalCurrency: "usd" },
+        { sessionId: null },
+      );
+      assert.equal(fetchMock.mock.callCount(), 1);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("円換算額を丸めずに小数のまま送ると、送信せずにエラーにする", async () => {
+    // 9.99 × 150.2 = 1500.498。amountは整数のみなので、換算後は丸めてから渡す（ツール説明で指示している）。
+    const fetchMock = mock.method(globalThis, "fetch");
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    try {
+      assert.deepEqual(
+        parsed(await assetManagerImportPaymentTool.handler({
+          gmailMessageId: "message-fx-5",
+          confidence: 0.9,
+          amount: 1500.498,
+          originalAmount: 9.99,
+          originalCurrency: "USD",
+        }, { sessionId: null })),
+        { status: "error", reason: "amount は正の整数で指定してください" },
+      );
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("ツール説明で、外貨建てなら original* を必ず付けて円換算額を整数へ丸めるよう指示する", () => {
+    const description = assetManagerImportPaymentTool.description;
+    for (const keyword of ["originalAmount", "originalCurrency", "整数へ丸めた", "amountNote"]) {
+      assert.ok(description.includes(keyword), `説明に「${keyword}」があるはず`);
+    }
+  });
+
+  it("入力スキーマに4項目があり、任意項目のままにする", () => {
+    const properties = assetManagerImportPaymentTool.inputSchema["properties"] as Record<string, unknown>;
+    for (const field of ["amountApproximate", "amountNote", "originalAmount", "originalCurrency"]) {
+      assert.ok(field in properties, `${field} がスキーマにあるはず`);
+    }
+    assert.deepEqual(assetManagerImportPaymentTool.inputSchema.required, ["gmailMessageId", "confidence"]);
+  });
+
   it("必須値とconfidenceを実行時にも検証する", async () => {
     assert.deepEqual(parsed(await assetManagerImportPaymentTool.handler({ confidence: 0.9 }, { sessionId: null })), {
       status: "error",
