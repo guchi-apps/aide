@@ -32,6 +32,25 @@ function invalid(reason: string): ToolResult {
 }
 
 /**
+ * Asset Manager が2xx以外を返したときの結果。
+ *
+ * 業務上の `duplicate` / `pendingReview` は2xxで返ってくるため、2xx以外はシークレットの不一致（401）や
+ * Asset Manager 側の障害（Apacheが返す5xxのHTML）など、連携そのものの失敗にあたる。
+ * **ここだけ `isError: true` にする。** MCPアクセスの記録（`transport.ts` の `outcome()`）は
+ * `isError` しか見ないため、`false` のままだと失敗が続いても `/status` から気づけない（#308）。
+ * 本文が JSON のオブジェクトなら項目を残し、`status` だけを `error` にそろえる。
+ * JSON でない本文（5xxのHTMLなど）は長く、読んでも役に立たないので載せない。
+ */
+function httpFailure(status: number, body: unknown): ToolResult {
+  const detail = body !== null && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const reason = typeof detail["reason"] === "string" && detail["reason"] ? detail["reason"] : `Asset ManagerがHTTP ${status}を返しました`;
+  return {
+    content: [{ type: "text", text: JSON.stringify({ ...detail, status: "error", reason, httpStatus: status }, null, 2) }],
+    isError: true,
+  };
+}
+
+/**
  * 購入日時として受け付ける形。`YYYY-MM-DD` と `YYYY-MM-DDTHH:mm[:ss]`（末尾に `Z` / `±HH:MM` を付けてもよい）。
  * Asset Manager の `parsePurchasedAt`（`lib/receipt-service.ts`）と同じ書式に揃えてある（#236）。
  * タイムゾーンを省いた場合はAsset Manager側がJSTとして解釈する。
@@ -98,6 +117,7 @@ export const assetManagerImportPaymentTool: Tool = {
     "gmailMessageId は必ず元メールの messageId を渡す。confidence も必ず指定し、曖昧な抽出結果は低くする。" +
     "status（imported / pendingReview / duplicate / ignored / error）、receiptId、zaimMoneyId、reasonを含む" +
     "Asset Managerの結果をそのまま返す。同じgmailMessageIdを再送してもduplicateになる。" +
+    "Asset Managerが2xx以外を返したときは、isError付きで status: error・reason・httpStatus を返す。" +
     "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。",
   inputSchema: {
     type: "object",
@@ -158,7 +178,8 @@ export const assetManagerImportPaymentTool: Tool = {
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
-      return result(await responseBody(response));
+      const body = await responseBody(response);
+      return response.ok ? result(body) : httpFailure(response.status, body);
     } catch (cause) {
       const reason = cause instanceof Error && cause.name === "AbortError" ? "Asset Managerへの接続がタイムアウトしました" : "Asset Managerへの接続に失敗しました";
       return invalid(reason);
