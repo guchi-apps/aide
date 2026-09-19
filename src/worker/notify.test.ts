@@ -74,6 +74,19 @@ describe("失敗理由の整形", () => {
     assert.equal(summarizeFailure({ toString: () => "壊れた" }).reason, "壊れた");
   });
 
+  it("送信の通信断は、エラーの中身が揺れても同じ署名にする（#295）", () => {
+    const timeout = summarizeFailure(
+      new Error("送信に失敗しました（zaim-snapshot・3回試行）: fetch failed（UND_ERR_CONNECT_TIMEOUT）"),
+    );
+    const reset = summarizeFailure(
+      new Error("送信に失敗しました（zaim-snapshot・3回試行）: fetch failed（ECONNRESET）"),
+    );
+    // 理由には中身を残す（何が起きたかを通知から辿れるように）。
+    assert.match(timeout.reason, /UND_ERR_CONNECT_TIMEOUT/);
+    assert.equal(timeout.signature, reset.signature);
+    assert.equal(timeout.signature, "送信に失敗しました（zaim-snapshot・3回試行）: fetch failed");
+  });
+
   it("セッション失効を判別し、署名を理由の文面から独立させる", () => {
     const viaSync = summarizeFailure(
       new Error("Zaimのログインセッションが失効しています（ZAIM_SESSION_EXPIRED）。"),
