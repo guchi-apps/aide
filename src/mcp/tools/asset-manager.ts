@@ -17,7 +17,14 @@ const PAYMENT_FIELDS = [
   "rawSender",
   "confidence",
   "sourceMetadata",
+  "amountApproximate",
+  "amountNote",
+  "originalAmount",
+  "originalCurrency",
 ] as const;
+
+/** 金額が不確かな理由の上限。Asset Manager の列（VarChar(191)）に収まる長さで、向こうの検証と同じ値（#341）。 */
+const MAX_AMOUNT_NOTE_LENGTH = 191;
 
 function result(payload: unknown): ToolResult {
   return {
@@ -92,6 +99,33 @@ function buildPayload(args: Record<string, unknown>): Record<string, unknown> | 
     }
   }
 
+  // 金額の精度（外貨・概算）。判定基準はAsset Managerの `validatePaymentImportInput` に揃えてある（#341）。
+  if (args["amountApproximate"] !== undefined && typeof args["amountApproximate"] !== "boolean") {
+    return "amountApproximate は true / false で指定してください";
+  }
+
+  if (args["amountNote"] !== undefined) {
+    const amountNote = args["amountNote"];
+    if (typeof amountNote !== "string") return "amountNote は文字列で指定してください";
+    if (amountNote.trim().length > MAX_AMOUNT_NOTE_LENGTH) {
+      return `amountNote は ${MAX_AMOUNT_NOTE_LENGTH}文字以内で指定してください`;
+    }
+  }
+
+  if (args["originalAmount"] !== undefined) {
+    const originalAmount = args["originalAmount"];
+    if (typeof originalAmount !== "number" || !Number.isFinite(originalAmount) || originalAmount <= 0) {
+      return "originalAmount は正の数で指定してください";
+    }
+  }
+
+  if (args["originalCurrency"] !== undefined) {
+    const originalCurrency = args["originalCurrency"];
+    if (typeof originalCurrency !== "string" || !/^[A-Za-z]{3}$/.test(originalCurrency.trim())) {
+      return "originalCurrency は USD のような3文字の通貨コードで指定してください";
+    }
+  }
+
   const payload: Record<string, unknown> = { source: "gmail" };
   for (const field of PAYMENT_FIELDS) {
     if (args[field] !== undefined) payload[field] = args[field];
@@ -118,7 +152,9 @@ export const assetManagerImportPaymentTool: Tool = {
     "status（imported / pendingReview / duplicate / ignored / error）、receiptId、zaimMoneyId、reasonを含む" +
     "Asset Managerの結果をそのまま返す。同じgmailMessageIdを再送してもduplicateになる。" +
     "Asset Managerが2xx以外を返したときは、isError付きで status: error・reason・httpStatus を返す。" +
-    "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。",
+    "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。" +
+    "ドル建てなど外貨建ての請求メールでは、originalAmount（外貨の元の金額）と originalCurrency（通貨コード）を必ず付け、" +
+    "amount には円へ換算した金額を入れる（換算根拠は amountNote に書く）。外貨建ての明細は概算として扱われ、Zaimへ自動登録されない。",
   inputSchema: {
     type: "object",
     properties: {
@@ -134,7 +170,32 @@ export const assetManagerImportPaymentTool: Tool = {
           "メールの受信日時（internalDate・Dateヘッダ）を購入時刻として使ってはいけない" +
           "（請求メールは購入から数時間〜数日遅れて届くため）。",
       },
-      amount: { type: "integer", minimum: 1 },
+      amount: {
+        type: "integer",
+        minimum: 1,
+        description: "円建ての金額。外貨建ての請求メールでは円へ換算した金額を入れ、元の金額は originalAmount / originalCurrency に渡す。",
+      },
+      amountApproximate: {
+        type: "boolean",
+        description:
+          "金額が正確でない可能性があるときに true。為替換算した・請求額が確定前の見込み、など。" +
+          "originalCurrency が JPY 以外なら省いてもAsset Manager側で概算として扱う。概算の明細はZaimへ自動登録されず、Asset Managerの突合せタブで確定する。",
+      },
+      amountNote: {
+        type: "string",
+        maxLength: MAX_AMOUNT_NOTE_LENGTH,
+        description: "金額が不確かな理由。例: `USD 9.99 を 1ドル=150.2円で換算`。191文字以内。",
+      },
+      originalAmount: {
+        type: "number",
+        exclusiveMinimum: 0,
+        description: "外貨建ての請求メールで、外貨の元の金額（例: 9.99）。外貨建てなら必ず指定する。",
+      },
+      originalCurrency: {
+        type: "string",
+        pattern: "^[A-Za-z]{3}$",
+        description: "originalAmount の通貨。ISO 4217 の3文字コード（例: USD）。外貨建てなら必ず指定する。",
+      },
       name: { type: "string" },
       place: { type: "string" },
       usage: {
