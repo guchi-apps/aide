@@ -46,6 +46,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
+| `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（AIDEはAsset Managerから読み取らないため、取り込み専用） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
@@ -142,6 +143,23 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 3. **作成だけ。** 編集・削除は持たない。動かす・消すにはDaySpanの画面から行う
 
 詳細は `src/core/connectors/dayspan/write.ts`。
+
+#### 照明などの操作は条件3の例外（aide#317）
+
+`aide_room_press` は myroom に登録済みの Nature Remo のボタン（照明のON/OFFなど）を押す。
+**部屋の機器の状態を変える操作で、「作成だけ」ではない。** それでも持つのは、押したボタンは逆のボタン
+（「消す」に対する「点ける」）を押せば戻せる、取り返しのつく操作だから（Issueでユーザーが決定）。
+
+1. **他のどこからも塞がっている経路。** myroom の操作APIはログインしたブラウザ専用で、
+   Claude / ChatGPT から部屋の機器へ届く経路は他に無い
+2. **読み取りとは別の資格情報。** 読み取り用の `AIDE_MYROOM_TOKEN` とは別に
+   `AIDE_MYROOM_CONTROL_TOKEN` を持つ。myroom側も読み取り用の `INTERNAL_API_KEY` とは別の
+   `INTERNAL_CONTROL_API_KEY` で守る（[myroom#419](https://github.com/guchi-apps/myroom/issues/419)）
+3. **例外。** 押せるのは myroom の画面で登録済みのボタンだけで、Nature Remo の signal を直接送る口や
+   エアコンの設定変更は持たない
+
+誤操作の防ぎ方は[照明などの操作](#照明などの操作aide317)。**この例外を前例として使わない。**
+状態を変える書き込みを次に持ち込むときは、この節を根拠にせずIssueで改めて決める。
 
 #### ChatGPTのスケジュールからの取り込みは条件1・2を満たす（#199・aide#205・aide#211）
 
@@ -352,10 +370,13 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
 | `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
+| `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
 | `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
+| `aide_room_buttons` | 照明など、AIDEから押せる機器のボタンの一覧（myroom に登録済みの Nature Remo のボタン）。読み取りだけ |
+| `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで） |
 | `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
-| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今週の予定」「何時なら空いているか」に答えるためのもので、今日1日の見通しは `aide_daily_briefing` |
+| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「明日の予定」「今週の予定」「何時なら空いているか」に答えるためのもので（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）、今日1日の見通しは `aide_daily_briefing` |
 | `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
 | `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細（起票に使えるラベルの候補を含む） |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない） |
@@ -395,9 +416,14 @@ Research Desk側が持つ**ため、AIDEは入力の形（事業ごとの件数�
 載る。**HTTPエンドポイントだけは静的な宣言**なので、`src/server.ts` にルートを足したら
 `ENDPOINTS` も更新する。
 
-**このページは認証なしで公開する。** 載せてよいのは「どんな機能が存在するか」という静的なカタログ
-だけで、キャッシュの中身・取得時刻などの実データ、環境変数の値、認証の有効・無効は載せない。
-掲載範囲はOAuthのディスカバリメタデータ（`/.well-known/...`）で既に公開されている情報を超えない。
+**このページはログインの内側に置く**（アプリ連携 `/map` と同じ関門。#332）。以前は認証なしで公開して
+いたが、どのツール・エンドポイントを持つかの一覧は利用状況を読み取れる材料になるため。認証は
+[アプリ連携ページ](#アプリ連携ページ)の表と同じで、許可したGoogleアカウント（未設定の環境では
+`AIDE_AUTH_PASSWORD`）。未ログインで開くとログイン画面が出て、ログイン後は元の `/features` へ戻る。
+
+載せてよいのは「どんな機能が存在するか」という静的なカタログだけで、キャッシュの中身・取得時刻などの
+実データ、環境変数の値、シークレットの設定有無は載せない（`AIDE_AUTH_DISABLED=1` の環境で出す警告だけは
+例外）。`/mcp`・`/api/*`・OAuth・`/health`・アイコン・PWAマニフェストの認証は変わらない。
 
 `/` は404のままにしている。
 
@@ -1157,6 +1183,7 @@ Frankfurter のレートで計算した参考値で、取得できていなけ�
 src/core/connectors/myroom/
   types.ts   myroom のレスポンスのうち、AIDEが使うフィールドだけを再宣言
   index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
+  control.ts 照明などの操作（ボタンの一覧と押す。aide#317）
 src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
 ```
 
@@ -1169,6 +1196,7 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 |---|---|---|
 | `AIDE_MYROOM_URL` | `http://127.0.0.1:8000` | そのURLへ問い合わせる |
 | `AIDE_MYROOM_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+| `AIDE_MYROOM_CONTROL_TOKEN` | 操作ツールは「未設定」を返し、myroom へ何も送らない | 操作用の内部APIを `Authorization: Bearer` で叩く |
 
 トークンは相手側の内部APIキーと**同じ値**で、**認証情報として扱う**。1Passwordでは値を複製せず
 提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで丸める
@@ -1177,6 +1205,34 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 **myroom の読み取りAPIは元々 Supabase のユーザーログイン必須**で、サーバー間から読める口が無い。
 内部APIは [myroom#161](https://github.com/guchi-apps/myroom/issues/161) で追加する。**未実装の
 バージョンに対しては 404 が返り、`unavailable` に「内部APIが未実装のバージョン」として出る。**
+
+### 照明などの操作（aide#317）
+
+操作そのものは myroom が持っている（`backend/remote.py`。Nature Remo へ赤外線の送信を依頼する）。
+**AIDEは Nature Remo を直接叩かず、myroom の画面で登録済みのボタンをIDで押すだけにする。**
+直接叩くとボタンの定義・表示名が myroom と二重になり、Nature Remo のレート制限（30回/5分）も
+両者で食い合う。対象は Nature Remo のボタンだけで、エアコン（白くまくん）の操作は持たない。
+
+| myroom の内部API | 使うツール |
+|---|---|
+| `GET /api/internal/remote/buttons` | `aide_room_buttons`（`aide_room_press` も押す前に引く） |
+| `POST /api/internal/remote/buttons/{id}/send` | `aide_room_press` |
+
+どちらも `INTERNAL_CONTROL_API_KEY`（AIDE側は `AIDE_MYROOM_CONTROL_TOKEN`）で通る、操作専用の口で
+[myroom#419](https://github.com/guchi-apps/myroom/issues/419) で追加する。**未実装のバージョンに対しては
+404 が返り、`unsupported` として出る。**
+
+誤操作は次の3つで防ぐ。
+
+- **IDと名前の両方を受け取り、押す直前に myroom の今の登録と突き合わせる。** 一致しなければ押さずに
+  `mismatch` を返す。Claudeが取り違えたIDや、myroom側で登録し直されたIDをそのまま押さないため
+- **同じボタンを30秒以内に続けて押さない**（`allowRepeat: true` で明示したときだけ押す）。赤外線の
+  「電源」のようなトグルは2回押すと元に戻るため、再試行で利用者の意図と逆の状態になる
+- **押す前に、押すボタンの名前を利用者に確認する**よう、ツールの説明文でClaudeに求める
+
+**結果は「myroom が Nature Remo へ送信を依頼できたか」まで。** 赤外線は片方向で、機器が反応したかは
+返ってこない（myroom#106）。応答を待ちきれなかったときは送れたか分からないため `unknown` を返し、
+再送せずに利用者へ確かめるよう案内する。照明なら `aide_room_status` の照度の変化でも確かめられる。
 
 ### 鮮度と判定
 
@@ -1455,8 +1511,9 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 | 1日10,000回未満（1時間5,000回・1分600回） | 毎時1回の worker ジョブだけが叩く（1日24回） |
 | CC BY 4.0 の帰属表示 | `WeatherForecast.attribution` に同梱し、**機能一覧ページ（`/features`）に出す** |
 
-帰属表示を `/features` に置いたのは、天気そのものはキャッシュと横断ビュー（＝認証の内側）に
-しか出ないため。誰でも見られるページに1か所だけ持たせ、取得元が増えたらそこへ足す。
+帰属表示を `/features` に置いたのは、天気を見られる人が限られるため。天気そのものはキャッシュと
+横断ビュー（＝認証の内側）にしか出ず、`/features` も同じくログインの内側にある（#332）。
+帰属表示はデータ自体にも同梱しているので、見る人の手元には必ず届く。取得元が増えたら `/features` へ足す。
 
 ### キャッシュを挟む理由
 
@@ -2247,6 +2304,42 @@ Asset ManagerのレスポンスJSON（`status`、`receiptId`、`zaimMoneyId`、`
 MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANAGER_URL`（既定は
 `https://asset.gucchii.com`）で指定する。デプロイ時のsecret/variable配線は
 `.github/secrets-manifest.tsv` と `.github/workflows/deploy.yml` が正である。
+
+## 電気代・ガス代を読む（MCP）
+
+「今月の電気代」「先月のガス使用量」「最近の推移」に答えるための読み取りツール
+`aide_utility_bills`（#324）。実装は `src/core/views/utility-bills.ts`（集計）と
+`src/core/connectors/zaim/read.ts`（Zaim公式APIの `GET /v2/home/money`）。引数は `kind`
+（`electricity` / `gas` / `all`）と `months`（今月を含めて遡る月数。既定13・上限36）。
+
+### 情報源はZaim公式API
+
+電気・ガスの請求メールは、上の `asset_manager_import_payment` で Asset Manager へ取り込まれ、
+Asset Manager が**Zaim APIで**支出として登録する。そのため公式APIで期間を指定して読める。
+ほかの経路は推移に使えないので採っていない。
+
+- **Asset Manager には読み取りAPIが無い**（`/api/receipts/import` と `/api/zaim/sync` だけ）
+- **Web版の一覧のキャッシュ（`zaim-money-snapshot`）は当月＋先月ぶんしか持たない**。巡回はPlaywrightで重く、月を増やせない
+
+公式APIは**自動連携（カード等）の明細を返さない**。電気・ガスがカード払いで、請求メールからの
+取り込みを経ずに自動連携の明細だけがある月は、この経路からは見えない。
+
+鮮度は呼び出しのたびに引くので常に最新。ジャンルの対応表は `aide_zaim_master` と同じ24時間キャッシュ
+（`src/core/views/zaim-master.ts`）を使う。Zaimへの問い合わせは種類ごとにジャンルの数だけ（通常は電気・ガスで2本）。
+
+### どれを電気・ガスとみなすか
+
+**Zaimのジャンル名に「電気」「ガス」を含むもの。** 品名・店名では拾わない（「ガス」を含む飲食店名などを
+拾うため）。該当するジャンルが無いときは、その種類だけ `unavailable` に理由を入れて返す。
+
+### 使用量と日付
+
+- **使用量は品名から読む。** Asset Manager は `usage` を品名の末尾へ足して登録する（「電気料金 258kWh」。
+  asset-manager#307）。`kWh` と `m3`（`㎥`・`m³`・`立方メートル` を寄せる）だけを読み、書かれていない月は `null`
+- **検針期間（対象期間）は持っていない。** Zaimの明細は日付を1つしか持たず、それは請求・支払の日。
+  月ごとの集計（`monthly`）もこの日付の月で束ねる
+- 前月比・前年同月比は、明細のある最新の月から**暦の**前月・前年同月を見る。その月に明細が無ければ `null`
+  （明細のある直前の月へずらさない）
 
 ## 外部のClaude CodeからのZaim登録（MCP）
 

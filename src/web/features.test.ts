@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, it } from "node:test";
 import { ToolRegistry } from "../mcp/registry.ts";
 import type { Tool } from "../mcp/types.ts";
 import { moneySummaryTool } from "../mcp/tools/money.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
-import { buildSections, renderFeaturesPage } from "./features.ts";
+import { buildSections, ENDPOINTS, handleFeaturesPage, renderFeaturesPage } from "./features.ts";
+import type { LoginOptions } from "./login.ts";
 
 function render(registry: ToolRegistry, baseUrl = "https://aide.example.com"): string {
   return renderFeaturesPage(buildSections(registry), baseUrl);
@@ -96,5 +98,62 @@ describe("機能一覧ページ", () => {
     const html = render(new ToolRegistry());
     assert.ok(html.startsWith("<!doctype html>"));
     assert.ok(html.includes("まだありません"));
+  });
+
+  it("ヘッダーの右端にログイン中の操作を出す", () => {
+    const html = renderFeaturesPage(buildSections(registryWith(pingTool)), "https://aide.example.com", {
+      headerAction: '<form action="/status/logout"></form>',
+    });
+    assert.ok(html.includes('action="/status/logout"'));
+    assert.ok(!html.includes("認証が無効です"));
+  });
+
+  it("認証が無効な環境でだけ警告を出す", () => {
+    const html = renderFeaturesPage(buildSections(registryWith(pingTool)), "https://aide.example.com", {
+      authDisabled: true,
+    });
+    assert.ok(html.includes("認証が無効です"));
+    assert.ok(!render(registryWith(pingTool)).includes("認証が無効です"));
+  });
+
+  it("このページ自身が、ログインが要ると説明する", () => {
+    // 「認証は不要」と書いたまま関門を付けると、実態と食い違う。
+    const endpoint = ENDPOINTS.find((item) => item.name === "/features");
+    assert.ok(endpoint);
+    assert.ok(!endpoint.description.includes("認証は不要"));
+    assert.ok(endpoint.description.includes("ログイン"));
+  });
+});
+
+describe("機能一覧ページの関門", () => {
+  it("認証が無効な環境では、ログインなしで機能一覧を返す", async () => {
+    // 認証が有効な経路は署名鍵を data/auth へ作るため、ここでは当てない（実サーバーで確かめる）。
+    const options: LoginOptions = {
+      authConfig: { enabled: false, password: null },
+      supabase: null,
+      baseUrl: "https://aide.example.com",
+      registry: registryWith(pingTool),
+    };
+    let status = 0;
+    let headers: Record<string, string | string[]> = {};
+    let body = "";
+    const res = {
+      writeHead(code: number, h: Record<string, string | string[]>) {
+        status = code;
+        headers = h;
+        return this;
+      },
+      end(chunk: string) {
+        body = chunk;
+      },
+    } as unknown as ServerResponse;
+
+    await handleFeaturesPage({ headers: {} } as IncomingMessage, res, options);
+
+    assert.equal(status, 200);
+    assert.equal(headers["Cache-Control"], "no-store");
+    assert.ok(body.includes("<h1>機能一覧</h1>"));
+    assert.ok(body.includes(pingTool.name));
+    assert.ok(body.includes("認証が無効です"));
   });
 });

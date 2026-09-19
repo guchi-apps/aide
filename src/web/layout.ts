@@ -214,6 +214,11 @@ export function isSiteNavPath(path: string | null | undefined): boolean {
   return NAV.some((item) => item.href === path);
 }
 
+/** ナビに並ぶ画面の名前。ナビに無いパスなら `null`。ログイン画面の見出しに使う。 */
+export function siteNavLabel(path: string | null | undefined): string | null {
+  return NAV.find((item) => item.href === path)?.label ?? null;
+}
+
 export interface PageOptions {
   title: string;
   /** ヘッダーのナビ。空なら見出しだけの簡素なページ（パスワード入力）になる。 */

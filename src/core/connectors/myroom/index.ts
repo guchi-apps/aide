@@ -20,14 +20,14 @@ import type { MyRoomSnapshot } from "./types.ts";
  */
 
 /** myroom は同じVPS上のPM2プロセス（uvicorn・ポート8000）。 */
-const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
+export const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
 
 /**
  * 1本あたりの制限時間。
  * MCPの同期リクエストの中で叩くため、相手が落ちていてもツールが固まらないよう短く切る。
  * localhost で数ミリ秒で返るものなので、3秒は十分な余裕にあたる。
  */
-const TIMEOUT_MS = 3_000;
+export const TIMEOUT_MS = 3_000;
 
 export interface MyRoomConfig {
   baseUrl: string;
