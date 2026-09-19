@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DATA_DIR } from "../core/paths.ts";
 import type { AccessToken, AuthCode, AuthState, OAuthClient } from "./types.ts";
 
@@ -12,7 +12,10 @@ import type { AccessToken, AuthCode, AuthState, OAuthClient } from "./types.ts";
  * 中身は実質的な認証情報なので、ファイルは 600 で作る。
  */
 
-const STORE_PATH = join(DATA_DIR, "auth", "oauth-state.json");
+/** テストが本番のトークンを汚さないよう差し替えられるようにしている（`AIDE_CACHE_DIR` と同じ考え方）。 */
+const STORE_PATH = process.env["AIDE_AUTH_STATE_PATH"]
+  ? resolve(process.env["AIDE_AUTH_STATE_PATH"])
+  : join(DATA_DIR, "auth", "oauth-state.json");
 const EMPTY: AuthState = { clients: [], codes: [], tokens: [] };
 
 let cached: AuthState | null = null;
@@ -37,13 +40,25 @@ async function save(state: AuthState): Promise<void> {
   cached = state;
 }
 
-/** 期限切れの認可コード・トークンを落とす。保存のたびに呼ぶ。 */
+/**
+ * リフレッシュトークンの失効時刻。`refreshExpiresAt` を持たない古いレコードは、
+ * 従来どおりアクセストークンと同時に切れるものとして扱う（保存済みの状態を巻き込んで落とさないため）。
+ */
+function refreshExpiryOf(token: AccessToken): number {
+  return token.refreshExpiresAt ?? token.expiresAt;
+}
+
+/**
+ * 期限切れの認可コード・トークンを落とす。保存のたびに呼ぶ。
+ * トークンのレコードはアクセストークンとリフレッシュトークンの両方を持つため、
+ * 後者の期限（アクセストークンより長い）が切れるまで残す。
+ */
 function prune(state: AuthState): AuthState {
   const now = Date.now();
   return {
     clients: state.clients,
     codes: state.codes.filter((c) => c.expiresAt > now),
-    tokens: state.tokens.filter((t) => t.expiresAt > now),
+    tokens: state.tokens.filter((t) => refreshExpiryOf(t) > now),
   };
 }
 
@@ -87,8 +102,9 @@ export async function consumeRefreshToken(refreshToken: string): Promise<AccessT
   const found = state.tokens.find((t) => t.refreshToken === refreshToken) ?? null;
   if (!found) return null;
   // 使ったリフレッシュトークンは無効化し、新しい組を発行させる（ローテーション）。
+  // 期限切れでも消す（同じ値でもう一度試されても通らないようにするため）。
   await save(prune({ ...state, tokens: state.tokens.filter((t) => t !== found) }));
-  return found;
+  return refreshExpiryOf(found) > Date.now() ? found : null;
 }
 
 /** 動作状況ページ（`/status`）へ出す集計。**トークンの値そのものは返さない。** */
@@ -103,13 +119,16 @@ export interface AuthSummary {
 
 export async function readAuthSummary(): Promise<AuthSummary> {
   const state = prune(await load());
-  const nearest = state.tokens.reduce<number | null>(
+  // 保存済みのレコードにはアクセストークンが切れてリフレッシュ待ちのものも含まれるため、数えるのは期限内だけ。
+  const now = Date.now();
+  const live = state.tokens.filter((t) => t.expiresAt > now);
+  const nearest = live.reduce<number | null>(
     (earliest, token) => (earliest === null || token.expiresAt < earliest ? token.expiresAt : earliest),
     null,
   );
   return {
     clients: state.clients.length,
-    tokens: state.tokens.length,
+    tokens: live.length,
     nearestExpiryAt: nearest === null ? null : new Date(nearest).toISOString(),
   };
 }
