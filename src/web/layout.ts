@@ -3,7 +3,7 @@ import { headTags } from "./assets.ts";
 /**
  * 人間向けHTMLページの共通レイアウト。
  *
- * AIDEがブラウザへ出す画面は4つある（機能一覧・動作状況・共通知識・パスワードの入力）。
+ * AIDEがブラウザへ出す画面は3つある（アプリ連携・機能一覧・ログイン）。
  * それぞれが自前のCSSを持っていたため、同じ「カード」「見出し」でも余白も色も違っていた。
  * **配色・書体・部品はここだけが持ち**、各ページは中身の組み立てに専念する。
  *
@@ -12,9 +12,6 @@ import { headTags } from "./assets.ts";
  * アイコンとPWAマニフェスト（`src/web/assets.ts`）だけは自分で配信しているため `<head>` に入れる。
  * 実行時依存を増やさない方針（README）と同じ理由で、ここでもテンプレートエンジンは使わない。
  */
-
-/** 状態の色。`OpsSeverity`（ok / warn / danger）と対応させてある。 */
-export type Tone = "ok" | "warn" | "danger" | "muted";
 
 export function escapeHtml(value: string): string {
   return value
@@ -36,7 +33,8 @@ const FONT_MONO = 'ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospac
 
 /**
  * 配色は明暗の2組。切り替えスイッチは置かず、端末の設定にそのまま従う。
- * 状態の色（緑・黄・赤）は差し色（青）とは別系統にして、状態の表示にしか使わない。
+ * 差し色（青）は「読む・AIDEへ流れる」、茶（`--wr`）は「書く・AIDEから流れる」に使う
+ * （アプリ連携の図）。赤（`--bad`）はエラー表示にしか使わない。
  */
 const STYLE = `
 :root{
@@ -44,8 +42,7 @@ const STYLE = `
  --ink:#131b22;--ink-2:#3c4a55;--muted:#67757f;
  --line:#d8e0e6;--line-2:#e9eef1;
  --accent:#1b5a75;--accent-soft:#e3edf2;--on-accent:#fff;
- --ok:#1f7346;--ok-bg:#e0f0e6;
- --warn:#8a5c07;--warn-bg:#f8ecd4;
+ --wr:#7a4d12;--wr-bg:#f6ecdc;
  --bad:#a52f26;--bad-bg:#f8e3e0;
 }
 @media (prefers-color-scheme:dark){
@@ -54,8 +51,7 @@ const STYLE = `
   --ink:#dde6ec;--ink-2:#b3c1cb;--muted:#8494a0;
   --line:#26333c;--line-2:#1e2a32;
   --accent:#6bb6d6;--accent-soft:#16313e;--on-accent:#0c1216;
-  --ok:#57c489;--ok-bg:#14301f;
-  --warn:#dda94a;--warn-bg:#332612;
+  --wr:#e0b070;--wr-bg:#33260f;
   --bad:#ef8175;--bad-bg:#3a1c19;
  }
 }
@@ -63,7 +59,7 @@ const STYLE = `
 body{margin:0;background:var(--bg);color:var(--ink);font-family:${FONT_SANS};
  line-height:1.7;font-size:15px;display:flex;flex-direction:column;min-height:100vh}
 a{color:var(--accent)}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,svg a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mono{font-family:${FONT_MONO};font-size:.95em}
 
 /* ---- ヘッダー ---- */
@@ -92,22 +88,6 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .hero h1{font-size:1.25rem;line-height:1.4;margin:0;font-weight:700;flex:1 1 12rem;min-width:0;text-wrap:balance}
 @media (min-width:720px){.hero h1{font-size:1.5rem}}
 .lead{margin:0;color:var(--ink-2);font-size:.9rem;max-width:44em}
-.stamp{font-family:${FONT_MONO};font-size:.75rem;color:var(--muted);
- display:flex;flex-wrap:wrap;gap:.15rem .9rem;font-variant-numeric:tabular-nums}
-.attention{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem}
-.attention li{padding:.55rem .7rem;background:var(--warn-bg);border-left:3px solid var(--warn);font-size:.88rem}
-.attention li.danger{background:var(--bad-bg);border-left-color:var(--bad)}
-.attention b{font-family:${FONT_MONO};font-weight:600;font-size:.85rem}
-.fix{color:var(--ink-2);font-size:.82rem;display:block;margin-top:.15rem}
-
-/* ---- 状態のバッジ ---- */
-.pill{display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .7rem;font-size:.78rem;
- font-weight:700;border:1px solid transparent;white-space:nowrap}
-.pill::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor}
-.pill.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)}
-.pill.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)}
-.pill.danger{color:var(--bad);background:var(--bad-bg);border-color:var(--bad)}
-.pill.muted{color:var(--muted);background:var(--panel-2);border-color:var(--line)}
 
 /* ---- カード ---- */
 .grid{display:grid;gap:.9rem;grid-template-columns:minmax(0,1fr)}
@@ -120,20 +100,6 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .card-body{padding:.7rem .9rem .9rem;display:flex;flex-direction:column;gap:.6rem}
 .sub{color:var(--muted);font-size:.8rem;margin:0}
 
-/* ---- 定義リスト・表 ---- */
-dl{margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:.3rem .9rem;
- font-size:.86rem;align-items:baseline}
-dt{color:var(--muted);white-space:nowrap}
-dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.tblwrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:.84rem}
-th{text-align:left;font-weight:500;color:var(--muted);font-size:.74rem;letter-spacing:.06em;
- padding:.3rem .5rem .35rem 0;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:.45rem .5rem;padding-left:0;border-bottom:1px solid var(--line-2);vertical-align:top;
- font-variant-numeric:tabular-nums}
-tr:last-child td{border-bottom:0}
-td.key{font-family:${FONT_MONO};font-weight:500;white-space:nowrap}
-
 /* ---- 一覧（機能一覧ページ） ---- */
 .items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .items li{padding:.55rem 0;border-bottom:1px solid var(--line-2);display:flex;flex-direction:column;gap:.1rem}
@@ -141,56 +107,60 @@ td.key{font-family:${FONT_MONO};font-weight:500;white-space:nowrap}
 .items .nm{font-family:${FONT_MONO};font-size:.84rem;font-weight:500;color:var(--accent);overflow-wrap:anywhere}
 .items .mt{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);margin-left:.5rem}
 .items .ds{font-size:.82rem;color:var(--ink-2)}
-.chips{display:flex;flex-wrap:wrap;gap:.35rem;margin:0;padding:0;list-style:none}
-.chips li{font-family:${FONT_MONO};font-size:.76rem;padding:.15rem .5rem;
- background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
-.chips li .c{font-weight:700;margin-left:.4em;font-variant-numeric:tabular-nums}
 .connect{background:var(--accent-soft);border:1px solid var(--accent);padding:.7rem .9rem;
  display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .9rem;font-size:.84rem;align-items:baseline}
 .connect dt{color:var(--accent)}
 
-/* ---- MCPアクセスの記録（動作状況ページ）---- */
-/* 接続確認・一覧の取得は数が多く、ツールの呼び出しを押し流す。
-   既定では畳んでおき、チェックを入れたときだけ同じ表に混ぜて出す。
-   JavaScriptを使わないのは、この画面が素のfetch1か所しか持たない方針に合わせるため。 */
-.log{min-width:0}
-.log input.logtoggle{accent-color:var(--accent);vertical-align:middle;margin:0 .35rem 0 0}
-.log label.logfilter{font-size:.8rem;color:var(--muted);vertical-align:middle;cursor:pointer}
-.log .tblwrap{margin-top:.5rem}
-.log input.logtoggle:not(:checked) ~ .tblwrap tr.quiet{display:none}
-.when{font-family:${FONT_MONO};white-space:nowrap;color:var(--ink-2)}
-tr.quiet td{color:var(--muted)}
-.why{display:block;color:var(--bad);font-size:.78rem;font-variant-numeric:normal}
+/* ---- アプリ連携（図と一覧） ---- */
+/* 図は横長（PC・iPad）と縦長（スマホ）の2枚を出し分ける。1枚を縮めるとスマホで字が読めない。 */
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1.2rem;font-size:.8rem;color:var(--muted);margin:0;padding:0;list-style:none}
+.legend li{display:flex;align-items:center;gap:.4rem}
+.legend svg{flex:none}
+.mapcard{background:var(--panel);border:1px solid var(--line);padding:.8rem .6rem}
+@media (min-width:720px){.mapcard{padding:1rem 1.2rem}}
+.mapcard svg{display:block;width:100%;height:auto}
+.map-wide{display:none}
+@media (min-width:720px){.map-wide{display:block}.map-narrow{display:none}}
+.maphead{display:flex;justify-content:space-between;font-size:.74rem;letter-spacing:.08em;color:var(--muted);margin:0 0 .4rem;padding:0 .2rem}
+.n-box{fill:var(--panel-2);stroke:var(--line)}
+.n-name{fill:var(--ink);font-size:14px;font-weight:600}
+.n-sub{fill:var(--muted);font-size:11.5px}
+.n-via{fill:var(--accent);font-size:11px;font-family:${FONT_MONO};font-weight:600}
+.hub-box{fill:var(--accent)}
+.hub-name{fill:var(--on-accent);font-size:26px;font-weight:700;letter-spacing:.14em;font-family:${FONT_MONO}}
+.hub-sub{fill:var(--on-accent);font-size:11.5px;opacity:.85}
+.g-name{fill:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.1em}
+.row-box{fill:var(--panel);stroke:var(--line)}
+svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
+.row-name{fill:var(--accent);font-size:13px;font-weight:600;font-family:${FONT_MONO}}
+.row-what{fill:var(--ink-2);font-size:11.5px}
+.edge{fill:none;stroke:var(--accent);stroke-width:1.4;opacity:.55}
+.edge.w{stroke:var(--wr);opacity:.75}
+.edge.solid{opacity:1}
+.edge.trunk{stroke:var(--line);opacity:1;stroke-width:2}
+.arrow{fill:var(--accent)}
+.arrow.w{fill:var(--wr)}
+.tag-r{fill:var(--accent-soft);stroke:var(--accent)}
+.tag-w{fill:var(--wr-bg);stroke:var(--wr)}
+.tag-rt{fill:var(--accent);font-size:10.5px;font-weight:700}
+.tag-wt{fill:var(--wr);font-size:10.5px;font-weight:700}
+.apps{list-style:none;margin:0;padding:0}
+.apps li{padding:.55rem 0;border-bottom:1px solid var(--line-2);display:grid;
+ grid-template-columns:minmax(0,1fr) auto;gap:.1rem .6rem;align-items:baseline;scroll-margin-top:1rem}
+.apps li:last-child{border-bottom:0}
+.apps li:target{background:var(--accent-soft);outline:1px solid var(--accent);outline-offset:0}
+.apps .nm{font-family:${FONT_MONO};font-size:.86rem;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
+.apps .dir{display:flex;gap:.25rem}
+.b{font-size:.7rem;font-weight:700;padding:0 .4rem;border:1px solid;white-space:nowrap}
+.b.r{color:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
+.b.w{color:var(--wr);background:var(--wr-bg);border-color:var(--wr)}
+.apps .ds{grid-column:1/-1;font-size:.84rem;color:var(--ink-2)}
+.chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.3rem;margin:.15rem 0 0;padding:0;list-style:none}
+.chips span{font-family:${FONT_MONO};font-size:.72rem;padding:.05rem .45rem;background:var(--panel-2);
+ color:var(--muted);border:1px solid var(--line);overflow-wrap:anywhere}
+.notice{margin:0;padding:.55rem .7rem;background:var(--bad-bg);border-left:3px solid var(--bad);font-size:.86rem}
 
-/* ---- ファイル別の折りたたみ（共通知識ページ）---- */
-/* JavaScriptを使わず <details> だけで開閉する。この画面はGitHubから取った内容を
-   並べるだけで、押した先で通信するものが無い。 */
-.files{display:flex;flex-direction:column;margin:0;padding:0;list-style:none;min-width:0}
-.files > li{border-bottom:1px solid var(--line-2)}
-.files > li:last-child{border-bottom:0}
-.files summary{cursor:pointer;padding:.5rem 0;display:flex;align-items:baseline;gap:.5rem;
- flex-wrap:wrap;font-size:.84rem;list-style:none}
-.files summary::-webkit-details-marker{display:none}
-.files summary::before{content:"▸";color:var(--muted);font-size:.7rem;line-height:1.6}
-.files details[open] > summary::before{content:"▾"}
-.files summary .fname{font-family:${FONT_MONO};color:var(--accent);font-weight:500;
- margin-right:auto;overflow-wrap:anywhere}
-.files summary .fcount{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);
- font-variant-numeric:tabular-nums}
-.sections{list-style:none;margin:0 0 .6rem;padding:0 0 0 1.1rem;
- display:flex;flex-direction:column;gap:.45rem}
-.sections li{display:flex;flex-direction:column;gap:.1rem;min-width:0}
-.sections .t{font-size:.84rem;color:var(--ink);line-height:1.5;overflow-wrap:anywhere}
-.sections .m{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);
- display:flex;gap:.15rem .8rem;flex-wrap:wrap;font-variant-numeric:tabular-nums}
-
-/* ---- 操作 ---- */
-button.act{font:inherit;font-size:.82rem;padding:.35rem .85rem;background:var(--panel-2);
- color:var(--ink);border:1px solid var(--line);cursor:pointer;align-self:flex-start}
-button.act:hover{border-color:var(--accent);color:var(--accent)}
-button.act[disabled]{opacity:.6;cursor:progress}
-
-/* ---- ログイン（動作状況のログイン・接続の許可） ---- */
+/* ---- ログイン（画面のログイン・接続の許可） ---- */
 body.centered{justify-content:center;align-items:center;padding:2rem 1rem}
 .box{background:var(--panel);border:1px solid var(--line);padding:1.6rem 1.4rem;width:100%;
  max-width:22rem;display:flex;flex-direction:column;gap:.85rem}
@@ -218,16 +188,15 @@ export interface NavItem {
 }
 
 /** ヘッダーのナビに並べる画面。ページを増やしたらここへ足す。 */
-export type NavKey = "status" | "knowledge" | "features";
+export type NavKey = "map" | "features";
 
 const NAV: { key: NavKey; href: string; label: string }[] = [
-  { key: "status", href: "/status", label: "動作状況" },
-  { key: "knowledge", href: "/knowledge", label: "共通知識" },
+  { key: "map", href: "/map", label: "アプリ連携" },
   { key: "features", href: "/features", label: "機能一覧" },
 ];
 
 /**
- * ヘッダーのナビ。**3つの画面が同じ並びを持つよう、定義はここ1か所にする。**
+ * ヘッダーのナビ。**どの画面も同じ並びを持つよう、定義はここ1か所にする。**
  * 各ページが自前で配列を書いていたときは、画面を足すたびに書き漏らしが出ていた。
  */
 export function siteNav(current: NavKey): NavItem[] {
@@ -292,17 +261,10 @@ ${header}${main}${footer}
 `;
 }
 
-/** 状態のバッジ。**色だけに頼らず、語でも状態が分かるようにする。** */
-export function pill(tone: Tone, label: string): string {
-  return `<span class="pill ${tone}">${escapeHtml(label)}</span>`;
-}
-
 export interface CardOptions {
   title: string;
   /** 見出しの脇の小さな補足（件数など）。 */
   meta?: string;
-  /** 見出しの右端のバッジ。 */
-  status?: string;
   body: string;
   /** 2列レイアウトのときに1行ぶん使う。 */
   wide?: boolean;
@@ -311,40 +273,6 @@ export interface CardOptions {
 export function card(options: CardOptions): string {
   const meta = options.meta ? `<span class="n">${escapeHtml(options.meta)}</span>` : "";
   return `<section class="card${options.wide ? " wide" : ""}">
-<div class="card-head"><h2>${escapeHtml(options.title)}</h2>${meta}${options.status ?? ""}</div>
+<div class="card-head"><h2>${escapeHtml(options.title)}</h2>${meta}</div>
 <div class="card-body">${options.body}</div></section>`;
-}
-
-/**
- * 定義リスト。値は**HTMLとして扱う**（バッジを混ぜるため）ので、
- * 呼び出し側で `escapeHtml()` を通してから渡すこと。
- */
-export function defList(rows: [label: string, valueHtml: string][]): string {
-  return `<dl>${rows
-    .map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${value}</dd>`)
-    .join("")}</dl>`;
-}
-
-/**
- * 表。セルも `defList` と同じくHTMLとして扱う。
- *
- * `rowClasses` は行ごとのclass（同じ添字で対応させる）。CSSだけで一部の行を畳むために使う。
- */
-export function table(
-  headers: string[],
-  rows: string[][],
-  rowClasses: (string | undefined)[] = [],
-): string {
-  const head = headers.length
-    ? `<thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>`
-    : "";
-  const body = rows
-    .map((cells, index) => {
-      const className = rowClasses[index];
-      return `<tr${className ? ` class="${escapeHtml(className)}"` : ""}>${cells
-        .map((cell) => `<td>${cell}</td>`)
-        .join("")}</tr>`;
-    })
-    .join("");
-  return `<div class="tblwrap"><table>${head}<tbody>${body}</tbody></table></div>`;
 }

@@ -113,7 +113,7 @@ function normalizeRegistered(raw: unknown): ZaimWebPaymentRegistered | null {
 }
 
 /**
- * 受け口が生きているかだけを確かめる（動作状況ページの「疎通を確認する」から呼ぶ）。
+ * 受け口が生きているかだけを確かめる（ops-dashboard の疎通確認 `POST /api/status/checks` から呼ぶ）。
  *
  * **配線が効いているかを確かめる手段がこれしか無い。** 実際に登録して確かめると本物の明細が
  * でき、この経路には削除が無いので人がZaimの画面から手で消すことになる。
