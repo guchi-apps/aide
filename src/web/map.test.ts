@@ -1,49 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assetManagerImportPaymentTool } from "../mcp/tools/asset-manager.ts";
-import { dailyBriefingTool } from "../mcp/tools/briefing.ts";
-import { claudeSessionsTool } from "../mcp/tools/claude-sessions.ts";
-import { createEventTool } from "../mcp/tools/create-event.ts";
-import { devStatusTool } from "../mcp/tools/dev.ts";
-import { createIssueTool } from "../mcp/tools/issue.ts";
-import { moneySummaryTool } from "../mcp/tools/money.ts";
-import {
-  createNotificationTool,
-  createTaskCandidateTool,
-  saveDailyBriefTool,
-} from "../mcp/tools/notifications.ts";
-import { opsStatusTool } from "../mcp/tools/ops.ts";
-import { pingTool } from "../mcp/tools/ping.ts";
-import { researchDeskImportWeeklyReportTool } from "../mcp/tools/research-desk.ts";
-import { roomStatusTool } from "../mcp/tools/room.ts";
-import { scheduleTool } from "../mcp/tools/schedule.ts";
-import { zaimMasterTool, zaimPaymentTool } from "../mcp/tools/zaim.ts";
+import { buildToolRegistry } from "../mcp/catalog.ts";
 import { ENDPOINTS } from "./features.ts";
 import { CALLERS, GROUPS, renderMapPage, renderNarrowMap, renderWideMap } from "./map.ts";
 
-/**
- * `src/server.ts` が登録しているMCPツール。**ツールを足したらここにも足す**
- * （足し忘れると、下の「全ツールが図のどこかに載っている」が確かめられなくなる）。
- */
-const REGISTERED_TOOLS = [
-  pingTool,
-  moneySummaryTool,
-  opsStatusTool,
-  roomStatusTool,
-  dailyBriefingTool,
-  scheduleTool,
-  createEventTool,
-  devStatusTool,
-  createIssueTool,
-  claudeSessionsTool,
-  zaimMasterTool,
-  zaimPaymentTool,
-  assetManagerImportPaymentTool,
-  researchDeskImportWeeklyReportTool,
-  createNotificationTool,
-  createTaskCandidateTool,
-  saveDailyBriefTool,
-].map((tool) => tool.name);
+/** `src/server.ts` と同じ登録簿。ツールを足せば、ここも自動で追従する。 */
+const REGISTERED_TOOLS = buildToolRegistry()
+  .list()
+  .map((tool) => tool.name);
 
 const ALL_USES = [...CALLERS.flatMap((c) => c.uses), ...GROUPS.flatMap((g) => g.apps.flatMap((a) => a.uses))];
 

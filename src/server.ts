@@ -23,25 +23,7 @@ import { logRedirectCheck } from "./auth/redirect-check.ts";
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { recordMcpAuthFailure } from "./mcp/access-log.ts";
 import { McpTransport } from "./mcp/transport.ts";
-import { ToolRegistry } from "./mcp/registry.ts";
-import { dailyBriefingTool } from "./mcp/tools/briefing.ts";
-import { claudeSessionsTool } from "./mcp/tools/claude-sessions.ts";
-import { createEventTool } from "./mcp/tools/create-event.ts";
-import { devStatusTool } from "./mcp/tools/dev.ts";
-import { createIssueTool } from "./mcp/tools/issue.ts";
-import { moneySummaryTool } from "./mcp/tools/money.ts";
-import {
-  createNotificationTool,
-  createTaskCandidateTool,
-  saveDailyBriefTool,
-} from "./mcp/tools/notifications.ts";
-import { opsStatusTool } from "./mcp/tools/ops.ts";
-import { pingTool } from "./mcp/tools/ping.ts";
-import { roomStatusTool } from "./mcp/tools/room.ts";
-import { scheduleTool } from "./mcp/tools/schedule.ts";
-import { zaimMasterTool, zaimPaymentTool } from "./mcp/tools/zaim.ts";
-import { assetManagerImportPaymentTool } from "./mcp/tools/asset-manager.ts";
-import { researchDeskImportWeeklyReportTool } from "./mcp/tools/research-desk.ts";
+import { buildToolRegistry } from "./mcp/catalog.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
@@ -71,27 +53,7 @@ const authConfig = loadAuthConfig();
 // 半端に設定されている場合はここで例外になる（許可メールだけ抜けた状態を通さないため）。
 const supabaseAuthConfig = loadSupabaseAuthConfig();
 
-const registry = new ToolRegistry();
-registry.register(pingTool);
-registry.register(moneySummaryTool);
-registry.register(opsStatusTool);
-registry.register(roomStatusTool);
-registry.register(dailyBriefingTool);
-registry.register(scheduleTool);
-// 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
-registry.register(createEventTool);
-registry.register(devStatusTool);
-registry.register(createIssueTool);
-registry.register(claudeSessionsTool);
-// Zaimへの支出登録（#135）。**読み取り（候補の一覧）と書き込み（登録）を分けている。**
-// 1本に畳むと、Claude Code側で「常に許可」にしたときに書き込みまで素通しになる。
-registry.register(zaimMasterTool);
-registry.register(zaimPaymentTool);
-registry.register(assetManagerImportPaymentTool);
-registry.register(researchDeskImportWeeklyReportTool);
-registry.register(createNotificationTool);
-registry.register(createTaskCandidateTool);
-registry.register(saveDailyBriefTool);
+const registry = buildToolRegistry();
 
 // ops-dashboard向けの動作状況JSON API（#276）。
 const statusApiOptions: StatusApiOptions = {

@@ -286,6 +286,7 @@ src/
   mcp/
     transport.ts       Streamable HTTP transport
     registry.ts        ツール登録簿
+    catalog.ts         登録簿の組み立て（MCPに出すツールはここへ足す）
     tools/             MCPツール
   api/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
@@ -454,7 +455,7 @@ Androidのアダプティブアイコンはそれより外を切り落として�
 HTTPエンドポイント・コネクタ・workerに散っていて、機械的に集めても「どのアプリか」までは
 分からない。代わりに、宣言したツール名が登録簿に実在すること・パスが機能一覧に載っていること・
 登録したツールがどれかの使う側に載っていることを `src/web/map.test.ts` が確かめる。
-**MCPツールやコネクタを足したら、ここへも足す。**
+**MCPツールやコネクタを足したら、ここへも足す**（ツールの登録は `src/mcp/catalog.ts`）。
 
 図はサーバー側でSVGとして組み立て、JavaScriptも描画ライブラリも使わない。図のアプリは
 下の一覧へのページ内リンクになっている。
