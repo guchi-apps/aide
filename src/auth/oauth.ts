@@ -51,15 +51,71 @@ function json(res: ServerResponse, status: number, body: unknown): void {
     .end(JSON.stringify(body));
 }
 
-async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+/**
+ * ボディの上限。**3つの口はどれも認証前に公開されている**（登録・認可・トークン）。
+ * 際限なく受け取ると、本番のヒープ（96MB）を大きなPOST1本で使い切らせられる。
+ * 動的登録（RFC 7591）のメタデータでも数百バイトなので、数KBあれば足りる。
+ */
+export const MAX_BODY_BYTES = 8192;
+
+/**
+ * リクエストボディをフォームとして読む。読めなかったときは応答を書き終えて `null` を返す。
+ *
+ * - 上限（`MAX_BODY_BYTES`）を超えたら 413。**超えた時点で読むのをやめる**ので、
+ *   巨大なボディでもメモリに載るのは上限ぶんまで。
+ * - `application/json` が不正なJSON・オブジェクトでない値のときは `invalid_request` の400。
+ *   例外にすると `server.ts` の未処理の例外として500になる。
+ */
+export async function readForm(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<URLSearchParams | null> {
+  const tooLarge = (): null => {
+    // 続きを読み捨てずに接続ごと閉じる。残りのボディを受け取り続ける理由が無い。
+    res
+      .writeHead(413, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+        Connection: "close",
+      })
+      .end(
+        JSON.stringify({
+          error: "invalid_request",
+          error_description: `リクエストが大きすぎます（上限 ${MAX_BODY_BYTES} バイト）`,
+        }),
+      );
+    return null;
+  };
+
+  // 宣言された長さが上限を超えているなら、1バイトも読まずに断る。
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return tooLarge();
+
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const raw = Buffer.concat(chunks).toString("utf8");
-  const type = String(req.headers["content-type"] ?? "");
-  if (type.includes("application/json")) {
-    return new URLSearchParams(Object.entries(JSON.parse(raw) as Record<string, string>));
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    // Content-Length を偽る・chunked で送る場合に備えて、読みながら数える。
+    if (size > MAX_BODY_BYTES) return tooLarge();
+    chunks.push(chunk as Buffer);
   }
-  return new URLSearchParams(raw);
+  const raw = Buffer.concat(chunks).toString("utf8");
+
+  const type = String(req.headers["content-type"] ?? "");
+  if (!type.includes("application/json")) return new URLSearchParams(raw);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    json(res, 400, { error: "invalid_request", error_description: "JSONのオブジェクトが必要です" });
+    return null;
+  }
+  return new URLSearchParams(Object.entries(parsed as Record<string, string>));
 }
 
 /** PKCE（S256）の検証。plain は受け付けない。 */
@@ -98,7 +154,8 @@ export async function handleRegister(req: IncomingMessage, res: ServerResponse):
     json(res, 429, { error: "too_many_requests", error_description: "登録の回数制限を超えました" });
     return;
   }
-  const form = await readForm(req);
+  const form = await readForm(req, res);
+  if (!form) return;
   const redirectUris = form.getAll("redirect_uris");
   // JSONで {"redirect_uris": [...]} と来る場合、URLSearchParams化でカンマ連結された1件になる。
   const uris = (redirectUris.length === 1 ? redirectUris[0]!.split(",") : redirectUris)
@@ -201,7 +258,8 @@ export async function handleAuthorize(
     return;
   }
 
-  const form = await readForm(req);
+  const form = await readForm(req, res);
+  if (!form) return;
   if (config.enabled && !verifyPassword(form.get("password") ?? "", config.password!)) {
     recordFailure(key);
     console.warn(`[auth] 認可失敗: client=${client.clientName} from=${key}`);
@@ -234,7 +292,8 @@ export async function handleAuthorize(
 // ---- トークンエンドポイント ----
 
 export async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const form = await readForm(req);
+  const form = await readForm(req, res);
+  if (!form) return;
   const grantType = form.get("grant_type");
 
   if (grantType === "refresh_token") {
