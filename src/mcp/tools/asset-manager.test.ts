@@ -48,20 +48,77 @@ describe("asset_manager_import_payment", () => {
     }
   });
 
-  it("HTTPエラーでもレスポンス本文を欠落させない", async () => {
+  it("HTTPエラーは isError: true にしつつ、レスポンス本文を欠落させない", async () => {
     process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
     process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
     const fetchMock = mock.method(globalThis, "fetch", async () =>
       new Response(JSON.stringify({ status: "error", reason: "Unauthorized", receiptId: "kept" }), { status: 401 }),
     );
     try {
-      assert.deepEqual(parsed(await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-2", confidence: 0.2 }, { sessionId: null })), {
+      const result = await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-2", confidence: 0.2 }, { sessionId: null });
+      assert.equal(result.isError, true);
+      assert.deepEqual(parsed(result), {
         status: "error",
         reason: "Unauthorized",
         receiptId: "kept",
+        httpStatus: 401,
       });
     } finally {
       fetchMock.mock.restore();
+    }
+  });
+
+  it("本文のstatusが業務上の値でも、2xx以外なら status: error にそろえる", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      new Response(JSON.stringify({ status: "imported", receiptId: "r-1" }), { status: 500 }),
+    );
+    try {
+      const result = await assetManagerImportPaymentTool.handler({ gmailMessageId: "message-5xx-json", confidence: 0.9 }, { sessionId: null });
+      assert.equal(result.isError, true);
+      assert.deepEqual(parsed(result), {
+        status: "error",
+        reason: "Asset ManagerがHTTP 500を返しました",
+        receiptId: "r-1",
+        httpStatus: 500,
+      });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("5xxのHTMLや空本文でも失敗として返し、本文は載せない", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    for (const [status, body] of [[502, "<html><body>Bad Gateway</body></html>"], [503, ""]] as const) {
+      const fetchMock = mock.method(globalThis, "fetch", async () => new Response(body, { status }));
+      try {
+        const result = await assetManagerImportPaymentTool.handler({ gmailMessageId: `message-${status}`, confidence: 0.9 }, { sessionId: null });
+        assert.equal(result.isError, true);
+        assert.deepEqual(parsed(result), {
+          status: "error",
+          reason: `Asset ManagerがHTTP ${status}を返しました`,
+          httpStatus: status,
+        });
+      } finally {
+        fetchMock.mock.restore();
+      }
+    }
+  });
+
+  it("業務上のduplicateやpendingReviewは2xxで返るので isError にしない", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    for (const status of ["duplicate", "pendingReview"]) {
+      const fetchMock = mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ status, receiptId: "r-2" }), { status: 200 }));
+      try {
+        const result = await assetManagerImportPaymentTool.handler({ gmailMessageId: `message-${status}`, confidence: 0.9 }, { sessionId: null });
+        assert.equal(result.isError, false);
+        assert.deepEqual(parsed(result), { status, receiptId: "r-2" });
+      } finally {
+        fetchMock.mock.restore();
+      }
     }
   });
 
