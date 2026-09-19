@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
-import { accountAction, currentSession, renderLoginPage, type LoginOptions } from "./login.ts";
+import { accountAction, handleGatedPage, type LoginOptions } from "./login.ts";
 
 /**
  * アプリ連携の画面（`GET /map`。#328）。
@@ -8,8 +8,9 @@ import { accountAction, currentSession, renderLoginPage, type LoginOptions } fro
  * AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを1枚の図で示す。
  * 機能一覧（`/features`）は文字の一覧で、「何と何が繋がっているか」が読み取れなかった。
  *
- * **ログインの内側に置く。** 載せるのはアプリの名前と繋がり方だけで実データは無いが、
- * 利用者がどのアプリを使っているかの一覧そのものが個人の情報にあたる（Issueでの指定）。
+ * **ログインの内側に置く（機能一覧 `/features` も同じ。#332）。** 載せるのはアプリの名前と繋がり方
+ * だけで実データは無いが、利用者がどのアプリを使っているかの一覧そのものが個人の情報にあたる
+ * （Issueでの指定）。
  *
  * **中身は下の静的な宣言（`CALLERS` / `GROUPS`）。** 繋がりはコードのあちこち（MCPツール・
  * HTTPエンドポイント・コネクタ・worker）に散っていて、機械的に集めても「どのアプリか」までは
@@ -452,12 +453,10 @@ ${GROUPS.map(groupCard).join("\n")}
 }
 
 export async function handleMapPage(req: IncomingMessage, res: ServerResponse, options: LoginOptions): Promise<void> {
-  const session = await currentSession(req, options);
-  const page = session
-    ? renderMapPage({
-        headerAction: accountAction(session, options.authConfig.enabled),
-        authDisabled: !options.authConfig.enabled,
-      })
-    : renderLoginPage({ google: options.supabase !== null, next: "/map" });
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).end(page);
+  await handleGatedPage(req, res, options, "/map", (session) =>
+    renderMapPage({
+      headerAction: accountAction(session, options.authConfig.enabled),
+      authDisabled: !options.authConfig.enabled,
+    }),
+  );
 }

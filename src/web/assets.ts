@@ -54,8 +54,9 @@ async function readIcon(file: string): Promise<Buffer> {
 /**
  * PWAのマニフェスト。ホーム画面へ追加したときの名前とアイコンになる。
  *
- * `start_url` は機能一覧ページにしている。AIDEにはまだ人間が開く画面がここしか無く、
- * `/` は404を返すため。
+ * `start_url` は機能一覧ページにしている。`/` は404を返すため。機能一覧はログインの内側にあり
+ * （#332）、ホーム画面から開いたときに未ログインならログイン画面が出て、ログイン後に
+ * `/features` へ戻る。戻り先が変わらないので、`/map` へ振り替える必要は無い。
  */
 export function manifest(): unknown {
   const icons = ICONS.filter((icon) => icon.size >= 192).map((icon) => ({

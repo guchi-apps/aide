@@ -87,14 +87,8 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // アイコンとPWAマニフェスト。公開してよい静的ファイルなので認証は通さない。
   if (await handleAsset(req.method, path, res)) return;
 
-  // 機能一覧。何が使えるかを載せるだけで実データは返さないため、認証は通さない。
-  if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {
-    handleFeaturesPage(res, registry, baseUrl);
-    return;
-  }
-
-  // ---- アプリ連携の画面（#328） ----
-  // **機能一覧とは公開範囲が逆で、ログインの内側に置く。**
+  // ---- 画面（アプリ連携 #328・機能一覧 #332） ----
+  // **どちらもログインの内側に置く。** 公開してよい静的ファイル（上のアイコン等）とは扱いが違う。
   // 認証はMCPのOAuthではなく画面用のCookie（src/web/session.ts）。
   // Supabaseが設定されていれば許可メールだけのGoogleログイン、無ければパスワード。
   const loginOptions: LoginOptions = {
@@ -105,6 +99,10 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   };
   if (path === "/map" && (req.method === "GET" || req.method === "HEAD")) {
     await handleMapPage(req, res, loginOptions);
+    return;
+  }
+  if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleFeaturesPage(req, res, loginOptions);
     return;
   }
   // 以前あった動作状況（→ ops-dashboard の「AIDE」タブ）と共通知識（→ IssueDeck）の画面。

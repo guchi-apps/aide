@@ -25,6 +25,19 @@ describe("ログイン画面", () => {
     assert.ok(renderLoginPage({ google: true, next: "/features" }).includes("next=%2Ffeatures"));
   });
 
+  it("見出しは開こうとした画面の名前になる", () => {
+    assert.ok(renderLoginPage({ google: true, next: "/features" }).includes("<h1>機能一覧を見る</h1>"));
+    assert.ok(renderLoginPage({ google: false, next: "/features" }).includes("<h1>機能一覧を見る</h1>"));
+    assert.ok(renderLoginPage({ google: true, next: "/map" }).includes("<h1>アプリ連携を見る</h1>"));
+    // 戻り先が無い・知らない値のときは既定の画面（アプリ連携）の名前になる。
+    assert.ok(renderLoginPage({ google: true }).includes("<h1>アプリ連携を見る</h1>"));
+    assert.ok(renderLoginPage({ google: true, next: "https://example.com/" }).includes("<h1>アプリ連携を見る</h1>"));
+  });
+
+  it("機能一覧はログイン後の戻り先として受け付ける", () => {
+    assert.equal(safeLanding("/features"), "/features");
+  });
+
   it("知らない戻り先は既定へ落とす", () => {
     // 外部URLをそのまま Location に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
     const html = renderLoginPage({ google: false, next: "https://example.com/" });
