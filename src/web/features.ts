@@ -15,8 +15,9 @@ import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
  * - キャッシュの中身・取得時刻などの実データや稼働状況
  * - 環境変数の値、シークレットの設定有無、認証の有効・無効
  *
- * それらを見たい場合は動作状況ページ（`/status`）が答える。**あちらは認証の内側にある。**
- * 見た目は共通（`src/web/layout.ts`）だが、公開範囲は混ぜない。
+ * 稼働状況は ops-dashboard の「AIDE」タブ（`/api/status` を読む）が答える。
+ * アプリ連携の画面（`/map`）は見た目は共通（`src/web/layout.ts`）だがログインの内側にあり、
+ * 公開範囲は混ぜない。
  *
  * MCPツールは登録簿（`src/mcp/registry.ts`）から自動生成するため、ツールを増やせば
  * 何もしなくてもここに出る。HTTPエンドポイントだけは静的な宣言（`ENDPOINTS`）なので、
@@ -54,28 +55,22 @@ const ATTRIBUTION_HTML =
   "を利用しています。";
 
 /** `src/server.ts` が処理するHTTPエンドポイント。ルートを増やしたらここも足す。 */
-const ENDPOINTS: FeatureItem[] = [
+export const ENDPOINTS: FeatureItem[] = [
   {
     name: "/mcp",
     meta: "POST / GET / DELETE",
     description: "MCPサーバー本体（Streamable HTTP）。OAuthのアクセストークンが要る。",
   },
   {
-    name: "/status",
+    name: "/map",
     meta: "GET",
     description:
-      "動作状況の画面。ジョブの成否・キャッシュの鮮度・接続先の設定・MCPへのアクセスの記録を人間向けに表示する。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
-  },
-  {
-    name: "/knowledge",
-    meta: "GET",
-    description:
-      "共通知識の画面。guchi-apps/docs に入っている共有知識と、各リポジトリの知見メモがどう採用・却下されたかを一覧する。動作状況の画面と同じログインが要る。",
+      "アプリ連携の画面。AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを図で示す。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
   },
   {
     name: "/status/auth/start",
     meta: "GET",
-    description: "動作状況の画面のGoogleログインを始める。Supabase経由でGoogleへ送り出す。",
+    description: "画面のGoogleログインを始める。Supabase経由でGoogleへ送り出す。",
   },
   {
     name: "/status/auth/callback",
@@ -149,13 +144,13 @@ const ENDPOINTS: FeatureItem[] = [
     name: "/api/status",
     meta: "GET",
     description:
-      "ops-dashboard向けの動作状況API。/status 画面と同じ判定（health）とMCPツール名一覧（tools）をJSONで返す。動作状況専用の共有シークレットで認証する。",
+      "ops-dashboard向けの動作状況API。ジョブ・キャッシュ・接続先・MCPアクセスの判定（health）とMCPツール名一覧（tools）をJSONで返す。動作状況専用の共有シークレットで認証する。",
   },
   {
     name: "/api/status/checks",
     meta: "POST",
     description:
-      "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/status/checks（ブラウザ向け）と同じ判定を使う。",
+      "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/api/status と同じ共有シークレットで認証する。",
   },
   {
     name: "/api/zaim/payment",
@@ -186,6 +181,12 @@ const ENDPOINTS: FeatureItem[] = [
     meta: "POST",
     description:
       "Research Deskのサーバーからmultipart/form-dataで届く画像ZIPを、AIDEが保持するGmail資格情報で社用メールへ送信する。件名は「[画像] {title}」固定、宛先・BCCも環境変数で固定する。専用の共有シークレットで認証し、idempotencyKeyで二重送信を防ぐ。",
+  },
+  {
+    name: "/api/news-mail/send",
+    meta: "POST",
+    description:
+      "Research Deskのサーバーから届く業界ニュース週報（HTMLとテキストの本文）を、画像メールと同じGmail資格情報で社用メールへ送信する。宛先・送信元は環境変数で固定し、画像メールとは別の共有シークレットで認証する。",
   },
 ];
 
@@ -253,7 +254,7 @@ ${sections.map(renderSection).join("\n")}
     title: "AIDE の機能一覧",
     nav: siteNav("features"),
     body,
-    footer: `このページには機能の一覧だけを載せています（実データ・設定値は含みません）。稼働状況は /status で確認できます。<br>${ATTRIBUTION_HTML}`,
+    footer: `このページには機能の一覧だけを載せています（実データ・設定値は含みません）。各アプリとのつながりはログイン後の「アプリ連携」で図にしています。<br>${ATTRIBUTION_HTML}`,
   });
 }
 

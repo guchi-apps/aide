@@ -44,16 +44,14 @@ import { assetManagerImportPaymentTool } from "./mcp/tools/asset-manager.ts";
 import { researchDeskImportWeeklyReportTool } from "./mcp/tools/research-desk.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
-import { handleKnowledgePage } from "./web/knowledge.ts";
 import {
   handleStatusAuthCallback,
   handleStatusAuthStart,
-  handleStatusChecks,
   handleStatusLogin,
   handleStatusLogout,
-  handleStatusPage,
-  type StatusOptions,
-} from "./web/status.ts";
+  type LoginOptions,
+} from "./web/login.ts";
+import { handleMapPage } from "./web/map.ts";
 
 /**
  * AIDE のエントリポイント。
@@ -69,7 +67,7 @@ const HOST = process.env["HOST"] ?? "127.0.0.1";
 // 起動時に読んで、設定不備ならここで落とす。
 // リクエストが来て初めて「認証が無効だった」と気づく事態を避ける。
 const authConfig = loadAuthConfig();
-// 動作状況ページのGoogleログイン。未設定なら null で、画面は従来のパスワードになる。
+// 画面のGoogleログイン。未設定なら null で、画面は従来のパスワードになる。
 // 半端に設定されている場合はここで例外になる（許可メールだけ抜けた状態を通さないため）。
 const supabaseAuthConfig = loadSupabaseAuthConfig();
 
@@ -95,7 +93,7 @@ registry.register(createNotificationTool);
 registry.register(createTaskCandidateTool);
 registry.register(saveDailyBriefTool);
 
-// ops-dashboard向けの動作状況JSON API（#276）。/status 画面と同じ入力を buildHealth() へ渡す。
+// ops-dashboard向けの動作状況JSON API（#276）。
 const statusApiOptions: StatusApiOptions = {
   authConfig,
   supabase: supabaseAuthConfig,
@@ -133,46 +131,42 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
-  // ---- 動作状況の画面 ----
-  // **機能一覧とは公開範囲が逆で、実データを載せるためログインの内側に置く。**
+  // ---- アプリ連携の画面（#328） ----
+  // **機能一覧とは公開範囲が逆で、ログインの内側に置く。**
   // 認証はMCPのOAuthではなく画面用のCookie（src/web/session.ts）。
   // Supabaseが設定されていれば許可メールだけのGoogleログイン、無ければパスワード。
-  const statusOptions: StatusOptions = {
+  const loginOptions: LoginOptions = {
     authConfig,
     supabase: supabaseAuthConfig,
     baseUrl,
     registry,
   };
-  if (path === "/status" && (req.method === "GET" || req.method === "HEAD")) {
-    await handleStatusPage(req, res, statusOptions);
+  if (path === "/map" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleMapPage(req, res, loginOptions);
     return;
   }
+  // 以前あった動作状況（→ ops-dashboard の「AIDE」タブ）と共通知識（→ IssueDeck）の画面。
+  // ホーム画面のショートカットやブックマークから来た人を、404ではなく今の画面へ送る。
+  if ((path === "/status" || path === "/knowledge") && (req.method === "GET" || req.method === "HEAD")) {
+    res.writeHead(302, { Location: "/map", "Cache-Control": "no-store" }).end();
+    return;
+  }
+  // ログインの受け口。**パスが /status/... のままなのは、Supabaseに登録した戻り先を変えないため**
+  // （src/web/login.ts）。
   if (path === "/status/auth/start" && (req.method === "GET" || req.method === "HEAD")) {
-    await handleStatusAuthStart(req, res, url, statusOptions);
+    await handleStatusAuthStart(req, res, url, loginOptions);
     return;
   }
   if (path === CALLBACK_PATH && (req.method === "GET" || req.method === "HEAD")) {
-    await handleStatusAuthCallback(req, res, url, statusOptions);
+    await handleStatusAuthCallback(req, res, url, loginOptions);
     return;
   }
   if (path === "/status/login" && req.method === "POST") {
-    await handleStatusLogin(req, res, statusOptions);
+    await handleStatusLogin(req, res, loginOptions);
     return;
   }
   if (path === "/status/logout" && req.method === "POST") {
     handleStatusLogout(req, res);
-    return;
-  }
-  // 共通知識の画面（#161）。動作状況と同じログインの内側に置く。
-  // **こちらは開くとGitHubへ問い合わせる。** 取得結果そのものが中身なので避けようがなく、
-  // 代わりに数分キャッシュしている（src/web/knowledge.ts）。
-  if (path === "/knowledge" && (req.method === "GET" || req.method === "HEAD")) {
-    await handleKnowledgePage(req, res, url, statusOptions);
-    return;
-  }
-  // 疎通確認。押したときだけ外部のコネクタへ問い合わせる。
-  if (path === "/status/checks" && req.method === "POST") {
-    await handleStatusChecks(req, res, statusOptions);
     return;
   }
 
@@ -228,7 +222,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
 
   // ---- ops-dashboard向けの動作状況API（#276） ----
-  // /status（ブラウザ向け）と同じ buildHealth() をサーバー間で読める形で出す。
+  // 動作状況の判定 buildHealth() をサーバー間で読める形で出す。人が見るのは ops-dashboard の画面。
   // AIDE_READ_SECRET とは別のシークレット（AIDE_STATUS_SECRET）で認証する。
   if (path === "/api/status") {
     await handleStatusApi(req, res, statusApiOptions);
@@ -288,7 +282,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     if (req.method !== "OPTIONS" && !(await requireBearer(req, res, baseUrl))) {
       // **弾いたアクセスもここで記録する。** 401はこの行で終わり、transport まで届かない。
       // 記録しないと、Claudeのトークンが切れて呼び出しが全部落ちている状態と、
-      // 誰も繋いでいない状態が動作状況ページで区別できない（#116）。
+      // 誰も繋いでいない状態が動作状況（ops-dashboard）で区別できない（#116）。
       void recordMcpAuthFailure({
         userAgent: req.headers["user-agent"],
         ms: Date.now() - startedAt,

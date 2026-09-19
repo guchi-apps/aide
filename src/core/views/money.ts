@@ -15,7 +15,7 @@ import type { ZaimOnlineAccount, ZaimSnapshot } from "../connectors/zaim/types.t
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 
 /**
- * これを超えたら鮮度が怪しいとみなす。動作状況ページ（`/status`）も同じ基準で判定する。
+ * これを超えたら鮮度が怪しいとみなす。動作状況（`/api/status`）も同じ基準で判定する。
  *
  * 巡回（`zaim-sync`）は12時間ごとに1日2回なので、**1回飛んだ時点で怪しいと言える**
  * 12時間＋実行のずれと再試行のぶんを見て18時間にしている（#165。日次だった頃は24時間）。

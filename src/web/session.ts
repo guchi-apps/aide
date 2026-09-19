@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { DATA_DIR } from "../core/paths.ts";
 
 /**
- * 動作状況ページ（`/status`）のログイン状態。
+ * 画面（アプリ連携 `/map`）のログイン状態。
  *
  * **OAuth（`src/auth/oauth.ts`）とは別系統。** あちらはClaudeアプリという機械のための認可で、
  * 動的クライアント登録・PKCE・トークンの発行を伴う。こちらは自分がブラウザで画面を開くための
@@ -171,10 +171,10 @@ export interface Handshake {
   state: string;
   verifier: string;
   /**
-   * ログイン後に戻る画面のパス。空なら既定（`/status`）へ戻る。
+   * ログイン後に戻る画面のパス。空なら既定（`/map`）へ戻る。
    *
    * **往復のあいだサーバー側に何も置かない方針は変えない**ので、戻り先も署名付きCookieへ
-   * 載せる。行き先の検証は受け取り側（`src/web/status.ts`）が行う。署名が通っても、
+   * 載せる。行き先の検証は受け取り側（`src/web/login.ts`）が行う。署名が通っても、
    * 既知の画面でなければ既定へ落とす（署名は「AIDEが書いた」ことしか保証しない）。
    */
   next?: string;

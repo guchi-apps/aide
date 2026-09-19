@@ -24,7 +24,7 @@ function requestWith(cookie: string | undefined): IncomingMessage {
   return { headers: cookie === undefined ? {} : { cookie } } as IncomingMessage;
 }
 
-describe("動作状況ページのログイン状態", () => {
+describe("画面のログイン状態", () => {
   it("発行した値は同じ鍵で通り、誰でログインしたかが読める", () => {
     assert.deepEqual(readSession(issueSession(KEY, "me@example.com"), KEY), {
       email: "me@example.com",
@@ -103,8 +103,8 @@ describe("Googleログインの往復", () => {
 
   it("ログイン後の戻り先を持ち回れる", () => {
     // `/` を含むパスをそのまま並べると区切りと混ざるため、base64url にしてから載せている。
-    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/knowledge" });
-    assert.equal(readHandshake(value, KEY)?.next, "/knowledge");
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/map" });
+    assert.equal(readHandshake(value, KEY)?.next, "/map");
   });
 
   it("書き換えた値は通らない", () => {
@@ -114,7 +114,7 @@ describe("Googleログインの往復", () => {
   });
 
   it("戻り先だけを書き換えた値も通らない", () => {
-    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/knowledge" });
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/map" });
     const [expiresAt, state, verifier, , signature] = value.split(".");
     const forged = Buffer.from("https://example.com", "utf8").toString("base64url");
     assert.equal(readHandshake([expiresAt, state, verifier, forged, signature].join("."), KEY), null);

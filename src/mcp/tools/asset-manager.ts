@@ -37,7 +37,7 @@ function invalid(reason: string): ToolResult {
  * 業務上の `duplicate` / `pendingReview` は2xxで返ってくるため、2xx以外はシークレットの不一致（401）や
  * Asset Manager 側の障害（Apacheが返す5xxのHTML）など、連携そのものの失敗にあたる。
  * **ここだけ `isError: true` にする。** MCPアクセスの記録（`transport.ts` の `outcome()`）は
- * `isError` しか見ないため、`false` のままだと失敗が続いても `/status` から気づけない（#308）。
+ * `isError` しか見ないため、`false` のままだと失敗が続いても 動作状況（ops-dashboard）から気づけない（#308）。
  * 本文が JSON のオブジェクトなら項目を残し、`status` だけを `error` にそろえる。
  * JSON でない本文（5xxのHTMLなど）は長く、読んでも役に立たないので載せない。
  */
