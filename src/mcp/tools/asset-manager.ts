@@ -154,7 +154,8 @@ export const assetManagerImportPaymentTool: Tool = {
     "Asset Managerが2xx以外を返したときは、isError付きで status: error・reason・httpStatus を返す。" +
     "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。" +
     "ドル建てなど外貨建ての請求メールでは、originalAmount（外貨の元の金額）と originalCurrency（通貨コード）を必ず付け、" +
-    "amount には円へ換算した金額を入れる（換算根拠は amountNote に書く）。外貨建ての明細は概算として扱われ、Zaimへ自動登録されない。",
+    "amount には円へ換算して整数へ丸めた金額を入れる（amount は整数のみ。換算レートと丸めは amountNote に書く）。" +
+    "外貨建ての明細は概算として扱われ、Zaimへ自動登録されない。",
   inputSchema: {
     type: "object",
     properties: {
@@ -173,7 +174,9 @@ export const assetManagerImportPaymentTool: Tool = {
       amount: {
         type: "integer",
         minimum: 1,
-        description: "円建ての金額。外貨建ての請求メールでは円へ換算した金額を入れ、元の金額は originalAmount / originalCurrency に渡す。",
+        description:
+          "円建ての金額（整数のみ。小数は受け付けない）。外貨建ての請求メールでは円へ換算して整数へ丸めた金額を入れ、" +
+          "元の金額は originalAmount / originalCurrency に渡し、換算レートと丸めは amountNote に書く。",
       },
       amountApproximate: {
         type: "boolean",

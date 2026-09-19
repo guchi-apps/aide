@@ -2305,14 +2305,17 @@ Asset Manager側の冪等性で `duplicate` になる。
 `originalCurrency`（ISO 4217の3文字。例: `USD`）を、AIDEは検証だけして加工せず転送する
 （判定基準はAsset Managerの `validatePaymentImportInput` に揃えてあり、通貨コードの大文字化も
 向こうが行う）。**ドル建てなど外貨の請求メールでは `originalAmount` / `originalCurrency` を必ず
-付け、`amount` には円へ換算した金額を入れる**（ツール説明で指示する。実行時には必須にしない。
-読み取れない請求メールまで弾いてしまうため）。`originalCurrency` が `JPY` 以外なら
+付け、`amount` には円へ換算して整数へ丸めた金額を入れる**（`amount` は整数のみで、丸めずに
+小数を送ると送信前に `status: error` になる。換算レートと丸めは `amountNote` に書く）。
+ツール説明で指示するだけで、`original*` は実行時には必須にしない（読み取れない請求メールまで
+弾いてしまうため）。`originalCurrency` が `JPY` 以外なら
 `amountApproximate` を省いてもAsset Manager側が概算として扱い、概算の明細はZaimへ自動登録されず、
 Asset Managerの突合せタブでカードの連携明細の金額に合わせてから登録する。
 
 **リリース順に注意する。** この受け入れ実装は asset-manager の `develop` にあり、`main` には
-未反映（#341の時点）。AIDEを先に本番へ出すと、外貨の請求が概算として扱われずZaimへ自動登録
-されうるため、**asset-manager の main 反映 → AIDE の本番反映**の順にする。
+未反映（#341の時点）。`main` の受け口は4項目を知らないため、AIDEを先に本番へ出しても400には
+ならず、**項目が黙って捨てられて通常の明細として扱われ**、外貨の請求が概算にならずZaimへ自動登録
+されうる。**asset-manager の main 反映 → AIDE の本番反映**の順にする。
 
 Asset ManagerのレスポンスJSON（`status`、`receiptId`、`zaimMoneyId`、`reason` 等）は加工せず返す。
 認証用の `ZAIM_SYNC_SECRET` は `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` としてAIDE側だけが保持し、

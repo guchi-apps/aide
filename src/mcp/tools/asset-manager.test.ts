@@ -386,6 +386,34 @@ describe("asset_manager_import_payment", () => {
     }
   });
 
+  it("円換算額を丸めずに小数のまま送ると、送信せずにエラーにする", async () => {
+    // 9.99 × 150.2 = 1500.498。amountは整数のみなので、換算後は丸めてから渡す（ツール説明で指示している）。
+    const fetchMock = mock.method(globalThis, "fetch");
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    try {
+      assert.deepEqual(
+        parsed(await assetManagerImportPaymentTool.handler({
+          gmailMessageId: "message-fx-5",
+          confidence: 0.9,
+          amount: 1500.498,
+          originalAmount: 9.99,
+          originalCurrency: "USD",
+        }, { sessionId: null })),
+        { status: "error", reason: "amount は正の整数で指定してください" },
+      );
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("ツール説明で、外貨建てなら original* を必ず付けて円換算額を整数へ丸めるよう指示する", () => {
+    const description = assetManagerImportPaymentTool.description;
+    for (const keyword of ["originalAmount", "originalCurrency", "整数へ丸めた", "amountNote"]) {
+      assert.ok(description.includes(keyword), `説明に「${keyword}」があるはず`);
+    }
+  });
+
   it("入力スキーマに4項目があり、任意項目のままにする", () => {
     const properties = assetManagerImportPaymentTool.inputSchema["properties"] as Record<string, unknown>;
     for (const field of ["amountApproximate", "amountNote", "originalAmount", "originalCurrency"]) {
