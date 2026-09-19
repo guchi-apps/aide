@@ -3,7 +3,10 @@ import { createIssue, DEFAULT_LABELS } from "../../core/connectors/github/write.
 import type { Tool } from "../types.ts";
 
 /**
- * Issueの起票。**AIDEが持つ唯一の書き込みツール**（aide#50）。
+ * Issueの起票（aide#50）。AIDEが最初に持った書き込みツールで、GitHubへの書き込みはこれだけ。
+ * 書き込みツールはほかにもあるので、「唯一」「N個目」といった数え方はここにも
+ * LLMへ渡す description にも書かない（増えるたびに嘘になる）。3条件の判断は README
+ * 「書き込みをどこまで持つか」の表にまとめてある。
  *
  * 外出先でClaudeアプリに思いついたことを話し、そのままIssueにしたい、という要望が起点
  * （guchi-apps/question#15）。Claude Code（端末・GitHub Actions）からは `gh issue create` で
@@ -19,7 +22,7 @@ import type { Tool } from "../types.ts";
 export const createIssueTool: Tool = {
   name: "aide_create_issue",
   description:
-    "guchi-apps のリポジトリに GitHub の Issue を新規作成する。**書き込みを伴う唯一のツール。**" +
+    "guchi-apps のリポジトリに GitHub の Issue を新規作成する。**書き込みを伴うツール。**" +
     "「Issueにしておいて」「起票して」「あとで対応したいので残しておいて」と明示的に頼まれたときだけ呼ぶ。" +
     "会話の中で課題や改善案が出てきただけでは呼ばない（勝手に起票するとIssueが量産される）。" +
     "1回の呼び出しで作れるのは1件だけで、複数の話題があるなら1件ずつ、本当に必要なものに絞ること。" +

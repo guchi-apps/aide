@@ -14,7 +14,7 @@ AIDEがやること:
 - 必要な範囲への**フィルタリング**
 - サービスごとに異なる形式の**共通フォーマットへの整形**
 - 複数ソースを1回の呼び出しに畳んだ**横断ビュー**の提供
-- **他のどこからも塞がっている経路に限った書き込み**（後述。現在はGitHubのIssue起票と、Zaimへの支出登録の2つ）
+- **他のどこからも塞がっている経路に限った書き込み**（後述。持っているものは下の表が正で、ここには数を書かない）
 
 AIDEがやらないこと:
 
@@ -32,7 +32,9 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 2. **読み取りとは別の資格情報を使うこと。** 取得用のトークンに書き込み権限を足さない
 3. **作成だけを持つこと。** 編集・削除・状態の変更は持たない。取り返しのつく操作に限る
 
-現在この基準で入れている書き込みは次の3つ。
+現在入れている書き込みと、3条件それぞれの判断は次のとおり。**書き込みを足すときは、ここに行を足して
+3条件の判断を書く**（表に無い書き込みは、判断の記録が無いのと同じになる）。MCPツールとしての一覧は
+[MCPツール](#mcpツール)。
 
 | | 経路 | 条件1 | 条件2（資格情報） | 条件3 |
 |---|---|---|---|---|
@@ -44,6 +46,9 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
+| `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（AIDEはAsset Managerから読み取らないため、取り込み専用） | 作成のみ（下記） |
+| `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
+| `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
 
 #### Zaimへの登録は条件1の例外（aide#37）
 
@@ -137,6 +142,57 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 3. **作成だけ。** 編集・削除は持たない。動かす・消すにはDaySpanの画面から行う
 
 詳細は `src/core/connectors/dayspan/write.ts`。
+
+#### ChatGPTのスケジュールからの取り込みは条件1・2を満たす（#199・aide#205・aide#211）
+
+`asset_manager_import_payment`・aide-bot向けの3ツール・`aide_research_desk_import_weekly_report` は、
+どれも**呼び出し元がChatGPTのスケジュール**で、宛先の受け口はそれぞれ別のアプリにある。
+**例外を根拠にしていない**（Zaimの例外〔aide#37〕も前例にしていない）。
+
+1. **他のどこからも塞がっている経路。** ChatGPTが繋げるのはAIDEの `/mcp` だけで、宛先アプリの
+   サーバー間シークレットをChatGPTへ渡す経路は無い。Asset Manager・aide-bot の受け口はBearer
+   シークレットで守られたサーバー間APIで、ChatGPTから繋げるMCPサーバーではない。Research Desk は
+   独立MCPを持っていたが、ChatGPT側のMCP認証運用と合わず、接続先を増やさないためにAIDEを共通窓口へ
+   寄せた（`docs/chatgpt-mcp.md`）。今は他に届く経路が無い
+2. **読み取りとは別の資格情報。** 3つの宛先とも、AIDEは**そこから何も読み取っていない**
+   （`AIDE_ASSET_MANAGER_*`・`AIDE_BOT_*`・`AIDE_RESEARCH_DESK_*` は取り込みのコネクタからしか
+   参照しない）。「取得用のトークンに書き込み権限を足した」形にはならず、各シークレットはこの
+   登録専用。サーバー側の値はAIDEの環境変数にだけあり、MCPの引数・応答・ログへは出さない。
+   なお `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` は、Asset Manager側では `POST /api/zaim/sync` と
+   同じ `ZAIM_SYNC_SECRET` で照合される（AIDE側で使うのは取り込みだけ）
+
+条件3は宛先ごとに違うので、次に分ける。
+
+- **Asset Managerへの取り込みは「作成のみ」を満たす。** 編集・削除の口は持たない。同じ
+  `gmailMessageId` の再送は `duplicate` になり、何も増えない。ただし**信頼度が十分で分類履歴にも一致すると、
+  Asset Manager が反映待ちを経ずにZaimへの登録まで進める**（`imported`・`zaimMoneyId`）。その明細は
+  この経路から取り消せない——`aide_zaim_payment` と同じ扱いで、間違いはZaimの画面から人が消す。
+  曖昧な抽出結果は `confidence` を低くするよう、ツールの説明で指示している（反映待ち
+  〔`pendingReview`〕にするかの判定はAsset Manager側）
+- **aide-bot向け3ツールとResearch Deskへの登録は条件3の例外**（下記）
+
+#### 同じキーの再送は上書きになる（aide-bot・Research Desk。条件3の例外）
+
+aide-bot向けの3ツールと `aide_research_desk_import_weekly_report` は、**厳密には「作成だけ」ではない。**
+どちらも既存の登録を上書きする。
+
+- aide-bot: `(source, kind, dedupeKey)` が同じお知らせは、新しく積まず**上書きされる**
+- Research Desk: 同じURL、または発表主体・対象製品・発表日・種別・主要数値から同一と判定された記事は、
+  新規作成されず**既存記事へ統合・上書きされる**（`mergedCount`。判定はResearch Desk側）
+
+例外にした理由は、ChatGPTのスケジュールが**同じ用件を何度も再送する**前提だから。日次実行で毎回
+新規作成にすると通知や記事が積み上がるため、宛先側の冪等性（重複させない・続報で更新する）に
+任せている。3条件が避けたいのは**取り返しのつかない変更**で、その懸念は次の範囲に収まっている。
+
+- 上書きされるのは**同じ識別キーで登録済みの内容だけ**。他のお知らせ・他の記事は変えられない
+- **削除・既読化・状態の変更は持たない。** 入れられるのは内容そのもので、送り直せば差し替えられる
+- 上書きの判定（重複・統合）はAIDEではなく宛先側が持つ。AIDEは入力の形を検証して渡すだけ
+
+**この例外を前例として使わない。** 上書きを許しているのは「同一キーの再送を吸収するため」で、
+任意の既存データの編集・削除を持ち込むときは、この節を根拠にせず改めて判断する。
+
+詳細は[ChatGPTからAsset Managerへ請求情報を取り込む](#chatgptからasset-managerへ請求情報を取り込むmcp)・
+[MCPツール](#mcpツール)・`docs/chatgpt-mcp.md`。
 
 ## Core と MCP層の境界
 
@@ -308,6 +364,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
+| `asset_manager_import_payment` | Gmailの請求メール1件をAsset Managerへ取り込む。**ChatGPTスケジュール向けの書き込みツール**（信頼度が十分だとAsset ManagerがZaimへの登録まで進める。この経路から取り消せない。詳細は[ChatGPTからAsset Managerへ請求情報を取り込む](#chatgptからasset-managerへ請求情報を取り込むmcp)） |
 | `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体10件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
 ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
@@ -1315,7 +1372,7 @@ GitHub取得は既に3実装ある。**AIDEはこれらを置き換えない。*
 issue-deck はGitHub Appの認証・webhook受信・書き込みが本体で、AIDE経由にすると往復が増えるだけ。
 AIDEが持つのは**横断ビュー**と、下記のIssue起票だけに限る。
 
-### 書き込みはIssueの起票1本だけ
+### GitHubへの書き込みはIssueの起票1本だけ
 
 外出先でClaudeアプリに思いついたことを話し、そのままIssueにしたいという要望
 （guchi-apps/question#15）に対して `aide_create_issue` を持つ（aide#50）。
@@ -1346,7 +1403,7 @@ Claude Code（CLI）とissue-deckが担当する。
 
 取得のツールは**1本だけ**（`aide_dev_status`）。「全体の俯瞰」と「1リポジトリの詳細」を別ツールに
 割るとツール選択が曖昧になるため、引数 `repo` の有無で深さを切り替えている
-（起票の `aide_create_issue` は用途が別なので分けている。上記「書き込みはIssueの起票1本だけ」）。
+（起票の `aide_create_issue` は用途が別なので分けている。上記「GitHubへの書き込みはIssueの起票1本だけ」）。
 
 `attention` に注意点が1行ずつ入り、これだけ読めば答えられるようにしている。しきい値は
 `src/core/views/dev.ts` の `DEFAULTS` にまとめてある。
