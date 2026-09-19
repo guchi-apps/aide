@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { RESEARCH_DESK_BUSINESSES } from "./businesses.ts";
 import {
   importWeeklyReport,
   normalizeWeeklyReportInput,
@@ -106,6 +107,43 @@ describe("research-desk 週報入力の検証", () => {
     if (mixed.ok) assert.equal(mixed.input.articles.length, 10);
   });
 
+  it("登録簿に無い事業は外部へ送る前に拒否し、受け付ける事業を理由へ示す（#314）", () => {
+    const unknown = normalizeWeeklyReportInput(validArgs([article({ business: "HOME" })]));
+    assert.equal(unknown.ok, false);
+    if (!unknown.ok) {
+      assert.match(unknown.reason, /articles\[0\]\.business/);
+      assert.match(unknown.reason, /DELIVERY/);
+      assert.match(unknown.reason, /LOCKER/);
+    }
+
+    // 大文字小文字の違いや配列など、文字列でない値も同じく弾く。
+    assert.equal(normalizeWeeklyReportInput(validArgs([article({ business: "delivery" })])).ok, false);
+    assert.equal(normalizeWeeklyReportInput(validArgs([article({ business: ["DELIVERY"] })])).ok, false);
+  });
+
+  it("登録簿へ事業を足すと、検証と事業ごとの件数上限がその事業にも効く（#314）", () => {
+    const businesses = [...RESEARCH_DESK_BUSINESSES, { id: "HOME", label: "住宅設備事業" }];
+
+    // 既定の登録簿では通らない事業が、足した登録簿では通る。
+    assert.equal(normalizeWeeklyReportInput(validArgs([article({ business: "HOME" })])).ok, false);
+    const added = normalizeWeeklyReportInput(validArgs([article({ business: "HOME" })]), businesses);
+    assert.equal(added.ok, true);
+    if (added.ok) assert.equal(added.input.articles[0]?.business, "HOME");
+
+    // 上限は事業ごとに数える。3事業に3件ずつ（合計9件）は通り、1事業に6件は弾く。
+    const spread = normalizeWeeklyReportInput(validArgs(["DELIVERY", "LOCKER", "HOME"].flatMap((business) =>
+      Array.from({ length: 3 }, () => article({ business })))), businesses);
+    assert.equal(spread.ok, true);
+    const sixHome = normalizeWeeklyReportInput(validArgs(Array.from({ length: 6 }, () => article({ business: "HOME" }))), businesses);
+    assert.equal(sixHome.ok, false);
+    if (!sixHome.ok) assert.match(sixHome.reason, /HOME/);
+
+    // 全体の上限（10件）は事業を足しても広がらない。
+    const eleven = normalizeWeeklyReportInput(validArgs(["DELIVERY", "LOCKER", "HOME"].flatMap((business, i) =>
+      Array.from({ length: i === 2 ? 3 : 4 }, () => article({ business })))), businesses);
+    assert.equal(eleven.ok, false);
+  });
+
   it("以前までの6件・1事業3件の呼び出しはそのまま通る", () => {
     const legacy = normalizeWeeklyReportInput(validArgs([
       ...Array.from({ length: 3 }, () => article()),
@@ -159,6 +197,16 @@ describe("research-desk 週報入力の検証", () => {
 
 describe("research-desk 週報の登録", () => {
   const input = (normalizeWeeklyReportInput(validArgs()) as { ok: true; input: ResearchDeskWeeklyReportInput }).input;
+
+  it("登録簿に無い事業のキーが応答に含まれても、そのまま返す（#314）", async () => {
+    const body = { ...succeededBody, businessCounts: { DELIVERY: 1, HOME: 2 }, duplicateBusinessCounts: { HOME: 1 } };
+    const outcome = await importWeeklyReport(input, config, (async () => jsonResponse(body)) as unknown as typeof fetch);
+    assert.equal(outcome.ok, true);
+    if (outcome.ok) {
+      assert.deepEqual(outcome.result.businessCounts, { DELIVERY: 1, HOME: 2 });
+      assert.deepEqual(outcome.result.duplicateBusinessCounts, { HOME: 1 });
+    }
+  });
 
   it("未設定なら外部へ送信しない", async () => {
     let called = false;

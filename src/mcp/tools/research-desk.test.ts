@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
+import { RESEARCH_DESK_BUSINESSES } from "../../core/connectors/research-desk/businesses.ts";
 import { researchDeskImportWeeklyReportTool } from "./research-desk.ts";
 
 const URL_ENV = "AIDE_RESEARCH_DESK_URL";
@@ -104,6 +105,41 @@ describe("aide_research_desk_import_weekly_report", () => {
         assert.equal(payload["mergedCount"], 1);
         assert.equal(payload["excludedCount"], 1);
         assert.deepEqual(payload["businessCounts"], { DELIVERY: 1, LOCKER: 1 });
+      } finally {
+        fetchMock.mock.restore();
+      }
+    });
+  });
+
+  it("business の選択肢と説明文は登録簿から作られる（#314）", () => {
+    const schema = tool.inputSchema as {
+      properties: { articles: { items: { properties: { business: { enum: string[]; description: string } } } } };
+    };
+    const business = schema.properties.articles.items.properties.business;
+    assert.deepEqual(business.enum, RESEARCH_DESK_BUSINESSES.map((entry) => entry.id));
+    for (const entry of RESEARCH_DESK_BUSINESSES) {
+      assert.ok(business.description.includes(`${entry.id}=${entry.label}`));
+      assert.ok(tool.description.includes(`${entry.label}（${entry.id}）`));
+    }
+  });
+
+  it("登録簿に無い事業は外部へ送らずINVALID_REQUESTを返す", async () => {
+    await withEnv(async () => {
+      const fetchMock = mock.method(globalThis, "fetch", async () => {
+        throw new Error("送信してはいけない");
+      });
+      try {
+        const payload = parsed(await tool.handler(args([{
+          business: "HOME",
+          informationType: "OTHER",
+          title: "住宅設備の記事",
+          url: "https://news.example.test/articles/3",
+          sourceName: "住宅ニュース",
+        }]), { sessionId: null }));
+        assert.equal(payload["ok"], false);
+        assert.equal(payload["status"], "INVALID_REQUEST");
+        assert.match(String(payload["reason"]), /business/);
+        assert.equal(fetchMock.mock.callCount(), 0);
       } finally {
         fetchMock.mock.restore();
       }

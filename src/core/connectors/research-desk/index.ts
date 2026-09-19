@@ -1,7 +1,9 @@
+import { RESEARCH_DESK_BUSINESSES, businessIds, type ResearchDeskBusinessDefinition } from "./businesses.ts";
+
 /**
  * Research Desk の週報登録コネクタ。
  *
- * ChatGPT が検索・要約した宅配事業／ロッカー事業の業界情報を、Research Desk の
+ * ChatGPT が検索・要約した事業（宅配事業・ロッカー事業など。登録簿は `businesses.ts`）の業界情報を、Research Desk の
  * **AIDE専用内部API** へ中継する（aide#211 / research-desk#31）。収集は週1回から
  * 毎日20時へ変わり、Research Desk 側が日曜始まりの週へ集約する（aide#226 / research-desk#43）。
  *
@@ -14,7 +16,6 @@
  * AIDE は形を検証して渡すだけで判定そのものは行わない。**
  */
 
-export type ResearchDeskBusiness = "DELIVERY" | "LOCKER";
 export type ResearchDeskImportance = "HIGH" | "MEDIUM" | "REFERENCE";
 export type ResearchDeskPeriodScope = "IN_SCOPE" | "PAST_30_DAYS_SUPPLEMENT";
 
@@ -37,7 +38,8 @@ export const RESEARCH_DESK_INFORMATION_TYPES = [
 export type ResearchDeskInformationType = (typeof RESEARCH_DESK_INFORMATION_TYPES)[number];
 
 export interface ResearchDeskArticle {
-  business: ResearchDeskBusiness;
+  /** 事業のID。取りうる値は登録簿（`businesses.ts`）が決める。 */
+  business: string;
   informationType: ResearchDeskInformationType;
   title: string;
   url: string;
@@ -86,8 +88,8 @@ export interface ResearchDeskImportResult {
   excludedCount?: number;
   failedCount?: number;
   /** 新規追加＋統合更新の事業別内訳。 */
-  businessCounts?: Record<ResearchDeskBusiness, number>;
-  duplicateBusinessCounts?: Record<ResearchDeskBusiness, number>;
+  businessCounts?: Record<string, number>;
+  duplicateBusinessCounts?: Record<string, number>;
   errors?: string[];
   [key: string]: unknown;
 }
@@ -106,6 +108,8 @@ interface ResearchDeskConfig {
  *
  * 毎日20時の日次実行で宅配・ロッカーを1回にまとめて送るため、全体6件・1事業3件から広げた（#226）。
  * **Research Desk 側の受け口にも同じ上限がある**ので、あちらを広げるまで10件は400で弾かれる。
+ * 全体の上限は事業の数と連動させていない。事業が3つ以上になると、1事業あたりに割ける件数は
+ * 全体10件の内訳で決まる（#314）。
  */
 export const MAX_ARTICLES = 10;
 export const MAX_ARTICLES_PER_BUSINESS = 5;
@@ -202,7 +206,7 @@ function optionalMetrics(value: unknown, name: string): { value: Record<string, 
   return { value: value as Record<string, unknown> };
 }
 
-function normalizeArticle(value: unknown, index: number):
+function normalizeArticle(value: unknown, index: number, businesses: readonly ResearchDeskBusinessDefinition[]):
   | { ok: true; article: ResearchDeskArticle }
   | { ok: false; reason: string } {
   const label = `articles[${index}]`;
@@ -212,8 +216,8 @@ function normalizeArticle(value: unknown, index: number):
   const item = value as Record<string, unknown>;
 
   const business = item["business"];
-  if (business !== "DELIVERY" && business !== "LOCKER") {
-    return { ok: false, reason: `${label}.business は DELIVERY または LOCKER で指定してください` };
+  if (typeof business !== "string" || !businessIds(businesses).includes(business)) {
+    return { ok: false, reason: `${label}.business は ${businessIds(businesses).join(" / ")} のいずれかで指定してください` };
   }
 
   const informationType = item["informationType"];
@@ -306,7 +310,16 @@ function normalizeArticle(value: unknown, index: number):
   return { ok: true, article };
 }
 
-export function normalizeWeeklyReportInput(args: Record<string, unknown>):
+/**
+ * 週報の入力を検証して正規化する。
+ *
+ * `businesses` は受け付ける事業の登録簿で、通常は既定（`RESEARCH_DESK_BUSINESSES`）のまま使う。
+ * 引数にしてあるのは、登録簿を差し替えたときの挙動をテストで確かめるため。
+ */
+export function normalizeWeeklyReportInput(
+  args: Record<string, unknown>,
+  businesses: readonly ResearchDeskBusinessDefinition[] = RESEARCH_DESK_BUSINESSES,
+):
   | { ok: true; input: ResearchDeskWeeklyReportInput }
   | { ok: false; reason: string } {
   const executedAt = isoDateTime(args["executedAt"]);
@@ -327,13 +340,14 @@ export function normalizeWeeklyReportInput(args: Record<string, unknown>):
     return { ok: false, reason: `articles は${MAX_ARTICLES}件までです` };
   }
 
-  const counts: Record<ResearchDeskBusiness, number> = { DELIVERY: 0, LOCKER: 0 };
+  const counts = new Map<string, number>();
   const articles: ResearchDeskArticle[] = [];
   for (const [index, raw] of rawArticles.entries()) {
-    const normalized = normalizeArticle(raw, index);
+    const normalized = normalizeArticle(raw, index, businesses);
     if (!normalized.ok) return { ok: false, reason: normalized.reason };
-    counts[normalized.article.business]++;
-    if (counts[normalized.article.business] > MAX_ARTICLES_PER_BUSINESS) {
+    const count = (counts.get(normalized.article.business) ?? 0) + 1;
+    counts.set(normalized.article.business, count);
+    if (count > MAX_ARTICLES_PER_BUSINESS) {
       return { ok: false, reason: `1事業あたりの記事は${MAX_ARTICLES_PER_BUSINESS}件までです（${normalized.article.business}）` };
     }
     articles.push(normalized.article);
