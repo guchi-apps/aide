@@ -76,11 +76,38 @@ ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
 日時はISO 8601形式で指定する。記事は**1回あたり全体で1〜10件、1事業あたり5件まで**（#226。
 それ以前は全体6件・1事業3件で、**当時の呼び出しはそのまま通る**）。
 
-記事の必須項目は `business`（`DELIVERY` = 宅配事業 / `LOCKER` = ロッカー事業）、`informationType`、
+記事の必須項目は `business`（現在の登録は `DELIVERY` = 宅配事業 / `LOCKER` = ロッカー事業。
+増やし方は下の「対象の事業を増やす」）、`informationType`、
 `title`、`url`、`sourceName`。任意で `publisher`、`isPrimarySource`、`publishedAt`、`occurredAt`、
 `summary`、`content`、`implications`（商品企画・全体設計への示唆）、`importance`、`targetCompany`、
 `targetProduct`、`extractedMetrics`、`keywords`、`tags`、`periodScope`（`IN_SCOPE` /
 `PAST_30_DAYS_SUPPLEMENT`）を渡せる。
+
+## 対象の事業を増やす（#314）
+
+対象の事業は `src/core/connectors/research-desk/businesses.ts` の `RESEARCH_DESK_BUSINESSES` に
+`{ id, label }` で登録する。`business` の検証・事業ごとの件数上限・ツールの `enum` と説明文は
+すべてここから作られるため、**AIDE側で直すのはこの1エントリとテストだけ**。
+
+**ただし、AIDEへ足す前に Research Desk 側が `main` で同じ `id` を受けられる状態になっている**
+必要がある。あちらは事業を Prisma enum（`IndustryBusiness`）と `/api/internal/weekly-report` の
+検証で持っており（画面・週あたりの保持上限・解析の関連性判定も事業ごとに分かれている）、知らない
+`id` は400で弾く。AIDEだけ先に本番へ出すと、**AIDEの検証は通るのに本番でだけ失敗する**。
+リリースは **Research Desk（`main`）→ AIDE（`main`）** の順にする。
+連携先の対応状況は、Issueの状態ではなく `git show origin/main:` で実物を確かめる。
+
+**どの事業を集めるかは、AIDEの登録簿ではなく ChatGPT 定期タスクの指示文で決まる。** 登録簿へ足しても
+指示文を変えない限り新事業の記事は集まらないため、事業を足すときは次の順で進める。
+
+1. Research Desk 側で新事業を受けられるようにし、`main` へ出す（別リポジトリ・別Issue）
+2. AIDEの登録簿へ1エントリ足し、`main` へ出す
+3. **ChatGPT定期タスクの指示文を更新する（ユーザー自身の手作業）**。下の「指示例」の事業名と、
+   事業ごと・全体の件数配分を新しい事業に合わせる
+4. 下の「手動確認」で、新事業の記事が登録され `businessCounts` に出ることを確かめる
+
+**全体の上限（10件）は事業を増やしても広がらない。** Research Desk 側にも同じ定数があるため、
+事業が3つ以上になると1事業あたりに割ける件数は全体10件の内訳になる。広げるときは、次の段落のとおり
+両方を揃える。
 
 **件数の上限はAIDEとResearch Deskの両方に、それぞれ独立した定数として書かれている**
 （AIDE側は `src/core/connectors/research-desk/index.ts` の `MAX_ARTICLES` /
@@ -116,6 +143,8 @@ Research Desk側で項目が増えてもそのまま届く。
 取得データが漏れる経路になるため）。
 
 ## ChatGPT定期タスクの指示例
+
+（事業を増やしたときは、下の事業名と件数配分を登録簿に合わせて書き換える）
 
 「宅配事業とロッカー事業の業界情報を直近7日から探し、事業ごとに5件まで（合計10件まで）選ぶ。7日で
 足りなければ30日まで広げ、その記事の `periodScope` を `PAST_30_DAYS_SUPPLEMENT` にする。各記事に

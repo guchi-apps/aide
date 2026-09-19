@@ -323,6 +323,9 @@ Research Desk側が持つ**ため、AIDEは入力の形（事業ごとの件数�
 `extractedMetrics`）も、AIDEは形を確かめて渡すだけで判定そのものは行わない。応答の
 `insertedCount`（新規）・`mergedCount`（統合更新）・`duplicateCount`（変化なし）・
 `excludedCount`（上限超過で除外）で1件ごとの結末が分かる。
+対象の事業は `src/core/connectors/research-desk/businesses.ts` の登録簿から作られ、事業を
+増やすときにAIDE側で直すのはそこだけ。**Research Desk 側が先に `main` で受けられる状態に
+なっている必要がある**（手順とリリース順は [docs/chatgpt-mcp.md](docs/chatgpt-mcp.md)）。
 
 
 ## 機能一覧ページ
