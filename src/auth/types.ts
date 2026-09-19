@@ -22,7 +22,13 @@ export interface AccessToken {
   clientId: string;
   /** リフレッシュトークン。アクセストークン失効後の再取得に使う。 */
   refreshToken: string;
+  /** アクセストークンの失効時刻（ms）。 */
   expiresAt: number;
+  /**
+   * リフレッシュトークンの失効時刻（ms）。アクセストークンより長い。
+   * この項目が無い古いレコードは `expiresAt` と同じ扱い（`refreshExpiryOf`）。
+   */
+  refreshExpiresAt?: number;
   createdAt: string;
 }
 

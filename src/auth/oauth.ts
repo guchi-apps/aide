@@ -272,12 +272,14 @@ export async function handleToken(req: IncomingMessage, res: ServerResponse): Pr
 async function issueTokens(res: ServerResponse, clientId: string): Promise<void> {
   const accessToken = token();
   const refreshToken = token();
+  const now = Date.now();
   await addToken({
     token: accessToken,
     clientId,
     refreshToken,
-    expiresAt: Date.now() + ACCESS_TOKEN_TTL_MS,
-    createdAt: new Date().toISOString(),
+    expiresAt: now + ACCESS_TOKEN_TTL_MS,
+    refreshExpiresAt: now + REFRESH_TOKEN_TTL_MS,
+    createdAt: new Date(now).toISOString(),
   });
   json(res, 200, {
     access_token: accessToken,
