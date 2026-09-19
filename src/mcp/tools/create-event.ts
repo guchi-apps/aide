@@ -6,7 +6,7 @@ import {
 import type { Tool, ToolResult } from "../types.ts";
 
 /**
- * 予定の新規作成（aide#243）。**AIDEが持つ3つ目の書き込みツール。**
+ * 予定の新規作成（aide#243）。
  *
  * 起点は guchi-apps/aide-bot#184——秘書（aide-bot）から声で予定を登録できるようにしたい、
  * という要望。予定の読み取りは `aide_schedule`（aide#173）で既に届いているが、登録の道具が

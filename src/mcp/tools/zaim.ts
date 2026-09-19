@@ -11,7 +11,7 @@ import { readZaimMaster, type ZaimMasterView } from "../../core/views/zaim-maste
 import type { Tool, ToolResult } from "../types.ts";
 
 /**
- * Zaimへの支出登録（aide#135）。**AIDEが持つ2つ目の書き込みツール。**
+ * Zaimへの支出登録（aide#135）。
  *
  * 外（VPS外）のClaude CodeからZaimへ支出を登録したい、が起点（guchi-apps/question#24）。
  * Zaimへ書ける口は `POST /api/zaim/payment` だけで、これは同じVPS上の個人アプリが
@@ -185,7 +185,7 @@ export const zaimMasterTool: Tool = {
 };
 
 /**
- * 支出を1件登録する。**AIDEが持つ2つ目の書き込みツール。**
+ * 支出を1件登録する。書き込みを伴うツール。
  */
 export const zaimPaymentTool: Tool = {
   name: "aide_zaim_payment",

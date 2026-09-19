@@ -5,6 +5,7 @@ import {
   MAX_ARTICLES_PER_BUSINESS,
   RESEARCH_DESK_INFORMATION_TYPES,
 } from "../../core/connectors/research-desk/index.ts";
+import { RESEARCH_DESK_BUSINESSES, businessIds, describeBusinessIds, describeBusinesses } from "../../core/connectors/research-desk/businesses.ts";
 import type { Tool, ToolResult } from "../types.ts";
 
 const articleSchema = {
@@ -12,7 +13,7 @@ const articleSchema = {
   additionalProperties: false,
   required: ["business", "informationType", "title", "url", "sourceName"],
   properties: {
-    business: { type: "string", enum: ["DELIVERY", "LOCKER"], description: "DELIVERY=宅配事業、LOCKER=ロッカー事業" },
+    business: { type: "string", enum: businessIds(RESEARCH_DESK_BUSINESSES), description: describeBusinessIds(RESEARCH_DESK_BUSINESSES) },
     informationType: { type: "string", enum: [...RESEARCH_DESK_INFORMATION_TYPES], description: "情報の種別。同一イベント判定にも使われる" },
     title: { type: "string", description: "記事の見出し" },
     url: { type: "string", format: "uri", description: "記事のURL。同一URLの重複判定に使うため元記事のURLを渡す" },
@@ -61,7 +62,7 @@ function output(payload: unknown): ToolResult {
 export const researchDeskImportWeeklyReportTool: Tool = {
   name: "aide_research_desk_import_weekly_report",
   description:
-    "ChatGPTが検索・選定・要約した宅配事業（DELIVERY）・ロッカー事業（LOCKER）の業界情報を、" +
+    `ChatGPTが検索・選定・要約した${describeBusinesses(RESEARCH_DESK_BUSINESSES)}の業界情報を、` +
     "Research Deskへ登録します。**明示的に登録を依頼されたときだけ呼ぶ書き込みツール**" +
     "（この経路から取り消し・削除はできません）。" +
     `記事は1回あたり全体で1〜${MAX_ARTICLES}件、1事業あたり${MAX_ARTICLES_PER_BUSINESS}件までです。` +
@@ -87,7 +88,7 @@ export const researchDeskImportWeeklyReportTool: Tool = {
         minItems: 1,
         maxItems: MAX_ARTICLES,
         items: articleSchema,
-        description: `登録する記事。宅配事業・ロッカー事業それぞれ${MAX_ARTICLES_PER_BUSINESS}件まで、合計${MAX_ARTICLES}件まで。`,
+        description: `登録する記事。事業ごとに${MAX_ARTICLES_PER_BUSINESS}件まで、合計${MAX_ARTICLES}件まで。`,
       },
     },
   },
