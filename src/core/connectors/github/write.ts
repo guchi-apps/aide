@@ -133,7 +133,8 @@ export function buildBody(body: string | undefined): string {
  *
  * ClaudeはMCPツールを会話の流れで自発的に呼ぶため、「あとでIssueにしておいて」の一言で
  * 似たIssueが何件も立ちうる。既存のエージェント運用にも「1回あたり目安3件まで」という
- * ルールがある（issue-deck `docs/multi-agent/labels.md`）ので、同じ上限を機械的に効かせる。
+ * ルールがある（issue-deck `docs/multi-agent/labels.md`）が、こちらは実装フローに乗らない
+ * 起票なので、件数の上限は既定値（`CREATION_MAX`）まで緩めている。
  *
  * 状態はプロセス内メモリに置く。再起動で消えるが、`src/auth/ratelimit.ts` と同じ判断で、
  * 数件の起票のためにディスクI/Oを増やす方が割に合わない。
@@ -172,8 +173,18 @@ export class CreationGuard {
   }
 }
 
-/** 既定のガード。10分あたり3件。 */
-const guard = new CreationGuard(10 * 60 * 1000, 3);
+/**
+ * 既定のガードの窓と上限。1時間あたり100件（#319）。
+ *
+ * 当初は10分あたり3件だったが、起票したIssueには既定で `70.confirm` が付き実装フローへ
+ * 自動では乗らない（実行するかは人が決める）ため、まとめて起票する使い方を妨げない値へ緩めた。
+ * 会話の暴走で際限なく立つのを止める役目は、上限そのものより「直前と同一なら拒否」と
+ * 1時間の窓で果たす。
+ */
+export const CREATION_WINDOW_MS = 60 * 60 * 1000;
+export const CREATION_MAX = 100;
+
+const guard = new CreationGuard(CREATION_WINDOW_MS, CREATION_MAX);
 
 /** 認証情報が漏れない形で叩く。`res.ok` でなければ Response 自体を投げる（describeFailure が拾う）。 */
 async function request(config: GitHubConfig, path: string, init?: RequestInit): Promise<Response> {
