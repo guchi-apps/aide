@@ -352,6 +352,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
 | `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
+| `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
 | `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
 | `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
@@ -2253,6 +2254,42 @@ Asset ManagerのレスポンスJSON（`status`、`receiptId`、`zaimMoneyId`、`
 MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANAGER_URL`（既定は
 `https://asset.gucchii.com`）で指定する。デプロイ時のsecret/variable配線は
 `.github/secrets-manifest.tsv` と `.github/workflows/deploy.yml` が正である。
+
+## 電気代・ガス代を読む（MCP）
+
+「今月の電気代」「先月のガス使用量」「最近の推移」に答えるための読み取りツール
+`aide_utility_bills`（#324）。実装は `src/core/views/utility-bills.ts`（集計）と
+`src/core/connectors/zaim/read.ts`（Zaim公式APIの `GET /v2/home/money`）。引数は `kind`
+（`electricity` / `gas` / `all`）と `months`（今月を含めて遡る月数。既定13・上限36）。
+
+### 情報源はZaim公式API
+
+電気・ガスの請求メールは、上の `asset_manager_import_payment` で Asset Manager へ取り込まれ、
+Asset Manager が**Zaim APIで**支出として登録する。そのため公式APIで期間を指定して読める。
+ほかの経路は推移に使えないので採っていない。
+
+- **Asset Manager には読み取りAPIが無い**（`/api/receipts/import` と `/api/zaim/sync` だけ）
+- **Web版の一覧のキャッシュ（`zaim-money-snapshot`）は当月＋先月ぶんしか持たない**。巡回はPlaywrightで重く、月を増やせない
+
+公式APIは**自動連携（カード等）の明細を返さない**。電気・ガスがカード払いで、請求メールからの
+取り込みを経ずに自動連携の明細だけがある月は、この経路からは見えない。
+
+鮮度は呼び出しのたびに引くので常に最新。ジャンルの対応表は `aide_zaim_master` と同じ24時間キャッシュ
+（`src/core/views/zaim-master.ts`）を使う。Zaimへの問い合わせは種類ごとにジャンルの数だけ（通常は電気・ガスで2本）。
+
+### どれを電気・ガスとみなすか
+
+**Zaimのジャンル名に「電気」「ガス」を含むもの。** 品名・店名では拾わない（「ガス」を含む飲食店名などを
+拾うため）。該当するジャンルが無いときは、その種類だけ `unavailable` に理由を入れて返す。
+
+### 使用量と日付
+
+- **使用量は品名から読む。** Asset Manager は `usage` を品名の末尾へ足して登録する（「電気料金 258kWh」。
+  asset-manager#307）。`kWh` と `m3`（`㎥`・`m³`・`立方メートル` を寄せる）だけを読み、書かれていない月は `null`
+- **検針期間（対象期間）は持っていない。** Zaimの明細は日付を1つしか持たず、それは請求・支払の日。
+  月ごとの集計（`monthly`）もこの日付の月で束ねる
+- 前月比・前年同月比は、明細のある最新の月から**暦の**前月・前年同月を見る。その月に明細が無ければ `null`
+  （明細のある直前の月へずらさない）
 
 ## 外部のClaude CodeからのZaim登録（MCP）
 

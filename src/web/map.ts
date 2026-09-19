@@ -61,6 +61,7 @@ export const CALLERS: Caller[] = [
     uses: [
       "aide_ping",
       "aide_money_summary",
+      "aide_utility_bills",
       "aide_ops_status",
       "aide_room_status",
       "aide_daily_briefing",
@@ -132,7 +133,13 @@ export const GROUPS: DestinationGroup[] = [
         name: "Zaim",
         dir: "both",
         what: "残高・明細を読む／支出を登録",
-        uses: ["aide_money_summary", "aide_zaim_master", "aide_zaim_payment", "/api/zaim/payment/web"],
+        uses: [
+          "aide_money_summary",
+          "aide_utility_bills",
+          "aide_zaim_master",
+          "aide_zaim_payment",
+          "/api/zaim/payment/web",
+        ],
       },
       {
         id: "subscription-lists",
