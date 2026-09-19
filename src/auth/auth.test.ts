@@ -10,6 +10,7 @@ import {
   recordFailure,
   recordSuccess,
   resetRateLimits,
+  trackedKeyCount,
 } from "./ratelimit.ts";
 
 describe("パスワード照合", () => {
@@ -96,13 +97,53 @@ describe("総当たり対策", () => {
     assert.equal(allowRegistration("1.2.3.4"), false, "21回目は拒否されるべき");
   });
 
-  it("転送ヘッダから送信元を取り出す", () => {
-    const req = {
-      headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" },
-      socket: { remoteAddress: "10.0.0.1" },
-    } as unknown as Parameters<typeof clientKey>[0];
+  it("転送ヘッダの末尾（手前のプロキシが足した値）を送信元にする", () => {
     // プロキシ配下では socket のアドレスが全リクエストで同一になり、
-    // 送信元ごとの制限が機能しなくなる。
-    assert.equal(clientKey(req), "203.0.113.9");
+    // 送信元ごとの制限が機能しなくなるため、転送ヘッダを使う。
+    // 先頭はクライアントが自由に書けるので、プロキシが末尾に足した値を採る（#300）。
+    assert.equal(clientKey(fakeRequest("203.0.113.9, 198.51.100.7", "127.0.0.1")), "198.51.100.7");
+    assert.equal(clientKey(fakeRequest("198.51.100.7", "::1")), "198.51.100.7");
+    assert.equal(clientKey(fakeRequest(["203.0.113.9", "198.51.100.7"], "::ffff:127.0.0.1")), "198.51.100.7");
+  });
+
+  it("先頭を偽装しても別の送信元として数えられず、ロックされる", () => {
+    resetRateLimits();
+    for (let i = 0; i < 5; i += 1) {
+      recordFailure(clientKey(fakeRequest(`10.0.0.${i}, 198.51.100.7`, "127.0.0.1")));
+    }
+    const locked = lockedFor(clientKey(fakeRequest("192.0.2.1, 198.51.100.7", "127.0.0.1")));
+    assert.ok(locked !== null && locked > 0, "偽装した値によらずロックされるべき");
+  });
+
+  it("プロキシを通らない接続では転送ヘッダを信用しない", () => {
+    assert.equal(clientKey(fakeRequest("203.0.113.9", "100.64.0.5")), "100.64.0.5");
+  });
+
+  it("転送ヘッダが無ければ socket のアドレスを使う", () => {
+    assert.equal(clientKey(fakeRequest(undefined, "127.0.0.1")), "127.0.0.1");
+  });
+
+  it("失敗の記録は上限を超えて増えない", () => {
+    resetRateLimits();
+    for (let i = 0; i < 10_500; i += 1) recordFailure(`key-${i}`);
+    assert.equal(trackedKeyCount().failures, 10_000);
+    // 記録済みの送信元への失敗は件数を増やさない
+    recordFailure("key-10499");
+    assert.equal(trackedKeyCount().failures, 10_000);
+    resetRateLimits();
+  });
+
+  it("クライアント登録の記録は上限を超えて増えない", () => {
+    resetRateLimits();
+    for (let i = 0; i < 10_500; i += 1) allowRegistration(`key-${i}`);
+    assert.equal(trackedKeyCount().registrations, 10_000);
+    resetRateLimits();
   });
 });
+
+function fakeRequest(forwarded: string | string[] | undefined, remoteAddress: string) {
+  return {
+    headers: forwarded === undefined ? {} : { "x-forwarded-for": forwarded },
+    socket: { remoteAddress },
+  } as unknown as Parameters<typeof clientKey>[0];
+}
