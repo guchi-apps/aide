@@ -30,6 +30,8 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 1. **他のどこからも塞がっている経路であること。** 既存のアプリ・公式MCP・Claude Code から
    できることは、AIDEに口を作らない（往復が増えるだけになる）
 2. **読み取りとは別の資格情報を使うこと。** 取得用のトークンに書き込み権限を足さない
+   （**逆の向きは可**。書き込み用の資格情報に読み取りの用途が加わっても、読み取り側へ書き込みの
+   力は増えない。Asset Manager がその例で、下の「ChatGPTのスケジュールからの取り込みは条件1・2を満たす」を参照）
 3. **作成だけを持つこと。** 編集・削除・状態の変更は持たない。取り返しのつく操作に限る
 
 現在入れている書き込みと、3条件それぞれの判断は次のとおり。**書き込みを足すときは、ここに行を足して
@@ -47,7 +49,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
-| `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（AIDEはAsset Managerから読み取らないため、取り込み専用） | 作成のみ（下記） |
+| `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
 
@@ -172,12 +174,17 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
    シークレットで守られたサーバー間APIで、ChatGPTから繋げるMCPサーバーではない。Research Desk は
    独立MCPを持っていたが、ChatGPT側のMCP認証運用と合わず、接続先を増やさないためにAIDEを共通窓口へ
    寄せた（`docs/chatgpt-mcp.md`）。今は他に届く経路が無い
-2. **読み取りとは別の資格情報。** 3つの宛先とも、AIDEは**そこから何も読み取っていない**
-   （`AIDE_ASSET_MANAGER_*`・`AIDE_BOT_*`・`AIDE_RESEARCH_DESK_*` は取り込みのコネクタからしか
-   参照しない）。「取得用のトークンに書き込み権限を足した」形にはならず、各シークレットはこの
-   登録専用。サーバー側の値はAIDEの環境変数にだけあり、MCPの引数・応答・ログへは出さない。
-   なお `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` は、Asset Manager側では `POST /api/zaim/sync` と
-   同じ `ZAIM_SYNC_SECRET` で照合される（AIDE側で使うのは取り込みだけ）
+2. **読み取りとは別の資格情報。** aide-bot・Research Desk は、AIDEが**そこから何も読み取っていない**
+   （`AIDE_BOT_*`・`AIDE_RESEARCH_DESK_*` は取り込みのコネクタからしか参照しない）。「取得用のトークンに
+   書き込み権限を足した」形にはならず、各シークレットはこの登録専用。サーバー側の値はAIDEの環境変数に
+   だけあり、MCPの引数・応答・ログへは出さない。
+   **Asset Manager だけは読み取りも持つ**（`asset_manager_subscriptions`。#345）。
+   `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` は Asset Manager 側で `POST /api/zaim/sync`・
+   `POST /api/receipts/import`・`GET /api/subscriptions` のどれも同じ `ZAIM_SYNC_SECRET` で照合される。
+   AIDE側は取り込みと同じ値で読む（新しい設定を持たない）。**条件2が避けたいのは「取得用の
+   トークンに書き込み権限を足す」こと**で、ここは向きが逆——書き込み用の資格情報へ読みの用途が
+   加わっただけで、読み取りツール（GETのみ）から書き込みの口は増えない。だから満たしたままと
+   判断する。読み取り専用のトークンを分ける案は、Asset Manager 側の変更が要るため採っていない
 
 条件3は宛先ごとに違うので、次に分ける。
 
@@ -226,6 +233,13 @@ Core をフルスコープで作っておけば、MCP層で「出す／出さな
 **単機能ツールを出している例外がZaimへの登録**（`aide_zaim_master` / `aide_zaim_payment`。aide#135）。
 横断ビューではないが、Zaimに公式MCPは無く、外部のClaude Codeから届く経路も他に無い。
 判断の根拠は[書き込みをどこまで持つか](#書き込みをどこまで持つか)に置いている。
+
+**もう1つの例外が、Asset Manager のサブスク一覧の読み取り**（`asset_manager_subscriptions`。#345）。
+横断ビューではないが、Asset Manager には公開のリモートMCPが無く（MCP層に出す条件の「公開のリモートMCPが
+無いもの」に当たる）、呼び出し元から届く経路が他に無い。`aide_money_summary` のような横断ビューへ
+畳まないのは、Zaim等と合成する情報が無く、相手が計算済みで返す内容（月額換算・次回請求日・契約状況・
+円換算）をそのまま渡すだけだから。取得は取り込みと同じ通信ヘルパー（`src/mcp/tools/asset-manager.ts` の
+`callAssetManager`）を共有するため `src/core/connectors/` へは切り出していない。
 
 ### 基準は「Claudeアプリにコネクタがあるか」ではない（aide#173）
 
@@ -387,6 +401,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `asset_manager_import_payment` | Gmailの請求メール1件をAsset Managerへ取り込む。**ChatGPTスケジュール向けの書き込みツール**（信頼度が十分だとAsset ManagerがZaimへの登録まで進める。この経路から取り消せない。詳細は[ChatGPTからAsset Managerへ請求情報を取り込む](#chatgptからasset-managerへ請求情報を取り込むmcp)） |
+| `asset_manager_subscriptions` | Asset Manager（サブスク管理の移管先）のサブスク一覧。合計（月額・年額・件数）・次の請求・契約ごとの明細（1回あたりの請求額と月あたりの金額の両方）。**読み取り専用**（`includeEnded` で解約済みも含める。詳細は[サブスクを読む](#asset-managerのサブスクを読むmcp)） |
 | `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体10件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
 ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
@@ -2323,6 +2338,34 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 `https://asset.gucchii.com`）で指定する。デプロイ時のsecret/variable配線は
 `.github/secrets-manifest.tsv` と `.github/workflows/deploy.yml` が正である。
 
+## Asset Managerのサブスクを読む（MCP）
+
+「いま何にいくら払っているか」「次に何が更新されるか」に答えるための読み取りツール
+`asset_manager_subscriptions`（#345）。asset-manager#491 でサブスク管理アプリ（subscription-lists）の
+機能が Asset Manager へ移管され、その読み出し口 `GET /api/subscriptions[?includeEnded=1]` を呼ぶ。
+実装は `src/mcp/tools/asset-manager.ts`。引数は `includeEnded`（真偽値。既定は解約済みを含めない）だけ。
+
+認証・宛先は取り込み（上）と同じ `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`・`AIDE_ASSET_MANAGER_URL`で、
+**新しい環境変数・secret は要らない**（Asset Manager 側の対象ユーザーも同じ `ZAIM_SYNC_USER_EMAIL` で決まる）。
+応答（`summary`・`subscriptions`）は**加工せず返す**。月額換算・次回請求日・契約状況・円換算は向こうが
+計算済みで、こちらで再計算すればズレる。仕様は asset-manager の `docs/subscriptions.md`。
+
+ツールの説明で、答え方を取り違えやすい点を指示している。
+
+- **「1回あたり」と「月あたり」は別物。** 「いくら払っている？」には `monthlyAmountJpy`、「次にいくら請求される？」には `amount`
+- **解約予定（`SCHEDULED_TO_END`）は合計に含まれる**（まだ払っているため）。「解約したもの」は `ENDED` だけ
+- `usdJpyRate` が `null` のときドル建ては合計から外れる。**`summary.excludedFromTotal` が空かを見てから**合計を答える
+
+### `aide_money_summary` の固定費との関係
+
+`aide_money_summary` の固定費は今も旧ソース（[subscription-lists](#コネクタ-subscription-lists)）由来で、
+同じ問いに2本のツールが答えうる。**移行が済むまでは `aide_money_summary` が正、移行後は Asset Manager が正**とする。
+Asset Manager へのデータ移行（asset-manager#492）は利用者の手作業のため、それまでこのツールは契約0件を返しうる
+（ツールの説明で「0件なら移行前の可能性があるので `aide_money_summary` の固定費も見る」と指示している）。
+移行後の `aide_money_summary` の参照先の付け替えと subscription-lists 側の撤去は、このツールとは別に行う。
+
+**リリース順の制約は無い。** 受け口は asset-manager の `develop`・`main` の両方に入っている（#345の時点）。
+
 ## 電気代・ガス代を読む（MCP）
 
 「今月の電気代」「先月のガス使用量」「最近の推移」に答えるための読み取りツール
@@ -2336,7 +2379,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 Asset Manager が**Zaim APIで**支出として登録する。そのため公式APIで期間を指定して読める。
 ほかの経路は推移に使えないので採っていない。
 
-- **Asset Manager には読み取りAPIが無い**（`/api/receipts/import` と `/api/zaim/sync` だけ）
+- **Asset Manager には電気・ガスの請求を読める口が無い**（読み取りは `GET /api/subscriptions` のサブスクだけで、レシート・明細は返さない）
 - **Web版の一覧のキャッシュ（`zaim-money-snapshot`）は当月＋先月ぶんしか持たない**。巡回はPlaywrightで重く、月を増やせない
 
 公式APIは**自動連携（カード等）の明細を返さない**。電気・ガスがカード払いで、請求メールからの

@@ -143,6 +143,42 @@ async function responseBody(response: Response): Promise<unknown> {
   }
 }
 
+/**
+ * Asset Manager のサーバー間APIを呼ぶ共通の経路（取り込みも読み取りも同じ）。
+ *
+ * 認証は `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` のBearer、宛先は `AIDE_ASSET_MANAGER_URL`。
+ * 向こうでは `POST /api/receipts/import`・`GET /api/subscriptions` とも同じ `ZAIM_SYNC_SECRET` で照合される。
+ * シークレットはMCPの入力・出力・ログへ出さない。未設定・タイムアウト・接続失敗は状態として返し（`isError` にしない）、
+ * 2xx以外だけ `httpFailure` で `isError: true` にする。
+ */
+async function callAssetManager(path: string, request: { method: "GET" | "POST"; body?: unknown }): Promise<ToolResult> {
+  const secret = process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+  if (!secret) return invalid("未設定（Asset Manager連携用の認証情報がありません）");
+
+  const baseUrl = process.env["AIDE_ASSET_MANAGER_URL"] || DEFAULT_ASSET_MANAGER_URL;
+  const endpoint = `${baseUrl.replace(/\/$/, "")}${path}`;
+  const headers: Record<string, string> = { Authorization: `Bearer ${secret}`, Accept: "application/json" };
+  if (request.body !== undefined) headers["Content-Type"] = "application/json";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: request.method,
+      headers,
+      ...(request.body !== undefined ? { body: JSON.stringify(request.body) } : {}),
+      signal: controller.signal,
+    });
+    const responseJson = await responseBody(response);
+    return response.ok ? result(responseJson) : httpFailure(response.status, responseJson);
+  } catch (cause) {
+    const reason = cause instanceof Error && cause.name === "AbortError" ? "Asset Managerへの接続がタイムアウトしました" : "Asset Managerへの接続に失敗しました";
+    return invalid(reason);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export const assetManagerImportPaymentTool: Tool = {
   name: "asset_manager_import_payment",
   description:
@@ -223,32 +259,46 @@ export const assetManagerImportPaymentTool: Tool = {
     const payload = buildPayload(args);
     if (typeof payload === "string") return invalid(payload);
 
-    const secret = process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
-    if (!secret) return invalid("未設定（Asset Manager連携用の認証情報がありません）");
+    return callAssetManager("/api/receipts/import", { method: "POST", body: payload });
+  },
+};
 
-    const baseUrl = process.env["AIDE_ASSET_MANAGER_URL"] || DEFAULT_ASSET_MANAGER_URL;
-    const endpoint = `${baseUrl.replace(/\/$/, "")}/api/receipts/import`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${secret}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const body = await responseBody(response);
-      return response.ok ? result(body) : httpFailure(response.status, body);
-    } catch (cause) {
-      const reason = cause instanceof Error && cause.name === "AbortError" ? "Asset Managerへの接続がタイムアウトしました" : "Asset Managerへの接続に失敗しました";
-      return invalid(reason);
-    } finally {
-      clearTimeout(timeout);
+/**
+ * サブスクの一覧の読み取り（#345。Asset Manager 側は asset-manager#491 の `GET /api/subscriptions`）。
+ *
+ * 応答は加工せずそのまま返す。月額換算・次回請求日・契約状況・円換算は向こうが計算済みで、
+ * こちらで再計算すればズレる（`aide_money_summary` の固定費と同じ「計算はしない」方針）。
+ */
+export const assetManagerSubscriptionsTool: Tool = {
+  name: "asset_manager_subscriptions",
+  description:
+    "Asset Manager（サブスク管理の移管先）が持つサブスクの一覧を返す。合計（月額・年額・件数）、次に請求されるもの、" +
+    "契約ごとの明細（1回あたりの請求額・月あたりの金額・請求サイクル・次回請求日・支払方法・ラベル・契約期間・メモ）を含む。" +
+    "「いま何にいくら払っているか」「次に何が更新されるか・いつ請求されるか」「解約予定のサブスクはどれか」を尋ねられたときに呼ぶ。" +
+    "読み取り専用。既定では解約済みを含めず、過去の契約まで要るときだけ includeEnded: true を指定する。" +
+    "金額の読み方: 「いくら払っているか」には monthlyAmountJpy（月あたりの円換算）を使い、「次にいくら請求されるか」には amount（1回あたり）を使う" +
+    "（3ヶ月ごと・毎年払いのサブスクがあるため両者は別物）。" +
+    "status が SCHEDULED_TO_END（解約予定）のものはまだ払っているので summary の合計に含まれる。「解約したもの」として扱うのは ENDED だけ。" +
+    "usdJpyRate が null（為替レートを取れなかった）のとき、ドル建ては monthlyAmountJpy が null になり合計から外れる。" +
+    "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
+    "aide_money_summary の固定費は旧ソース（subscription-lists）由来で、こちらは移管先の契約データ。" +
+    "契約が0件のときは Asset Manager へのデータ移行前の可能性があるので、aide_money_summary の固定費も確認する。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      includeEnded: {
+        type: "boolean",
+        description: "true で解約済み（ENDED）も含める。省略時は含めない。過去の契約まで尋ねられたときだけ指定する。",
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const includeEnded = args["includeEnded"];
+    if (includeEnded !== undefined && typeof includeEnded !== "boolean") {
+      return invalid("includeEnded は true / false で指定してください");
     }
+
+    return callAssetManager(includeEnded ? "/api/subscriptions?includeEnded=1" : "/api/subscriptions", { method: "GET" });
   },
 };
