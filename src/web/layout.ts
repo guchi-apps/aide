@@ -158,8 +158,20 @@ svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
 .b.w{color:var(--wr);background:var(--wr-bg);border-color:var(--wr)}
 .apps .ds{grid-column:1/-1;font-size:.84rem;color:var(--ink-2)}
 .chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.3rem;margin:.15rem 0 0;padding:0;list-style:none}
-.chips span{font-family:${FONT_MONO};font-size:.72rem;padding:.05rem .45rem;background:var(--panel-2);
+.chips span,.detail-trigger{font-family:${FONT_MONO};font-size:.72rem;padding:.05rem .45rem;background:var(--panel-2);
  color:var(--muted);border:1px solid var(--line);overflow-wrap:anywhere}
+.detail-trigger{cursor:pointer;text-align:left}
+.detail-trigger:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.detail-popover{margin:auto;width:min(34rem,calc(100% - 2rem));max-height:calc(100vh - 2rem);overflow:auto;
+ padding:.9rem 1rem;background:var(--panel);color:var(--ink);border:1px solid var(--line);box-shadow:0 .8rem 2rem #0004}
+.detail-popover::backdrop{background:#0003}
+.popover-head{display:flex;align-items:baseline;gap:.5rem;border-bottom:1px solid var(--line-2);padding-bottom:.5rem}
+.popover-head h2{font-family:${FONT_MONO};font-size:.9rem;color:var(--accent);overflow-wrap:anywhere;margin:0}
+.popover-meta{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted)}
+.popover-close{margin-left:auto;font:inherit;font-size:1.25rem;line-height:1;color:var(--muted);background:none;border:0;cursor:pointer}
+.detail-popover>p{font-size:.84rem;color:var(--ink-2);margin:.7rem 0}
+.popover-items{list-style:none;margin:0;padding:0}.popover-items li{padding:.55rem 0;border-top:1px solid var(--line-2)}
+.popover-items li>.mono{color:var(--accent);font-size:.84rem;overflow-wrap:anywhere}.popover-items li>span:last-child{display:block;font-size:.8rem;color:var(--ink-2)}
 .notice{margin:0;padding:.55rem .7rem;background:var(--bad-bg);border-left:3px solid var(--bad);font-size:.86rem}
 
 /* ---- ログイン（画面のログイン・接続の許可） ---- */
