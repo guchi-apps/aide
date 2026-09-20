@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
-import { assetManagerImportPaymentTool, assetManagerSubscriptionsTool } from "./asset-manager.ts";
+import type { ToolResult } from "../types.ts";
+import {
+  assetManagerAddSubscriptionPriceTool,
+  assetManagerCreateSubscriptionTool,
+  assetManagerImportPaymentTool,
+  assetManagerSubscriptionsTool,
+} from "./asset-manager.ts";
 
 const SECRET = "test-asset-manager-secret";
 
-function parsed(result: Awaited<ReturnType<typeof assetManagerImportPaymentTool.handler>>): unknown {
+function parsed(result: ToolResult): unknown {
   return JSON.parse(result.content[0]!.text);
 }
 
@@ -570,6 +576,165 @@ describe("asset_manager_subscriptions", () => {
     const description = assetManagerSubscriptionsTool.description;
     for (const keyword of ["monthlyAmountJpy", "amount", "SCHEDULED_TO_END", "ENDED", "excludedFromTotal", "aide_money_summary", "includeEnded"]) {
       assert.ok(description.includes(keyword), keyword);
+    }
+  });
+});
+
+describe("asset_manager_create_subscription", () => {
+  const PRICE = {
+    amount: 1080,
+    currency: "JPY",
+    billingCycle: "MONTHLY",
+    billingInterval: 1,
+    billingDay: 15,
+    effectiveFrom: "2026-10-01",
+  };
+
+  function useEnv(): void {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+  }
+
+  it("作成に必要な入力をスキーマで必須にする", () => {
+    assert.deepEqual(assetManagerCreateSubscriptionTool.inputSchema.required, [
+      "name",
+      "paymentMethodName",
+      "startDate",
+      "amount",
+      "currency",
+      "billingCycle",
+      "billingInterval",
+      "billingDay",
+      "effectiveFrom",
+    ]);
+    assert.equal(assetManagerCreateSubscriptionTool.inputSchema.additionalProperties, false);
+  });
+
+  it("POSTで契約と初回料金をBearer認証付きで送る", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+      assert.equal(input, "https://asset.example.test/api/subscriptions");
+      assert.equal(init?.method, "POST");
+      assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${SECRET}`);
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        subscription: {
+          name: "Netflix",
+          paymentMethodName: "楽天カード",
+          startDate: "2026-09-01",
+          endDate: null,
+          autoRenew: true,
+          memo: "家族用",
+          labels: ["動画", "家族"],
+        },
+        price: { ...PRICE, billingMonth: null },
+      });
+      return new Response(JSON.stringify({ status: "created", subscriptionId: 42 }), { status: 201 });
+    });
+    try {
+      const result = await assetManagerCreateSubscriptionTool.handler({
+        name: " Netflix ",
+        paymentMethodName: " 楽天カード ",
+        startDate: "2026-09-01",
+        subscriptionMemo: " 家族用 ",
+        labels: [" 動画 ", "家族", ""],
+        ...PRICE,
+      }, { sessionId: null });
+      assert.equal(result.isError, false);
+      assert.deepEqual(parsed(result), { status: "created", subscriptionId: 42 });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("入力不正なら外部へ送信しない", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch");
+    try {
+      const invalidStart = await assetManagerCreateSubscriptionTool.handler({
+        name: "Netflix",
+        paymentMethodName: "楽天カード",
+        startDate: "2026-02-30",
+        ...PRICE,
+      }, { sessionId: null });
+      assert.deepEqual(parsed(invalidStart), { status: "error", reason: "startDate は正しい YYYY-MM-DD 形式で指定してください" });
+
+      const monthlyWithMonth = await assetManagerCreateSubscriptionTool.handler({
+        name: "Netflix",
+        paymentMethodName: "楽天カード",
+        startDate: "2026-09-01",
+        billingMonth: 10,
+        ...PRICE,
+      }, { sessionId: null });
+      assert.deepEqual(parsed(monthlyWithMonth), { status: "error", reason: "MONTHLY では billingMonth を指定しないでください" });
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+});
+
+describe("asset_manager_add_subscription_price", () => {
+  const PRICE = {
+    amount: 1490,
+    currency: "JPY",
+    billingCycle: "YEARLY",
+    billingInterval: 1,
+    billingDay: 10,
+    billingMonth: 4,
+    effectiveFrom: "2027-04-01",
+  };
+
+  function useEnv(): void {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+  }
+
+  it("サブスクIDを含む料金履歴をPOSTする", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+      assert.equal(input, "https://asset.example.test/api/subscriptions/42/prices");
+      assert.equal(init?.method, "POST");
+      assert.deepEqual(JSON.parse(String(init?.body)), { price: { ...PRICE, memo: "値上げ" } });
+      return new Response(JSON.stringify({ status: "created", subscriptionId: 42, priceId: 99 }), { status: 201 });
+    });
+    try {
+      const result = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, memo: " 値上げ ", ...PRICE }, { sessionId: null });
+      assert.equal(result.isError, false);
+      assert.deepEqual(parsed(result), { status: "created", subscriptionId: 42, priceId: 99 });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("同じ適用開始日の料金が拒否された場合はHTTPエラーとして返す", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      new Response(JSON.stringify({ status: "error", reason: "同じ適用開始日の料金がすでにあります" }), { status: 409 }),
+    );
+    try {
+      const result = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, ...PRICE }, { sessionId: null });
+      assert.equal(result.isError, true);
+      assert.deepEqual(parsed(result), {
+        status: "error",
+        reason: "同じ適用開始日の料金がすでにあります",
+        httpStatus: 409,
+      });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("サブスクIDと料金を実行時に検証する", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch");
+    try {
+      const badId = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 0, ...PRICE }, { sessionId: null });
+      assert.deepEqual(parsed(badId), { status: "error", reason: "subscriptionId は正の整数で指定してください" });
+      const badMonth = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, ...PRICE, billingMonth: 13 }, { sessionId: null });
+      assert.deepEqual(parsed(badMonth), { status: "error", reason: "YEARLY の billingMonth は1〜12の整数で指定してください" });
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
     }
   });
 });
