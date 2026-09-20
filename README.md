@@ -449,7 +449,7 @@ Research Desk側が持つ**ため、AIDEは入力の形（事業ごとの件数�
 ## アイコンとPWAマニフェスト
 
 `src/web/icons/` に置いたPNGを `GET /icons/<名前>` で返し、`GET /manifest.webmanifest` で
-ホーム画面へ追加したときの名前とアイコンを返す（どちらも認証は不要）。ブラウザが `<link>` の
+ホーム画面へ追加したときの名前・アイコン・起動先（`/map`）を返す（どちらも認証は不要）。ブラウザが `<link>` の
 有無によらず取りにくる `/favicon.ico` にも、同じ32px版のPNGを返している。
 
 **アイコンの正は `src/web/icons/icon.svg` の1枚。** 配信しているPNGはそこから
