@@ -34,9 +34,9 @@ export const ICONS: IconAsset[] = [
 /** マニフェストの配信パス。 */
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
-/** アイコンの背景（紫）に合わせた色。ブラウザのUIとPWAの起動画面に出る。 */
-export const THEME_COLOR = "#6b34b4";
-const BACKGROUND_COLOR = "#3b1078";
+/** アイコンの淡い青と濃い青に合わせた色。ブラウザのUIとPWAの起動画面に出る。 */
+export const THEME_COLOR = "#2f91bd";
+const BACKGROUND_COLOR = "#d8f2fa";
 
 const ICON_DIR = new URL("./icons/", import.meta.url);
 
