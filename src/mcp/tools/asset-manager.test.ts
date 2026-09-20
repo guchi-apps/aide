@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, mock } from "node:test";
-import { assetManagerImportPaymentTool } from "./asset-manager.ts";
+import { assetManagerImportPaymentTool, assetManagerSubscriptionsTool } from "./asset-manager.ts";
 
 const SECRET = "test-asset-manager-secret";
 
@@ -431,5 +431,145 @@ describe("asset_manager_import_payment", () => {
       status: "error",
       reason: "confidence は 0 以上 1 以下の数値で必須です",
     });
+  });
+});
+
+describe("asset_manager_subscriptions", () => {
+  const SUBSCRIPTIONS = {
+    status: "ok",
+    asOf: "2026-09-20",
+    summary: { monthlyTotalJpy: 6480, yearlyTotalJpy: 77760, activeCount: 1, excludedFromTotal: [], usdJpyRate: 152 },
+    subscriptions: [{ id: 3, name: "Adobe Creative Cloud", status: "SCHEDULED_TO_END", amount: 6480, monthlyAmountJpy: 6480 }],
+  };
+
+  function useEnv(): void {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+  }
+
+  it("引数は includeEnded だけの任意項目で、必須は無い", () => {
+    assert.deepEqual(Object.keys(assetManagerSubscriptionsTool.inputSchema.properties as object), ["includeEnded"]);
+    assert.equal(assetManagerSubscriptionsTool.inputSchema.required, undefined);
+    assert.equal(assetManagerSubscriptionsTool.inputSchema.additionalProperties, false);
+  });
+
+  it("GETでBearer認証付きで呼び、本文を加工せず返す（既定は解約済みを含めない）", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+      assert.equal(input, "https://asset.example.test/api/subscriptions");
+      assert.equal(init?.method, "GET");
+      assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${SECRET}`);
+      assert.equal(init?.body, undefined);
+      assert.equal((init?.headers as Record<string, string>)["Content-Type"], undefined);
+      return new Response(JSON.stringify(SUBSCRIPTIONS), { status: 200 });
+    });
+    try {
+      const result = await assetManagerSubscriptionsTool.handler({}, { sessionId: null });
+      assert.equal(result.isError, false);
+      assert.deepEqual(parsed(result), SUBSCRIPTIONS);
+      assert.equal(fetchMock.mock.callCount(), 1);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("includeEnded: true のときだけ ?includeEnded=1 を付ける", async () => {
+    useEnv();
+    const urls: string[] = [];
+    const fetchMock = mock.method(globalThis, "fetch", async (input: string | URL) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify(SUBSCRIPTIONS), { status: 200 });
+    });
+    try {
+      await assetManagerSubscriptionsTool.handler({ includeEnded: true }, { sessionId: null });
+      await assetManagerSubscriptionsTool.handler({ includeEnded: false }, { sessionId: null });
+      assert.deepEqual(urls, [
+        "https://asset.example.test/api/subscriptions?includeEnded=1",
+        "https://asset.example.test/api/subscriptions",
+      ]);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("includeEnded が真偽値でなければ、送信せずにエラーにする", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch");
+    try {
+      for (const value of ["1", 1, "true", null]) {
+        const result = await assetManagerSubscriptionsTool.handler({ includeEnded: value }, { sessionId: null });
+        assert.deepEqual(parsed(result), { status: "error", reason: "includeEnded は true / false で指定してください" });
+      }
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("契約が0件でも、空のまま status: ok で返す（isError にしない）", async () => {
+    useEnv();
+    const empty = { status: "ok", asOf: "2026-09-20", summary: { activeCount: 0, excludedFromTotal: [] }, subscriptions: [] };
+    const fetchMock = mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(empty), { status: 200 }));
+    try {
+      const result = await assetManagerSubscriptionsTool.handler({}, { sessionId: null });
+      assert.equal(result.isError, false);
+      assert.deepEqual(parsed(result), empty);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("401・404・5xxは isError: true で、向こうのreasonとhttpStatusを返す", async () => {
+    useEnv();
+    for (const [status, body, reason] of [
+      [401, JSON.stringify({ status: "error", reason: "Unauthorized" }), "Unauthorized"],
+      [404, JSON.stringify({ status: "error", reason: "Sync user not found" }), "Sync user not found"],
+      [502, "<html>Bad Gateway</html>", "Asset ManagerがHTTP 502を返しました"],
+    ] as const) {
+      const fetchMock = mock.method(globalThis, "fetch", async () => new Response(body, { status }));
+      try {
+        const result = await assetManagerSubscriptionsTool.handler({}, { sessionId: null });
+        assert.equal(result.isError, true);
+        assert.deepEqual(parsed(result), { status: "error", reason, httpStatus: status });
+      } finally {
+        fetchMock.mock.restore();
+      }
+    }
+  });
+
+  it("secret未設定時は外部へ送信しない", async () => {
+    delete process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+    const fetchMock = mock.method(globalThis, "fetch");
+    try {
+      assert.deepEqual(parsed(await assetManagerSubscriptionsTool.handler({}, { sessionId: null })), {
+        status: "error",
+        reason: "未設定（Asset Manager連携用の認証情報がありません）",
+      });
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("接続に失敗したときは、シークレットやURLを載せずに状態として返す", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch", async () => {
+      throw new Error(`connect ECONNREFUSED https://asset.example.test ${SECRET}`);
+    });
+    try {
+      const result = await assetManagerSubscriptionsTool.handler({}, { sessionId: null });
+      assert.equal(result.isError, false);
+      assert.deepEqual(parsed(result), { status: "error", reason: "Asset Managerへの接続に失敗しました" });
+      assert.ok(!result.content[0]!.text.includes(SECRET));
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("ツール説明で、金額の読み方・解約予定・excludedFromTotal・aide_money_summaryとの使い分けを示す", () => {
+    const description = assetManagerSubscriptionsTool.description;
+    for (const keyword of ["monthlyAmountJpy", "amount", "SCHEDULED_TO_END", "ENDED", "excludedFromTotal", "aide_money_summary", "includeEnded"]) {
+      assert.ok(description.includes(keyword), keyword);
+    }
   });
 });
