@@ -25,6 +25,10 @@ const PAYMENT_FIELDS = [
 
 /** 金額が不確かな理由の上限。Asset Manager の列（VarChar(191)）に収まる長さで、向こうの検証と同じ値（#341）。 */
 const MAX_AMOUNT_NOTE_LENGTH = 191;
+const DAY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_SUBSCRIPTION_NAME_LENGTH = 100;
+const MAX_PAYMENT_METHOD_NAME_LENGTH = 50;
+const MAX_LABEL_NAME_LENGTH = 30;
 
 function result(payload: unknown): ToolResult {
   return {
@@ -66,6 +70,128 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2}
 
 function validDate(value: unknown): value is string {
   return typeof value === "string" && DATE_PATTERN.test(value);
+}
+
+function validDayKey(value: unknown): value is string {
+  if (typeof value !== "string" || !DAY_KEY_PATTERN.test(value)) return false;
+  const [year, month, date] = value.split("-").map(Number) as [number, number, number];
+  const parsed = new Date(Date.UTC(year, month - 1, date));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === date;
+}
+
+function buildPricePayload(args: Record<string, unknown>, memoField = "memo"): Record<string, unknown> | string {
+  const amount = args["amount"];
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
+    return "amount は0以上の数値で指定してください";
+  }
+
+  const currency = args["currency"];
+  if (currency !== "JPY" && currency !== "USD") return "currency は JPY または USD で指定してください";
+
+  const billingCycle = args["billingCycle"];
+  if (billingCycle !== "MONTHLY" && billingCycle !== "YEARLY") {
+    return "billingCycle は MONTHLY または YEARLY で指定してください";
+  }
+
+  const billingInterval = args["billingInterval"];
+  if (typeof billingInterval !== "number" || !Number.isInteger(billingInterval) || billingInterval < 1 || billingInterval > 36) {
+    return "billingInterval は1〜36の整数で指定してください";
+  }
+
+  const billingDay = args["billingDay"];
+  if (typeof billingDay !== "number" || !Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31) {
+    return "billingDay は1〜31の整数で指定してください";
+  }
+
+  const billingMonth = args["billingMonth"];
+  if (billingCycle === "YEARLY" && (typeof billingMonth !== "number" || !Number.isInteger(billingMonth) || billingMonth < 1 || billingMonth > 12)) {
+    return "YEARLY の billingMonth は1〜12の整数で指定してください";
+  }
+  if (billingCycle === "MONTHLY" && billingMonth !== undefined && billingMonth !== null) {
+    return "MONTHLY では billingMonth を指定しないでください";
+  }
+
+  const effectiveFrom = args["effectiveFrom"];
+  if (!validDayKey(effectiveFrom)) return "effectiveFrom は正しい YYYY-MM-DD 形式で指定してください";
+
+  const memo = args[memoField];
+  if (memo !== undefined && memo !== null && typeof memo !== "string") return "memo は文字列で指定してください";
+
+  return {
+    amount,
+    currency,
+    billingCycle,
+    billingInterval,
+    billingDay,
+    billingMonth: billingCycle === "YEARLY" ? billingMonth : null,
+    effectiveFrom,
+    ...(typeof memo === "string" ? { memo: memo.trim() || null } : {}),
+  };
+}
+
+function buildCreateSubscriptionPayload(args: Record<string, unknown>): Record<string, unknown> | string {
+  const name = typeof args["name"] === "string" ? args["name"].trim() : "";
+  if (!name) return "name は必須です";
+  if (name.length > MAX_SUBSCRIPTION_NAME_LENGTH) return `name は${MAX_SUBSCRIPTION_NAME_LENGTH}文字以内で指定してください`;
+
+  const paymentMethodName = typeof args["paymentMethodName"] === "string" ? args["paymentMethodName"].trim() : "";
+  if (!paymentMethodName) return "paymentMethodName は必須です";
+  if (paymentMethodName.length > MAX_PAYMENT_METHOD_NAME_LENGTH) {
+    return `paymentMethodName は${MAX_PAYMENT_METHOD_NAME_LENGTH}文字以内で指定してください`;
+  }
+
+  const startDate = args["startDate"];
+  if (!validDayKey(startDate)) return "startDate は正しい YYYY-MM-DD 形式で指定してください";
+
+  const endDate = args["endDate"];
+  if (endDate !== undefined && endDate !== null && endDate !== "") {
+    if (!validDayKey(endDate)) return "endDate は正しい YYYY-MM-DD 形式で指定してください";
+    if (endDate < startDate) return "endDate は startDate 以後の日付で指定してください";
+  }
+
+  const autoRenew = args["autoRenew"];
+  if (autoRenew !== undefined && typeof autoRenew !== "boolean") return "autoRenew は true / false で指定してください";
+
+  const memo = args["subscriptionMemo"];
+  if (memo !== undefined && memo !== null && typeof memo !== "string") return "memo は文字列で指定してください";
+
+  const rawLabels = args["labels"];
+  if (rawLabels !== undefined && !Array.isArray(rawLabels)) return "labels は文字列の配列で指定してください";
+  const labels: string[] = [];
+  for (const label of rawLabels ?? []) {
+    if (typeof label !== "string") return "labels は文字列の配列で指定してください";
+    const normalized = label.trim();
+    if (!normalized) continue;
+    if (normalized.length > MAX_LABEL_NAME_LENGTH) return `labels の各項目は${MAX_LABEL_NAME_LENGTH}文字以内で指定してください`;
+    labels.push(normalized);
+  }
+
+  const price = buildPricePayload(args, "priceMemo");
+  if (typeof price === "string") return price;
+
+  return {
+    subscription: {
+      name,
+      paymentMethodName,
+      startDate,
+      endDate: endDate || null,
+      autoRenew: autoRenew ?? true,
+      ...(typeof memo === "string" ? { memo: memo.trim() || null } : {}),
+      labels,
+    },
+    price,
+  };
+}
+
+function buildAddSubscriptionPricePayload(args: Record<string, unknown>): Record<string, unknown> | string {
+  const subscriptionId = args["subscriptionId"];
+  if (typeof subscriptionId !== "number" || !Number.isInteger(subscriptionId) || subscriptionId <= 0) {
+    return "subscriptionId は正の整数で指定してください";
+  }
+
+  const price = buildPricePayload(args);
+  if (typeof price === "string") return price;
+  return { subscriptionId, price };
 }
 
 function buildPayload(args: Record<string, unknown>): Record<string, unknown> | string {
@@ -300,5 +426,72 @@ export const assetManagerSubscriptionsTool: Tool = {
     }
 
     return callAssetManager(includeEnded ? "/api/subscriptions?includeEnded=1" : "/api/subscriptions", { method: "GET" });
+  },
+};
+
+/** サブスクと初回料金を新規登録する（#346。Asset Manager 側は asset-manager#502）。 */
+export const assetManagerCreateSubscriptionTool: Tool = {
+  name: "asset_manager_create_subscription",
+  description:
+    "Asset Managerへサブスクと最初の料金を新規登録する書き込みツール。既存のサブスク・料金は変更も削除もできない。" +
+    "登録前に asset_manager_subscriptions の paymentMethod で支払い方法の名前を確認し、paymentMethodName にはその名前を正確に指定する。" +
+    "料金は「1回あたりの請求額」を amount に入れ、プラン変更・値上げはこのツールで作り直さず asset_manager_add_subscription_price を使う。" +
+    "実行すると契約と初回料金が作成されるため、内容を利用者に確認してから呼ぶ。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", maxLength: MAX_SUBSCRIPTION_NAME_LENGTH, description: "サブスク名。" },
+      paymentMethodName: { type: "string", maxLength: MAX_PAYMENT_METHOD_NAME_LENGTH, description: "登録済みの支払い方法名。" },
+      startDate: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "契約開始日（YYYY-MM-DD）。" },
+      endDate: { type: ["string", "null"], pattern: DAY_KEY_PATTERN.source, description: "契約終了日。未定なら省略または null。" },
+      autoRenew: { type: "boolean", description: "自動更新するか。省略時は true。" },
+      subscriptionMemo: { type: ["string", "null"], description: "契約のメモ。" },
+      labels: { type: "array", items: { type: "string", maxLength: MAX_LABEL_NAME_LENGTH }, description: "ラベル名。未登録の名前はAsset Manager側で作成する。" },
+      amount: { type: "number", minimum: 0, description: "1回あたりの請求額。" },
+      currency: { type: "string", enum: ["JPY", "USD"] },
+      billingCycle: { type: "string", enum: ["MONTHLY", "YEARLY"] },
+      billingInterval: { type: "integer", minimum: 1, maximum: 36, description: "何か月・何年ごとか。" },
+      billingDay: { type: "integer", minimum: 1, maximum: 31, description: "支払日。" },
+      billingMonth: { type: "integer", minimum: 1, maximum: 12, description: "毎年払いの支払い月。MONTHLYでは指定しない。" },
+      effectiveFrom: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "初回料金の適用開始日（YYYY-MM-DD）。" },
+      priceMemo: { type: ["string", "null"], description: "初回料金のメモ。" },
+    },
+    required: ["name", "paymentMethodName", "startDate", "amount", "currency", "billingCycle", "billingInterval", "billingDay", "effectiveFrom"],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const payload = buildCreateSubscriptionPayload(args);
+    if (typeof payload === "string") return invalid(payload);
+    return callAssetManager("/api/subscriptions", { method: "POST", body: payload });
+  },
+};
+
+/** 既存サブスクへ料金改定の履歴を追加する（#346。Asset Manager 側は asset-manager#502）。 */
+export const assetManagerAddSubscriptionPriceTool: Tool = {
+  name: "asset_manager_add_subscription_price",
+  description:
+    "Asset Managerの既存サブスクへ、プラン変更・値上げ・値下げ後の料金を履歴として追加する書き込みツール。" +
+    "既存料金を上書きしない。対象は asset_manager_subscriptions の id で指定し、適用開始日 effectiveFrom を必ず指定する。" +
+    "同じ適用開始日の料金は追加できない。内容を利用者に確認してから呼ぶ。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      subscriptionId: { type: "integer", minimum: 1, description: "asset_manager_subscriptions が返したサブスク ID。" },
+      amount: { type: "number", minimum: 0, description: "1回あたりの改定後の請求額。" },
+      currency: { type: "string", enum: ["JPY", "USD"] },
+      billingCycle: { type: "string", enum: ["MONTHLY", "YEARLY"] },
+      billingInterval: { type: "integer", minimum: 1, maximum: 36 },
+      billingDay: { type: "integer", minimum: 1, maximum: 31 },
+      billingMonth: { type: "integer", minimum: 1, maximum: 12, description: "毎年払いの支払い月。MONTHLYでは指定しない。" },
+      effectiveFrom: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "改定料金の適用開始日（YYYY-MM-DD）。" },
+      memo: { type: ["string", "null"], description: "料金改定のメモ。" },
+    },
+    required: ["subscriptionId", "amount", "currency", "billingCycle", "billingInterval", "billingDay", "effectiveFrom"],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const payload = buildAddSubscriptionPricePayload(args);
+    if (typeof payload === "string") return invalid(payload);
+    return callAssetManager(`/api/subscriptions/${payload["subscriptionId"]}/prices`, { method: "POST", body: { price: payload["price"] } });
   },
 };

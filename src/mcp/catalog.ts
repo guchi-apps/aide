@@ -17,7 +17,12 @@ import { roomStatusTool } from "./tools/room.ts";
 import { scheduleTool } from "./tools/schedule.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
-import { assetManagerImportPaymentTool, assetManagerSubscriptionsTool } from "./tools/asset-manager.ts";
+import {
+  assetManagerAddSubscriptionPriceTool,
+  assetManagerCreateSubscriptionTool,
+  assetManagerImportPaymentTool,
+  assetManagerSubscriptionsTool,
+} from "./tools/asset-manager.ts";
 import { researchDeskImportWeeklyReportTool } from "./tools/research-desk.ts";
 
 /**
@@ -50,8 +55,10 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(zaimMasterTool);
   registry.register(zaimPaymentTool);
   registry.register(assetManagerImportPaymentTool);
-  // サブスクの読み取り（#345）。取り込み（上）とは向きが逆で、書き込みの口は増えない。
+  // サブスクの読み取りと書き込みは、クライアント側の承認を分けるため別ツールにする（#345, #346）。
   registry.register(assetManagerSubscriptionsTool);
+  registry.register(assetManagerCreateSubscriptionTool);
+  registry.register(assetManagerAddSubscriptionPriceTool);
   registry.register(researchDeskImportWeeklyReportTool);
   registry.register(createNotificationTool);
   registry.register(createTaskCandidateTool);

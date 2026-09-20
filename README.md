@@ -50,6 +50,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
+| `asset_manager_create_subscription` / `asset_manager_add_subscription_price`（#346） | Asset Managerへのサブスク・初回料金の登録と、料金改定履歴の追加 | 満たす | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（取り込み・サブスクの読み取りと共用。下記） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
 
@@ -178,7 +179,7 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
    （`AIDE_BOT_*`・`AIDE_RESEARCH_DESK_*` は取り込みのコネクタからしか参照しない）。「取得用のトークンに
    書き込み権限を足した」形にはならず、各シークレットはこの登録専用。サーバー側の値はAIDEの環境変数に
    だけあり、MCPの引数・応答・ログへは出さない。
-   **Asset Manager だけは読み取りも持つ**（`asset_manager_subscriptions`。#345）。
+   **Asset Manager は取り込み・サブスクの読み取り・作成を持つ**（`asset_manager_subscriptions`、`asset_manager_create_subscription`、`asset_manager_add_subscription_price`。#345、#346）。
    `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` は Asset Manager 側で `POST /api/zaim/sync`・
    `POST /api/receipts/import`・`GET /api/subscriptions` のどれも同じ `ZAIM_SYNC_SECRET` で照合される。
    AIDE側は取り込みと同じ値で読む（新しい設定を持たない）。**条件2が避けたいのは「取得用の
@@ -194,6 +195,7 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
   この経路から取り消せない——`aide_zaim_payment` と同じ扱いで、間違いはZaimの画面から人が消す。
   曖昧な抽出結果は `confidence` を低くするよう、ツールの説明で指示している（反映待ち
   〔`pendingReview`〕にするかの判定はAsset Manager側）
+- **Asset Managerのサブスク登録・料金追加も「作成のみ」を満たす。** サブスクは初回料金と一緒に新規作成するだけで、既存契約の編集・削除は持たない。料金改定は既存料金を上書きせず、適用開始日付きの `SubscriptionPrice` を履歴として1件追加する。重複する適用開始日は Asset Manager 側が拒否する
 - **aide-bot向け3ツールとResearch Deskへの登録は条件3の例外**（下記）
 
 #### 同じキーの再送は上書きになる（aide-bot・Research Desk。条件3の例外）
@@ -402,6 +404,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `asset_manager_import_payment` | Gmailの請求メール1件をAsset Managerへ取り込む。**ChatGPTスケジュール向けの書き込みツール**（信頼度が十分だとAsset ManagerがZaimへの登録まで進める。この経路から取り消せない。詳細は[ChatGPTからAsset Managerへ請求情報を取り込む](#chatgptからasset-managerへ請求情報を取り込むmcp)） |
 | `asset_manager_subscriptions` | Asset Manager（サブスク管理の移管先）のサブスク一覧。合計（月額・年額・件数）・次の請求・契約ごとの明細（1回あたりの請求額と月あたりの金額の両方）。**読み取り専用**（`includeEnded` で解約済みも含める。詳細は[サブスクを読む](#asset-managerのサブスクを読むmcp)） |
+| `asset_manager_create_subscription` | Asset Managerへサブスクと初回料金を新規登録する。**書き込みツール**（作成のみ。既存の契約・料金を編集・削除しない） |
+| `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
 | `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体10件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
 ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
@@ -2364,7 +2368,17 @@ Asset Manager へのデータ移行（asset-manager#492）は利用者の手作�
 （ツールの説明で「0件なら移行前の可能性があるので `aide_money_summary` の固定費も見る」と指示している）。
 移行後の `aide_money_summary` の参照先の付け替えと subscription-lists 側の撤去は、このツールとは別に行う。
 
-**リリース順の制約は無い。** 受け口は asset-manager の `develop`・`main` の両方に入っている（#345の時点）。
+## Asset Managerのサブスクを登録・料金追加する（MCP）
+
+`asset_manager_create_subscription` と `asset_manager_add_subscription_price`（#346）は、サブスクの初回登録と価格改定の記録を行う書き込みツールである。読み取りの `asset_manager_subscriptions` とは別ツールにし、MCPクライアント側で書き込みの承認を分ける。
+
+新規登録では `name`・`paymentMethodName`・契約開始日と、初回料金（`amount`・通貨・請求周期・適用開始日）を渡す。支払い方法は Asset Manager に登録済みの名前を使う。料金改定では一覧が返した `id` と改定後の料金を渡す。**既存料金を更新しない。** 値上げ・値下げ・請求周期の変更はいずれも `effectiveFrom` を持つ料金履歴を1件追加する。
+
+サブスク・料金の編集と削除は持たない。AIDE は ChatGPT と Claude Code を認可上区別できず、削除だけを片方へ安全に制限できないためである。特に削除は料金履歴まで失い、README の「作成だけ」の原則にも反する。
+
+認証・宛先は読み取りと同じ `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`・`AIDE_ASSET_MANAGER_URL` を使い、新しい環境変数・secret は要らない。入力は AIDE 側と Asset Manager 側の両方で検証し、Asset Manager が返した成功・入力エラーの JSON をそのまま返す。
+
+**リリース順に注意する。** 書き込み API は asset-manager#502 が `main` へ反映されてから使える。**asset-manager の main 反映 → AIDE の本番反映**の順にする。読み取りツールだけは受け口が asset-manager の `develop`・`main` の両方に入っている（#345）。
 
 ## 電気代・ガス代を読む（MCP）
 
