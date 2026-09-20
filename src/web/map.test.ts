@@ -75,6 +75,13 @@ describe("アプリ連携の画面", () => {
     assert.ok(!html.includes('href="/knowledge"'));
   });
 
+  it("図から選んだ項目を画面中央へ移動する", () => {
+    const html = renderMapPage();
+    assert.ok(html.includes(".mapcard a[href^=\"#\"]"));
+    assert.ok(html.includes('history.pushState(null, "", href)'));
+    assert.ok(html.includes('scrollIntoView({ behavior: "smooth", block: "center" })'));
+  });
+
   it("MCPで使う側はツール名を並べず本数だけにする", () => {
     const html = renderMapPage();
     const claude = CALLERS.find((caller) => caller.id === "claude")!;
