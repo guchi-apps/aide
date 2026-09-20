@@ -42,6 +42,7 @@ const STYLE = `
  --ink:#131b22;--ink-2:#3c4a55;--muted:#67757f;
  --line:#d8e0e6;--line-2:#e9eef1;
  --accent:#1b5a75;--accent-soft:#e3edf2;--on-accent:#fff;
+ --focus:#f1f6f8;--focus-line:#9dbbc9;
  --wr:#7a4d12;--wr-bg:#f6ecdc;
  --bad:#a52f26;--bad-bg:#f8e3e0;
 }
@@ -51,6 +52,7 @@ const STYLE = `
   --ink:#dde6ec;--ink-2:#b3c1cb;--muted:#8494a0;
   --line:#26333c;--line-2:#1e2a32;
   --accent:#6bb6d6;--accent-soft:#16313e;--on-accent:#0c1216;
+  --focus:#172a34;--focus-line:#356071;
   --wr:#e0b070;--wr-bg:#33260f;
   --bad:#ef8175;--bad-bg:#3a1c19;
  }
@@ -148,7 +150,7 @@ svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
 .apps li{padding:.55rem 0;border-bottom:1px solid var(--line-2);display:grid;
  grid-template-columns:minmax(0,1fr) auto;gap:.1rem .6rem;align-items:baseline;scroll-margin-top:1rem}
 .apps li:last-child{border-bottom:0}
-.apps li:target{background:var(--accent-soft);outline:1px solid var(--accent);outline-offset:0}
+.apps li:target{background:var(--focus);outline:1px solid var(--focus-line);outline-offset:0}
 .apps .nm{font-family:${FONT_MONO};font-size:.86rem;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
 .apps .dir{display:flex;gap:.25rem}
 .b{font-size:.7rem;font-weight:700;padding:0 .4rem;border:1px solid;white-space:nowrap}
