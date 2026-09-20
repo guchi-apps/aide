@@ -442,6 +442,27 @@ const LEGEND = `<ul class="legend">
 <li><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="26" y2="5" stroke="var(--wr)" stroke-width="1.6"/><path d="M24,0 L34,5 L24,10z" fill="var(--wr)"/></svg>AIDEから流れる（書く・送る）</li>
 </ul>`;
 
+/**
+ * 図のリンクは、JavaScriptが無効なら通常のアンカーリンクとして働く。
+ * 有効なときだけ既定の上端寄せを止めて、対象を画面中央付近へ表示する。
+ */
+const CENTER_TARGET_SCRIPT = `<script>
+document.querySelectorAll('.mapcard a[href^="#"]').forEach((link) => {
+  link.addEventListener("click", (event) => {
+    const href = link.getAttribute("href");
+    const target = href ? document.getElementById(href.slice(1)) : null;
+    if (!target) return;
+    event.preventDefault();
+    history.pushState(null, "", href);
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+});
+addEventListener("popstate", () => {
+  const target = document.getElementById(location.hash.slice(1));
+  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+</script>`;
+
 export interface MapPageOptions {
   /** ヘッダー右端（ログイン中の表示・ログアウト）。 */
   headerAction?: string;
@@ -466,7 +487,8 @@ ${LEGEND}${warning}
 <div class="grid">
 ${callersCard()}
 ${GROUPS.map(groupCard).join("\n")}
-</div>`;
+</div>
+${CENTER_TARGET_SCRIPT}`;
 
   return renderPage({
     title: "AIDE のアプリ連携",
