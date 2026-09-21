@@ -13,23 +13,44 @@ const { evaluatePrinterStatus, readWatchState } = await import("./printer-watch.
 const { summarizePrinter } = await import("../../core/views/printer.ts");
 
 type MyRoomPrinter = import("../../core/connectors/myroom/types.ts").MyRoomPrinter;
+type MyRoomPrinterSnapshot = import("../../core/connectors/myroom/types.ts").MyRoomPrinterSnapshot;
 
 const NOW = new Date("2026-09-21T03:00:00.000Z");
+const ONE_MINUTE_AGO = new Date(NOW.getTime() - 60_000).toISOString();
 
-function status(overrides: Partial<MyRoomPrinter> = {}) {
+function printer(state: string, overrides: Partial<MyRoomPrinter> = {}): MyRoomPrinter {
+  return {
+    state,
+    job: { name: "benchy.3mf", progressPercent: state === "finished" ? 100 : 50 },
+    errors: { printError: null, hms: [] },
+    ...overrides,
+  };
+}
+
+/** myroom `build_response()` の online の形。 */
+function snapshot(top: Partial<MyRoomPrinterSnapshot> = {}): MyRoomPrinterSnapshot {
+  return {
+    staleThresholdSeconds: 180,
+    configured: true,
+    connection: "online",
+    online: true,
+    stale: false,
+    lastUpdateAt: ONE_MINUTE_AGO,
+    lastMessageAt: ONE_MINUTE_AGO,
+    printer: printer("printing"),
+    lastKnown: null,
+    ...top,
+  };
+}
+
+function status(state = "printing", overrides: Partial<MyRoomPrinter> = {}) {
+  return summarizePrinter(snapshot({ printer: printer(state, overrides) }), NOW);
+}
+
+/** プリンターの電源が切れている（収集は生きている）。最後の値は lastKnown に入る。 */
+function offline(lastKnownState: string) {
   return summarizePrinter(
-    {
-      staleThresholdMinutes: 10,
-      printer: {
-        online: true,
-        updatedAt: new Date(NOW.getTime() - 60_000).toISOString(),
-        state: "printing",
-        jobName: "benchy.3mf",
-        progressPercent: 50,
-        errors: [],
-        ...overrides,
-      },
-    },
+    snapshot({ connection: "printer_offline", online: false, printer: null, lastKnown: printer(lastKnownState) }),
     NOW,
   );
 }
@@ -67,7 +88,7 @@ beforeEach(async () => {
 
 describe("evaluatePrinterStatus", () => {
   it("初回は基準だけ記録し、通知しない", async () => {
-    const message = await evaluatePrinterStatus(status({ state: "finished" }), NOW);
+    const message = await evaluatePrinterStatus(status("finished"), NOW);
 
     assert.match(message, /基準を記録/);
     assert.equal(received.length, 0);
@@ -75,54 +96,63 @@ describe("evaluatePrinterStatus", () => {
   });
 
   it("印刷中→完了で1回だけ通知し、続けて呼んでも重ねて送らない", async () => {
-    await evaluatePrinterStatus(status({ state: "printing" }), NOW);
+    await evaluatePrinterStatus(status("printing"), NOW);
 
-    const done = await evaluatePrinterStatus(status({ state: "finished", progressPercent: 100 }), NOW);
+    const done = await evaluatePrinterStatus(status("finished"), NOW);
     assert.match(done, /1件を通知/);
     assert.equal(received.length, 1);
     assert.match(received[0] ?? "", /印刷が完了/);
 
-    const again = await evaluatePrinterStatus(status({ state: "finished", progressPercent: 100 }), NOW);
+    const again = await evaluatePrinterStatus(status("finished"), NOW);
     assert.match(again, /変化なし/);
     assert.equal(received.length, 1);
   });
 
   it("鮮度が切れている間は何もせず、記録も進めない", async () => {
-    await evaluatePrinterStatus(status({ state: "printing" }), NOW);
+    await evaluatePrinterStatus(status("printing"), NOW);
 
     // 電源が切れて更新が止まった。最後の値が「完了」でも遷移を作らない。
-    const stale = status({ state: "finished", updatedAt: new Date(NOW.getTime() - 60 * 60_000).toISOString() });
-    const message = await evaluatePrinterStatus(stale, NOW);
+    for (const stale of [
+      offline("finished"),
+      summarizePrinter(
+        snapshot({ connection: "collector_stale", online: false, stale: true, printer: null, lastKnown: printer("finished") }),
+        NOW,
+      ),
+      // myroom はまだ online と言っているが、AIDEの数え直しでは収集が止まっている。
+      summarizePrinter(snapshot({ lastUpdateAt: new Date(NOW.getTime() - 60 * 60_000).toISOString(), printer: printer("finished") }), NOW),
+    ]) {
+      const message = await evaluatePrinterStatus(stale, NOW);
 
-    assert.match(message, /判定しない/);
-    assert.equal(received.length, 0);
-    assert.equal((await readWatchState())?.state, "printing");
+      assert.match(message, /判定しない/);
+      assert.equal(received.length, 0);
+      assert.equal((await readWatchState())?.state, "printing");
+    }
   });
 
   it("切れている間に印刷が終わっていれば、復帰後の新しい値で完了を通知する", async () => {
-    await evaluatePrinterStatus(status({ state: "printing" }), NOW);
-    await evaluatePrinterStatus(status({ online: false }), NOW);
+    await evaluatePrinterStatus(status("printing"), NOW);
+    await evaluatePrinterStatus(offline("printing"), NOW);
     assert.equal(received.length, 0);
 
-    await evaluatePrinterStatus(status({ state: "finished" }), NOW);
+    await evaluatePrinterStatus(status("finished"), NOW);
     assert.equal(received.length, 1);
   });
 
-  it("収集が一度も届いていない（printer: null）ときは何もしない", async () => {
-    const never = summarizePrinter({ printer: null }, NOW);
+  it("収集が一度も届いていない（no_data）ときは何もしない", async () => {
+    const never = summarizePrinter({ configured: false, connection: "no_data", printer: null, lastKnown: null }, NOW);
     assert.match(await evaluatePrinterStatus(never, NOW), /判定しない/);
     assert.equal(received.length, 0);
   });
 
   it("通知を送れなかったときは記録を進めず、例外で失敗させる（次回送り直す）", async () => {
-    await evaluatePrinterStatus(status({ state: "printing" }), NOW);
+    await evaluatePrinterStatus(status("printing"), NOW);
 
     respondWith = 500;
-    await assert.rejects(evaluatePrinterStatus(status({ state: "finished" }), NOW), /送れなかった/);
+    await assert.rejects(evaluatePrinterStatus(status("finished"), NOW), /送れなかった/);
     assert.equal((await readWatchState())?.state, "printing");
 
     respondWith = 204;
-    await evaluatePrinterStatus(status({ state: "finished" }), NOW);
+    await evaluatePrinterStatus(status("finished"), NOW);
     assert.equal((await readWatchState())?.state, "finished");
   });
 
@@ -147,7 +177,7 @@ describe("evaluatePrinterStatus", () => {
   });
 
   it("記録ファイルには状態とエラーの署名だけを残す（取得した値・ジョブ名は残さない）", async () => {
-    await evaluatePrinterStatus(status({ jobName: "secret-model.3mf" }), NOW);
+    await evaluatePrinterStatus(status("printing", { job: { name: "secret-model.3mf" } }), NOW);
 
     const raw = await readFile(join(STATE_DIR, "printer-watch.json"), "utf8");
     assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ["errorSignature", "observedAt", "state"]);
@@ -155,10 +185,10 @@ describe("evaluatePrinterStatus", () => {
   });
 
   it("通知本文にジョブ名・進捗は載るが、接続情報は載らない", async () => {
-    await evaluatePrinterStatus(status({ state: "printing" }), NOW);
+    await evaluatePrinterStatus(status("printing"), NOW);
     const leaky = { serial: "01P00A000000000", accessCode: "12345678", host: "192.168.0.50" };
     await evaluatePrinterStatus(
-      status({ state: "finished", progressPercent: 100, ...leaky } as Partial<MyRoomPrinter>),
+      status("finished", leaky as Partial<MyRoomPrinter>),
       NOW,
     );
 

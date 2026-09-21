@@ -88,8 +88,8 @@ export async function fetchRoomState(config: MyRoomConfig): Promise<MyRoomSnapsh
 
 /**
  * 3Dプリンターの状態を1回で取得する。整形は行わない（`src/core/views/printer.ts` の仕事）。
- * 同じ `AIDE_MYROOM_TOKEN`（読み取り専用の内部API）で通る（guchi-apps/aide#378）。
+ * 同じ `AIDE_MYROOM_TOKEN`（読み取り専用の内部API）で通る（guchi-apps/aide#378・myroom#428）。
  */
 export async function fetchPrinterState(config: MyRoomConfig): Promise<MyRoomPrinterSnapshot> {
-  return getInternal<MyRoomPrinterSnapshot>(config, "/api/internal/printer-state");
+  return getInternal<MyRoomPrinterSnapshot>(config, "/api/internal/bambu/printer");
 }
