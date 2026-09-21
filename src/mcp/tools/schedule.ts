@@ -111,6 +111,13 @@ export const scheduleTool: Tool = {
     "freeSlots は freeWindow（既定 08:00〜22:00・freeFrom / freeTo で変えられる）の範囲で、" +
     "時刻の決まった予定・移動のどちらとも重ならない30分以上の時間帯。" +
     "**終日の予定は時間帯を持たないため freeSlots を塞いでいない**ので、allDayCount も併せて見ること。" +
+    "**予定の events には中止・不参加の記録（outcome）と本文（description）が付く。** " +
+    "outcome が CANCELED なら予定そのものが無くなった（中止）、ABSENT なら予定は行われたが自分は行かなかった（不参加）で、" +
+    "null なら通常どおり行われる。**中止・不参加の予定も一覧から消えずに残る**ため、" +
+    "「◯◯はキャンセルになったか」は outcome で判断し、存在しないから中止と読まないこと。" +
+    "中止・不参加の予定は freeSlots・busyMinutes を塞がない。" +
+    "description は予定のメモで、300文字で切ってあり（超えた分は末尾が …）、長文の全体は返さない。" +
+    "**中止・不参加にした理由は返らない**（DaySpanのAPIが持ち出していない）。" +
     "時刻はすべてDaySpanが設定タイムゾーン（既定 Asia/Tokyo）で描いた HH:MM で、" +
     "こちらで時差を足し引きしないこと。" +
     "configured が false なら接続が未設定、complete が false なら取得できなかったものがあり、" +

@@ -27,6 +27,15 @@ export interface DaySpanEvent {
   /** 元のカレンダー名（「仕事」など）。 */
   calendarName?: string | null;
   recurring?: boolean;
+  /**
+   * 中止・不参加の記録（DaySpan docs/spec.md §37）。`CANCELED`（予定そのものが無くなった）か
+   * `ABSENT`（予定は行われたが自分は行かなかった）。無ければ null。
+   *
+   * **DaySpanは記録の付いた予定を落とさず返す**（黙って消すと「予定が無かった」ことになるため）。
+   * 起こらない予定として扱うかどうかは呼び出し側（AIDE）が決める。
+   * 将来種類が増えても落ちないよう、文字列として受ける。
+   */
+  outcome?: string | null;
   url?: string | null;
 }
 

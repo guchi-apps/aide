@@ -46,10 +46,12 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 | `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
+| `POST /api/zaim/payment/web/memo`（aide#354） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のメモの書き換え | **満たす**（下記） | ログイン状態（storage state。新規登録・カテゴリ変更と共用） | **例外**（下記。メモの書き換えのみ） |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
+| `aide_aircon_control`（aide#316） | myroom経由でのエアコンの電源・運転モード・設定温度・風量の変更（白くまくんへ運転指示を送る） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（照明の操作と共用。読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
 | `asset_manager_create_subscription` / `asset_manager_add_subscription_price`（#346） | Asset Managerへのサブスク・初回料金の登録と、料金改定履歴の追加 | 満たす | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（取り込み・サブスクの読み取りと共用。下記） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
@@ -149,6 +151,14 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 
 詳細は[既存明細のカテゴリ・内訳の変更](#既存明細のカテゴリ内訳の変更aide273)。
 
+**メモの書き換え（`POST /api/zaim/payment/web/memo`・aide#354）も、同じ理由の別の例外として個別に決めた**
+（上の「前例として使わない」の運用どおり、この節を根拠にせず #354 で判断した）。銀行口座・
+デビットカードの連携明細はZaimの「置き換え」の対象外で、asset-manager の家計簿連携
+（asset-manager#514）が買った物を書き込む先が、その連携明細のメモしか無いため。**許すのは
+メモ（`input[name="comment"]`）を書き換える（空文字なら消す）ことだけ**で、カテゴリ・金額・日付・
+口座・品目・お店・集計対象外は変えない（`normalizeWebMemoEditInput()` がメモ以外を受け取らない）。
+条件1・2はカテゴリ変更と同じ理由で満たす。詳細は[既存明細のメモの書き換え](#既存明細のメモの書き換えaide354)。
+
 #### 予定の作成は3条件を文言どおり満たす（aide#243）
 
 `aide_create_event` はDaySpan経由での予定（Googleカレンダー）の新規作成で、他の書き込みと違い
@@ -174,10 +184,27 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 2. **読み取りとは別の資格情報。** 読み取り用の `AIDE_MYROOM_TOKEN` とは別に
    `AIDE_MYROOM_CONTROL_TOKEN` を持つ。myroom側も読み取り用の `INTERNAL_API_KEY` とは別の
    `INTERNAL_CONTROL_API_KEY` で守る（[myroom#419](https://github.com/guchi-apps/myroom/issues/419)）
-3. **例外。** 押せるのは myroom の画面で登録済みのボタンだけで、Nature Remo の signal を直接送る口や
-   エアコンの設定変更は持たない
+3. **例外。** 押せるのは myroom の画面で登録済みのボタンだけで、Nature Remo の signal を直接送る口は
+   持たない。エアコン（白くまくん）の運転指示はこのツールでは送らない（[別のツール](#エアコンの操作は条件3の例外aide316)）
 
 誤操作の防ぎ方は[照明などの操作](#照明などの操作aide317)。**この例外を前例として使わない。**
+状態を変える書き込みを次に持ち込むときは、この節を根拠にせずIssueで改めて決める。
+
+#### エアコンの操作は条件3の例外（aide#316）
+
+`aide_aircon_control` は myroom 経由で白くまくん（AirCloud Home）へ運転指示を送り、エアコンの電源・
+運転モード・設定温度・風量を変える。**部屋の機器の状態を変える操作で、「作成だけ」ではない。**
+**照明の操作（aide#317）の例外を前例にせず、Issue #316 で改めて判断した。** 持つのは、変更前の状態を
+応答に返すので、その値を指定し直せば元に戻せる取り返しのつく操作だから（Issueでユーザーが決定）。
+
+1. **他のどこからも塞がっている経路。** myroom のエアコン操作（#213）はログインしたブラウザ専用で、
+   Claude / ChatGPT から届く経路は他に無い
+2. **読み取りとは別の資格情報。** 照明の操作と同じ `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の
+   `AIDE_MYROOM_TOKEN` とは別）。**白くまくんのログイン情報はAIDEに持たない**（myroom が持つ）
+3. **例外。** 変えられるのは電源・運転モード・設定温度・風量の4項目だけ。風向・湿度など他の設定や、
+   タイマー・スケジュールの登録は持たない
+
+誤操作の防ぎ方は[エアコンの操作](#エアコンの操作aide316)。**この例外を前例として使わない。**
 状態を変える書き込みを次に持ち込むときは、この節を根拠にせずIssueで改めて決める。
 
 #### ChatGPTのスケジュールからの取り込みは条件1・2を満たす（#199・aide#205・aide#211）
@@ -274,7 +301,7 @@ Core をフルスコープで作っておけば、MCP層で「出す／出さな
 ### 読み取りと書き込みは必ず分ける
 
 `aide_zaim_master` / `aide_zaim_payment`（aide#135）、`aide_room_buttons` / `aide_room_press`（#317）、
-`aide_schedule` / `aide_create_event`（#243）、`asset_manager_subscriptions` /
+`aide_aircon_status` / `aide_aircon_control`（#316）、`aide_schedule` / `aide_create_event`（#243）、`asset_manager_subscriptions` /
 `asset_manager_create_subscription`（#345・#346）はいずれもこの理由で2本になっている。
 **1本に畳むと、クライアント側で「常に許可」にしたときに書き込みまで素通しになる。**
 
@@ -441,8 +468,9 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_printer_status` | 3Dプリンター（Bambu Lab A1 mini）の状態。印刷状態・進捗率・残り時間・レイヤー・温度・AMS Lite・エラー・最終更新。**鮮度を必ず返し、切れているときは現在の状態を返さない**（詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）。**読み取りだけ** |
 | `aide_room_buttons` | 照明など、AIDEから押せる機器のボタンの一覧（myroom に登録済みの Nature Remo のボタン）。読み取りだけ |
 | `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで。`dryRun` で押さずに確認できる） |
+| `aide_aircon_control` | エアコンの電源・運転モード・設定温度・風量を変更する。**部屋の機器を操作するツール**（`acId` と名前を myroom のいまの状態と突き合わせてから送る。オフラインには送らない。結果は変更前の状態と送信後の読み戻しまで返す。`dryRun` で送らずに確認できる。詳細は[エアコンの操作](#エアコンの操作aide316)） |
 | `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
-| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325） |
+| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）。予定には中止・不参加の記録（`outcome`）と本文（300文字まで）が付く（#388） |
 | `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |
 | `aide_dev_status` | 各リポジトリの開発状況を**俯瞰で**返す。最新リリース・未リリースの差分・Issue/PRの件数・確認待ち・直近コミット・CIの成否。引数は取らない |
 | `aide_repo_status` | リポジトリ1件の詳細。俯瞰の項目に加えて、直近コミットの一覧・確認待ちのIssue・open な Pull Request |
@@ -1000,7 +1028,7 @@ asset-manager（VPS）
 | | VPS（中継する側） | サブPC（画面を操作する側） |
 |---|---|---|
 | 動かすもの | 本体サーバー（PM2） | `src/worker/zaim-web-server.ts`（`aide-zaim-web.service`） |
-| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web`・`POST /api/zaim/payment/web/genre`（#273）と `/health` だけ** |
+| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web`・`/genre`（#273）・`/memo`（#354）と `/health` だけ** |
 | 要る設定 | `AIDE_ZAIM_WEB_UPSTREAM_URL` | `AIDE_ZAIM_WRITE_SECRET`・`AIDE_ZAIM_WEB_HOST` |
 | 冪等の記録 | 持たない | `data/zaim-web-payments.json` |
 
@@ -1145,6 +1173,46 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 される時点で動かない可能性がある**。当たらなかった場合は `scripts/edit-genre.mjs` のセレクタを
 実物に合わせて直す。
 
+
+### 既存明細のメモの書き換え（aide#354）
+
+銀行口座・デビットカードの連携明細は、Zaimの「置き換え」（カード・電子マネーの連携明細にしか
+効かない。公式「対象となる履歴」）で置き換えられない。asset-manager の家計簿連携
+（asset-manager#514）は代わりに、**その連携明細のメモへ買った物を直接書き込む**。自動連携明細は
+公式APIから編集できず、上の `/genre` はカテゴリ・内訳しか触らないため、同じ編集画面
+（`/money/<moneyId>/edit`）から**メモ（`input[name="comment"]`）だけ**を書き換える口を設けた。
+[条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることは `/genre` と同じ。
+
+```bash
+curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/memo \
+  -H "authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"requestId":"asset-manager:zaim-memo:5001:<本文の指紋>","moneyId":5001,
+       "date":"2026-09-17","amount":1284,"comment":"おにぎり 158円／牛乳 218円"}'
+# => {"ok":true,"moneyId":5001,"duplicated":false,"requestId":"asset-manager:zaim-memo:5001:<本文の指紋>"}
+```
+
+- `comment` は**必須**。**空文字ならメモを消す**。省略・`null`・文字列以外は400（項目名の取り違えで
+  メモが黙って消えるのを防ぐ）
+- 上限は `write.ts` の `MAX_TEXT_LENGTH`（100文字）。**超えたら切らずに400**で返す（呼び出し側も
+  同じ値で切っている）。メモ欄は1行の入力なので、改行・タブ・制御文字も400
+- **`requestId` はメモ本文へ混ぜない。** 新規登録の `composeComment` は二重登録を探す手掛かりとして
+  混ぜているが、ここでは利用者が読むメモが汚れるだけで、冪等は記録で足りる
+- 取り違えの検知（開いた明細の `date`・`amount` が本文と違えば何も触らず422）・冪等（同じ
+  `requestId` は `duplicated: true`）・同時実行のロック・失敗の分類・中継・ステータス
+  （400 / 401 / 409 / 422 / 503）は `/genre` と**同じ実装を通る**。冪等の記録も
+  `data/zaim-web-genre-edits.json` を共用する（`requestId` の接頭辞が違うので衝突しない）
+- 応答まで数十秒かかる。`"dryRun": true`（手元では `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1`）を足すと
+  **保存だけ行わず**、取り違えの検知とメモの入力までを試す
+
+**サブPCの受け口は、デプロイ後に再起動しないと新しい経路が開かない。** 受け口は起動時に
+経路の表を読み込むため、VPSだけ更新しても中継先が404を返す（呼び出し側 asset-manager は404を
+`notImplemented` として扱い、「コピーしてZaimアプリへ貼り付ける」導線に落ちる）。
+
+**編集画面のメモ欄の位置は、この実装の時点でZaimの実物では確認していない。** 新規登録画面と同じく
+品目行の中の `input[name="comment"]` に在る想定で、見つからない・複数ある・書いた値が読み直せない
+場合は保存の手前で止まる。**初めて実アクセスする前に `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1` で当たりを確認する**。
+外れたときは `scripts/edit-memo.mjs` のセレクタを実物に合わせて直す。
 
 ## コネクタ: ops-dashboard
 
@@ -1316,6 +1384,7 @@ src/core/connectors/myroom/
   types.ts   myroom のレスポンスのうち、AIDEが使うフィールドだけを再宣言
   index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
   control.ts 照明などの操作（ボタンの一覧と押す。aide#317）
+  aircon-control.ts エアコンの操作（状態の読み取り・運転指示・入力の検証。aide#316）
 src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
 src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後述。aide#378）
 ```
@@ -1344,7 +1413,8 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 操作そのものは myroom が持っている（`backend/remote.py`。Nature Remo へ赤外線の送信を依頼する）。
 **AIDEは Nature Remo を直接叩かず、myroom の画面で登録済みのボタンをIDで押すだけにする。**
 直接叩くとボタンの定義・表示名が myroom と二重になり、Nature Remo のレート制限（30回/5分）も
-両者で食い合う。対象は Nature Remo のボタンだけで、エアコン（白くまくん）の操作は持たない。
+両者で食い合う。**このツールの対象は Nature Remo のボタンだけ**で、エアコン（白くまくん）の操作は
+別のツール（[エアコンの操作](#エアコンの操作aide316)）。
 
 | myroom の内部API | 使うツール |
 |---|---|
@@ -1366,6 +1436,40 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 **結果は「myroom が Nature Remo へ送信を依頼できたか」まで。** 赤外線は片方向で、機器が反応したかは
 返ってこない（myroom#106）。応答を待ちきれなかったときは送れたか分からないため `unknown` を返し、
 再送せずに利用者へ確かめるよう案内する。照明なら `aide_room_sensors` の照度の変化でも確かめられる。
+
+### エアコンの操作（aide#316）
+
+操作そのものは myroom が持っている（`backend/aircon_control.py`。白くまくん〔AirCloud Home〕へ運転指示を
+送る）。**AIDEは白くまくんへ直接繋がず、サインインもトークンの更新も持たない。** 直接叩くと、ログイン状態・
+レート制限（429）の管理が myroom と二重になり、資格情報がもう1か所に増える。
+
+| myroom の内部API | 使うもの |
+|---|---|
+| `GET /api/internal/aircon/units/{ac_id}/state` | `aide_aircon_control`（送る前の状態と、送った後の読み戻し。**DBではなく白くまくんから直接読む**） |
+| `POST /api/internal/aircon/units/{ac_id}/control` | `aide_aircon_control`（受けるのは電源・運転モード・設定温度・風量の4項目だけ） |
+
+どちらも照明の操作と同じ `INTERNAL_CONTROL_API_KEY`（AIDE側は `AIDE_MYROOM_CONTROL_TOKEN`）で通る。
+**契約は AIDE 側で先に決めた**（[myroom#439](https://github.com/guchi-apps/myroom/issues/439) の実装より前）。
+**myroom が未実装のバージョンなら 404 が返り、何も送らずに `unsupported` として止まる。**
+**リリースは myroom → AIDE の順**（AIDE を先に出しても、安全に失敗するだけで何も送らない）。
+
+誤操作は次で防ぐ。
+
+- **`acId` と名前の両方を受け取り、送る直前に myroom の今の状態と突き合わせる。** 一致しなければ
+  送らずに `mismatch` を返す。名前は `aide_aircon_status` の値をそのまま渡す
+- **オフライン（`online: false`）のエアコンには送らない。** 送っても反映されないのに、成功に見える
+- **今と同じ値なら送らない**（`changed: false`）。絶対値で指定するので二重に送っても結果は変わらないが、
+  送れたか分からない状況での再試行が白くまくんの回数制限を食うだけになるため
+- **設定温度は16〜32℃の0.5℃刻みだけを受け、丸めない。** 27.3 を 27.5 にして送ると頼んだ値と違う
+- **自動運転（`AUTO`）では設定温度を受けない。** 自動運転の「設定温度」は室温からのシフト量で意味が違う。
+  自動運転との行き来で温度の指定が無いときは、myroom が既定値へ置き換える旨を `warning` で返す
+- **送る前に、対象の名前と変更内容を利用者へ伝えて確認を取る**よう、ツールの説明文でClaudeに求める。
+  迷うときは `dryRun` で「変更前→変更後」だけを見られる
+
+**結果は「送れたか」と「指定どおりの状態になったか」を分けて返す。** 送信後に状態を読み戻し、
+`readback.matches` に一致の有無を入れる。**`false` でも失敗とは限らない**（白くまくんの反映に時間がかかる
+ことがある）ので、再送せずしばらくしてから確かめるよう案内する。応答を待ちきれなかったときは送れたか分からない
+ため `unknown` を返し、再送しない。応答の `before` は変更前の状態で、間違えたときはその値で元に戻せる。
 
 ### 鮮度と判定
 
@@ -1618,9 +1722,23 @@ Googleの予定は返す）。握りつぶすと「予定が無い日」とし�
 
 ### 返す粒度
 
-予定は件名・時間帯・場所・カレンダー名・繰り返しの有無まで。**本文（`description`）は返さない。**
-予定の中身を読み上げるためのツールではなく、「その日が何で埋まっていて、どこが空いているか」に
-答えるためのもので、本文を載せるとコンテキストを食うだけになる。
+予定は件名・時間帯・場所・カレンダー名・繰り返しの有無・**中止／不参加の記録（`outcome`）・本文
+（`description`）**まで（#388）。
+
+**`outcome` は `CANCELED`（予定そのものが無くなった）・`ABSENT`（予定は行われたが自分は行かなかった）・
+null。** DaySpanは記録の付いた予定を落とさず返す（黙って消すと「予定が無かった」ことになるため）ので、
+AIDEも一覧から消さず、そのまま持ち上げる。aide-bot が「キャンセルになったのか」を判断できるように
+するためのもの。**中止・不参加の予定は `freeSlots`・`busyMinutes` を塞がない**（流れた打ち合わせの
+時間は実際には空いている）。DaySpanが将来 `outcome` の種類を増やしても、null 以外は「起こらない予定」
+として同じに扱う。
+
+**本文は300文字で切って返す**（超えた分は末尾が `…`）。以前は「予定の中身を読み上げるツールではない」
+として返していなかったが、キャンセルの有無や補足がメモにしか書かれていない予定があるため、
+コンテキストを食わない長さに切って載せる形に改めた。
+
+**返らないもの。** 中止・不参加にした**理由のメモ**（DaySpanの `EventOutcome.note`）と、Googleの
+出欠（`responseStatus`）は、DaySpanの内部APIが持ち出していないため返らない。必要になったら
+DaySpan側に足す。Notionのタスク・日付リマインドの `memo` も同じく載せていない。
 
 期限切れタスク（`overdueTasks`）は**既定で取りにいかない**（`includeOverdueTasks: true` のときだけ）。
 遡るとNotionへの往復が1回増えるうえ、半年前に期限が過ぎたタスクを読み上げても行動は変わらない。

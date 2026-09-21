@@ -81,20 +81,24 @@ export type CreateWebGenreEditOutcome =
       reason: string;
     };
 
-/**
- * 受け取ったJSONを検査して入力へ変換する。
- *
- * `write.ts` の `normalizeText` / `normalizeId` / `isValidDate` を再利用する（`web-payment.ts` と
- * 同じ方針で、経路によって受け付ける値の範囲を変えない）。
- */
-export function normalizeWebGenreEditInput(
-  raw: unknown,
-): { input: ZaimWebGenreEditInput } | { error: string } {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { error: "JSONオブジェクトを送ってください" };
-  }
-  const body = raw as Record<string, unknown>;
+/** 既存明細を編集画面から変更する経路が共通で受け取る、対象の明細を指す4項目。 */
+export interface ZaimWebEditTarget {
+  requestId: string;
+  moneyId: number;
+  date: string;
+  amount: number;
+}
 
+/**
+ * 対象の明細を指す `requestId`・`moneyId`・`date`・`amount` を検査する。
+ *
+ * カテゴリの変更（ここ）とメモの変更（`web-memo-edit.ts`・#354）で共用する。**経路によって
+ * 受け付ける値の範囲を変えない**ためで、`write.ts` の `normalizeId` / `isValidDate` を再利用する
+ * （`web-payment.ts` と同じ方針）。
+ */
+export function normalizeWebEditTarget(
+  body: Record<string, unknown>,
+): { target: ZaimWebEditTarget } | { error: string } {
   const requestId = typeof body["requestId"] === "string" ? body["requestId"].trim() : "";
   if (!requestId) return { error: "requestId が必要です（呼び出し元のレコードごとに一意な文字列）" };
   if (requestId.length > MAX_REQUEST_ID_LENGTH) {
@@ -117,6 +121,25 @@ export function normalizeWebGenreEditInput(
     return { error: "date は YYYY-MM-DD 形式の実在する日付で指定してください" };
   }
 
+  return { target: { requestId, moneyId: moneyId.value!, amount, date } };
+}
+
+/**
+ * 受け取ったJSONを検査して入力へ変換する。
+ *
+ * `write.ts` の `normalizeText` を再利用する。対象の明細を指す項目は `normalizeWebEditTarget()`。
+ */
+export function normalizeWebGenreEditInput(
+  raw: unknown,
+): { input: ZaimWebGenreEditInput } | { error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { error: "JSONオブジェクトを送ってください" };
+  }
+  const body = raw as Record<string, unknown>;
+
+  const target = normalizeWebEditTarget(body);
+  if ("error" in target) return { error: target.error };
+
   const required: Array<[string, string]> = [
     ["categoryName", "categoryName（カテゴリ名）"],
     ["genreName", "genreName（ジャンル名）"],
@@ -131,10 +154,7 @@ export function normalizeWebGenreEditInput(
 
   return {
     input: {
-      requestId,
-      moneyId: moneyId.value!,
-      amount,
-      date,
+      ...target.target,
       categoryName: texts["categoryName"]!,
       genreName: texts["genreName"]!,
       ...(body["dryRun"] === true ? { dryRun: true } : {}),

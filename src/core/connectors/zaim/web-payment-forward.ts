@@ -6,6 +6,8 @@ import type {
 import { WEB_PAYMENT_TIMEOUT_MS } from "./web-payment.ts";
 import type { CreateWebGenreEditOutcome, ZaimWebGenreEditInput } from "./web-genre-edit.ts";
 import { WEB_GENRE_EDIT_TIMEOUT_MS } from "./web-genre-edit.ts";
+import type { CreateWebMemoEditOutcome, ZaimWebMemoEditInput } from "./web-memo-edit.ts";
+import { WEB_MEMO_EDIT_TIMEOUT_MS } from "./web-memo-edit.ts";
 
 /**
  * Web版の入力画面からの登録を、**それが成立するマシンへ中継する**（#215）。
@@ -52,6 +54,9 @@ export const ZAIM_WEB_FORWARD_TIMEOUT_MS = WEB_PAYMENT_TIMEOUT_MS + 30_000;
 
 /** 既存明細のカテゴリ変更（#273）の中継の上限。考え方は上と同じ。 */
 export const ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS = WEB_GENRE_EDIT_TIMEOUT_MS + 30_000;
+
+/** 既存明細のメモの書き換え（#354）の中継の上限。考え方は上と同じ。 */
+export const ZAIM_WEB_MEMO_EDIT_FORWARD_TIMEOUT_MS = WEB_MEMO_EDIT_TIMEOUT_MS + 30_000;
 
 /**
  * 接続そのものが確立できなかったことを示すエラーコード。
@@ -244,18 +249,21 @@ export async function forwardZaimWebPayment(
 }
 
 /**
- * 既存明細のカテゴリ・内訳の変更（#273）を中継する。考え方は `forwardZaimWebPayment` と同じで、
- * 判定に使う定数（`NOT_DELIVERED_CODES`・`NOT_STARTED_STATUSES`・`KNOWN_KINDS`）もそのまま使い回す。
+ * 既存明細を編集画面から変更する経路（カテゴリ・内訳の #273、メモの #354）の中継。考え方は
+ * `forwardZaimWebPayment` と同じで、判定に使う定数（`NOT_DELIVERED_CODES`・`NOT_STARTED_STATUSES`・
+ * `KNOWN_KINDS`）もそのまま使い回す。**経路が違うのは相手のパスと打ち切りの上限だけ。**
  *
  * **`moneyId` は呼び出し元が渡した値をそのまま返す**（新規登録と違い `null` にならない）。
  * 相手の応答に載っていればそちらを、読めなければ入力の `moneyId` を使う。
  */
-export async function forwardZaimWebGenreEdit(
-  input: ZaimWebGenreEditInput,
+async function forwardZaimWebEdit(
+  path: string,
+  defaultTimeoutMs: number,
+  input: { moneyId: number },
   options: ZaimWebForwardOptions,
 ): Promise<CreateWebGenreEditOutcome> {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const url = `${options.baseUrl.replace(/\/$/, "")}/api/zaim/payment/web/genre`;
+  const url = `${options.baseUrl.replace(/\/$/, "")}${path}`;
 
   let response: Response;
   try {
@@ -267,7 +275,7 @@ export async function forwardZaimWebGenreEdit(
         [ZAIM_WEB_FORWARDED_HEADER]: "1",
       },
       body: JSON.stringify(input),
-      signal: AbortSignal.timeout(options.timeoutMs ?? ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS),
+      signal: AbortSignal.timeout(options.timeoutMs ?? defaultTimeoutMs),
     });
   } catch (cause) {
     const code = errorCode(cause);
@@ -330,4 +338,30 @@ export async function forwardZaimWebGenreEdit(
       `Zaim Web版の変更を行うマシンの応答を読めませんでした（HTTP ${response.status}）。` +
       "変更されたかどうかは分かりません。Zaimの画面で確認してください。",
   };
+}
+
+/** 既存明細のカテゴリ・内訳の変更（#273）を中継する。 */
+export function forwardZaimWebGenreEdit(
+  input: ZaimWebGenreEditInput,
+  options: ZaimWebForwardOptions,
+): Promise<CreateWebGenreEditOutcome> {
+  return forwardZaimWebEdit(
+    "/api/zaim/payment/web/genre",
+    ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS,
+    input,
+    options,
+  );
+}
+
+/** 既存明細のメモの書き換え（#354）を中継する。 */
+export function forwardZaimWebMemoEdit(
+  input: ZaimWebMemoEditInput,
+  options: ZaimWebForwardOptions,
+): Promise<CreateWebMemoEditOutcome> {
+  return forwardZaimWebEdit(
+    "/api/zaim/payment/web/memo",
+    ZAIM_WEB_MEMO_EDIT_FORWARD_TIMEOUT_MS,
+    input,
+    options,
+  );
 }

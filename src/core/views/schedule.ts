@@ -42,6 +42,9 @@ export interface TimeWindow {
   to: string;
 }
 
+/** 予定の本文（`description`）を返す長さの上限。超えた分は切って末尾に `…` を付ける。 */
+export const MAX_DESCRIPTION_LENGTH = 300;
+
 export interface ScheduleEvent {
   title: string;
   allDay: boolean;
@@ -51,6 +54,13 @@ export interface ScheduleEvent {
   location: string | null;
   calendarName: string | null;
   recurring: boolean;
+  /**
+   * 中止・不参加の記録。`CANCELED`（予定そのものが無くなった）／`ABSENT`（予定は行われたが
+   * 自分は行かなかった）／記録が無ければ null。**null 以外の予定は `freeSlots` を塞いでいない。**
+   */
+  outcome: string | null;
+  /** 予定の本文（メモ）。`MAX_DESCRIPTION_LENGTH` 文字で切ってある。無ければ null。 */
+  description: string | null;
   url: string | null;
 }
 
@@ -256,6 +266,22 @@ export function computeFreeSlots(
   return { freeSlots, busyMinutes };
 }
 
+/**
+ * 本文を上限の長さで切る。**純粋関数。**
+ *
+ * 予定の本文は議事録や長いURL一覧が入ることがあり、14日ぶんを返すと応答が膨らむ。
+ * サロゲートペア（絵文字など）を途中で割らないよう、コードポイント単位で数える。
+ */
+export function truncateDescription(
+  value: string | null | undefined,
+  max: number = MAX_DESCRIPTION_LENGTH,
+): string | null {
+  const body = text(value)?.trim();
+  if (!body) return null;
+  const chars = [...body];
+  return chars.length <= max ? body : `${chars.slice(0, max).join("")}…`;
+}
+
 function summarizeEvent(event: DaySpanEvent): ScheduleEvent {
   return {
     title: text(event.title) ?? "（無題の予定）",
@@ -265,6 +291,8 @@ function summarizeEvent(event: DaySpanEvent): ScheduleEvent {
     location: text(event.location),
     calendarName: text(event.calendarName),
     recurring: event.recurring === true,
+    outcome: text(event.outcome),
+    description: truncateDescription(event.description),
     url: text(event.url),
   };
 }
@@ -317,8 +345,9 @@ export function summarizeDay(day: DaySpanDay, window: TimeWindow = DEFAULT_FREE_
   const events = (day.events ?? []).map(summarizeEvent);
   const travels = (day.travels ?? []).map(summarizeTravel);
   // 終日の予定は時間帯を持たないので、空きの計算には入れない。
+  // 中止・不参加の記録が付いた予定も入れない（流れた打ち合わせの時間は、実際には空いている）。
   const { freeSlots, busyMinutes } = computeFreeSlots(
-    [...events.filter((event) => !event.allDay), ...travels],
+    [...events.filter((event) => !event.allDay && event.outcome === null), ...travels],
     window,
   );
 
@@ -369,6 +398,12 @@ export function summarizeSchedule(
   ];
   if (days.some((day) => day.allDayCount > 0)) {
     notes.push("終日の予定は時間帯を持たないため freeSlots を塞いでいない。");
+  }
+  if (days.some((day) => day.events.some((event) => event.outcome !== null))) {
+    notes.push(
+      "events の outcome が CANCELED（中止）・ABSENT（不参加）の予定は、記録として残っているが起こらなかった予定で、" +
+        "freeSlots・busyMinutes には数えていない。",
+    );
   }
   if (sources.googleConnected === false) {
     notes.push("Googleカレンダーが未接続のため、events が空でも予定が無いという意味ではない。");

@@ -1,4 +1,5 @@
 import { ToolRegistry } from "./registry.ts";
+import { airconControlTool } from "./tools/aircon-control.ts";
 import { claudeSessionsTool } from "./tools/claude-sessions.ts";
 import { createEventTool } from "./tools/create-event.ts";
 import { devStatusTool, repoLabelsTool, repoStatusTool } from "./tools/dev.ts";
@@ -57,6 +58,8 @@ export function buildToolRegistry(): ToolRegistry {
   // 照明などの操作（#317）。**一覧と押すを分けている**（Zaimと同じ理由）。
   registry.register(roomButtonsTool);
   registry.register(roomPressTool);
+  // エアコンの操作（#316）。読み取り（aide_aircon_status）と分けている（照明・Zaimと同じ理由）。
+  registry.register(airconControlTool);
   registry.register(weatherTool);
   registry.register(scheduleTool);
   // 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
