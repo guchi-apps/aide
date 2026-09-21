@@ -54,6 +54,7 @@ export const roomSensorsTool: Tool = {
     "を尋ねられたときに呼ぶ。" +
     "**ここで返すのはいまの実測値**で、今日・明日の予報ではない（予報は aide_weather）。" +
     "**エアコンの運転状態は返さない**（それは aide_aircon_status）。" +
+    "**3Dプリンターの状態は返さない**（それは aide_printer_status）。" +
     "problems に気になる点が1行ずつ入るので、まずそこを見ること。ok が true なら判定できた範囲で問題なし。" +
     "stale が true のセンサーは受信が止まっており、値は最後に受信した時点のもので現在の値ではない" +
     "（この場合その値は problems の判定に使っていない）。" +

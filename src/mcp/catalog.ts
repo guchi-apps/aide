@@ -11,6 +11,7 @@ import {
 } from "./tools/notifications.ts";
 import { hostStatusTool, serviceQuotasTool, uptimeMonitorsTool } from "./tools/ops.ts";
 import { pingTool } from "./tools/ping.ts";
+import { printerStatusTool } from "./tools/printer.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
 import { airconStatusTool, roomSensorsTool } from "./tools/room.ts";
 import { scheduleTool } from "./tools/schedule.ts";
@@ -51,6 +52,8 @@ export function buildToolRegistry(): ToolRegistry {
   // 部屋も測定値とエアコンで問いが違う（#373）。
   registry.register(roomSensorsTool);
   registry.register(airconStatusTool);
+  // 3Dプリンター（#378）。部屋の測定値とは問いが違う。進捗・完了・エラー・温度は同じ1台の同じ時点の値なので1本。
+  registry.register(printerStatusTool);
   // 照明などの操作（#317）。**一覧と押すを分けている**（Zaimと同じ理由）。
   registry.register(roomButtonsTool);
   registry.register(roomPressTool);
