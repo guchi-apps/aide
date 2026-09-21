@@ -107,17 +107,23 @@ describe("Googleログインの往復", () => {
     assert.equal(readHandshake(value, KEY)?.next, "/map");
   });
 
+  it("iOSアプリが作ったPKCE challengeを署名つきで持ち回れる", () => {
+    const challenge = "a".repeat(43);
+    const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/map", appChallenge: challenge });
+    assert.equal(readHandshake(value, KEY)?.appChallenge, challenge);
+  });
+
   it("書き換えた値は通らない", () => {
     const value = issueHandshake(KEY, { state: "abc", verifier: "xyz" });
-    const [expiresAt, , verifier, next, signature] = value.split(".");
-    assert.equal(readHandshake([expiresAt, "zzz", verifier, next, signature].join("."), KEY), null);
+    const [expiresAt, , verifier, next, appChallenge, signature] = value.split(".");
+    assert.equal(readHandshake([expiresAt, "zzz", verifier, next, appChallenge, signature].join("."), KEY), null);
   });
 
   it("戻り先だけを書き換えた値も通らない", () => {
     const value = issueHandshake(KEY, { state: "abc", verifier: "xyz", next: "/map" });
-    const [expiresAt, state, verifier, , signature] = value.split(".");
+    const [expiresAt, state, verifier, , appChallenge, signature] = value.split(".");
     const forged = Buffer.from("https://example.com", "utf8").toString("base64url");
-    assert.equal(readHandshake([expiresAt, state, verifier, forged, signature].join("."), KEY), null);
+    assert.equal(readHandshake([expiresAt, state, verifier, forged, appChallenge, signature].join("."), KEY), null);
   });
 
   it("10分で切れる", () => {
