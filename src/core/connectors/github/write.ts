@@ -51,6 +51,8 @@ export interface CreateIssueInput {
   body?: string | undefined;
   /** 省略時は DEFAULT_LABELS。対象リポジトリに実在するものだけが付く。 */
   labels?: string[] | undefined;
+  /** 本文の末尾に付ける出所の記録。省略時は Claudeアプリ経由の脚注（`FOOTNOTE`）。 */
+  footnote?: string | undefined;
 }
 
 export interface CreateIssueOutcome {
@@ -122,10 +124,15 @@ export function selectExistingLabels(
   return { applied, dropped };
 }
 
-/** 本文を組み立てる。空でも脚注だけは必ず載せる。 */
-export function buildBody(body: string | undefined): string {
+/**
+ * 本文を組み立てる。空でも脚注だけは必ず載せる。
+ *
+ * 脚注は既定だとClaudeアプリ経由の起票を名乗る。**別の経路から起票するときは、その経路を名乗る
+ * 脚注を渡す**（アプリ連携画面の起案など。名乗りが違うと、後から見た人が出所を取り違える）。
+ */
+export function buildBody(body: string | undefined, footnote: string = FOOTNOTE): string {
   const trimmed = (body ?? "").trim().slice(0, MAX_BODY_LENGTH);
-  return trimmed ? `${trimmed}\n\n${FOOTNOTE}` : FOOTNOTE;
+  return trimmed ? `${trimmed}\n\n${footnote}` : footnote;
 }
 
 /**
@@ -267,7 +274,7 @@ export async function createIssue(
   try {
     const res = await request(config, `/repos/${config.org}/${repo}/issues`, {
       method: "POST",
-      body: JSON.stringify({ title, body: buildBody(input.body), labels: applied }),
+      body: JSON.stringify({ title, body: buildBody(input.body, input.footnote), labels: applied }),
     });
     created = (await res.json()) as typeof created;
   } catch (cause) {

@@ -1,8 +1,21 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createIssue, DEFAULT_LABELS } from "../core/connectors/github/write.ts";
+import { readGitHubWriteConfig } from "../core/connectors/github/index.ts";
 import { buildToolRegistry } from "../mcp/catalog.ts";
+import type { ToolRegistry } from "../mcp/registry.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { ENDPOINTS, type FeatureItem } from "./features.ts";
-import { accountAction, handleGatedPage, type LoginOptions } from "./login.ts";
+import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
+import {
+  buildIssueDraft,
+  collectSync,
+  formatSyncedAt,
+  hasDifference,
+  ISSUE_REPO,
+  MAP_SYNC_FOOTNOTE,
+  type DeclaredUse,
+  type SyncResult,
+} from "./map-sync.ts";
 
 /**
  * アプリ連携の画面（`GET /map`。#328）。
@@ -21,6 +34,9 @@ import { accountAction, handleGatedPage, type LoginOptions } from "./login.ts";
  *
  * 図はサーバー側でSVGとして組み立て、JavaScriptも外部の描画ライブラリも使わない
  * （実行時依存を増やさない方針。README）。図の各アプリは下の一覧へのページ内リンクになっている。
+ *
+ * **「機能を同期」（#355）は、宣言と今の機能の差を画面に出すだけで、宣言は書き換えない。**
+ * 突き合わせは `map-sync.ts`。差があれば、図を直すIssueを起案できる（`POST /map/issue`）。
  */
 
 /** データの流れる向き。read = アプリ→AIDE（読む）、write = AIDE→アプリ（書く・送る）。 */
@@ -475,26 +491,181 @@ function callerChips(caller: Caller, catalog: Map<string, FeatureItem>, popovers
   return `<span class="chips"><button type="button" class="detail-trigger" popovertarget="${id}" aria-haspopup="dialog">MCPツール ${caller.uses.length}本</button></span>`;
 }
 
-function callersCard(catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
+function callersCard(catalog: Map<string, FeatureItem>, popovers: MapPopover[], gone: GoneByOwner): string {
   const items = CALLERS.map(
     (caller) =>
       `<li id="from-${caller.id}"><span class="nm">${escapeHtml(caller.name)}</span>` +
       `<span class="dir"><span class="b r">${caller.via}</span></span>` +
-      `<span class="ds">${escapeHtml(caller.what)}</span>${callerChips(caller, catalog, popovers)}</li>`,
+      `<span class="ds">${escapeHtml(caller.what)}</span>${callerChips(caller, catalog, popovers)}` +
+      `${goneChips(caller.name, gone)}</li>`,
   ).join("");
   return card({ title: "AIDEを使うアプリ", meta: String(CALLERS.length), body: `<ul class="apps">${items}</ul>` });
 }
 
-function groupCard(group: DestinationGroup, catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
+function groupCard(
+  group: DestinationGroup,
+  catalog: Map<string, FeatureItem>,
+  popovers: MapPopover[],
+  gone: GoneByOwner,
+): string {
   const items = group.apps
     .map(
       (app) =>
         `<li id="to-${app.id}"><span class="nm">${escapeHtml(app.name)}</span>` +
         `<span class="dir">${badges(app.dir)}</span>` +
-        `<span class="ds">${escapeHtml(app.what)}</span>${chips(app.uses, catalog, popovers)}</li>`,
+        `<span class="ds">${escapeHtml(app.what)}</span>${chips(app.uses, catalog, popovers)}` +
+        `${goneChips(app.name, gone)}</li>`,
     )
     .join("");
   return card({ title: group.name, meta: String(group.apps.length), body: `<ul class="apps">${items}</ul>` });
+}
+
+// ---- 機能の同期（#355） ----
+
+/** 図のアプリ名 → そこに載っているのに実在しない機能名。 */
+type GoneByOwner = Map<string, string[]>;
+
+/** 図の宣言を、突き合わせ用の形にする（同じアプリが使う側と繋ぐ先の両方にあっても1つにまとまる）。 */
+function declaredUses(): DeclaredUse[] {
+  return [
+    ...CALLERS.map((caller) => ({ owner: caller.name, uses: caller.uses })),
+    ...GROUPS.flatMap((group) => group.apps.map((app) => ({ owner: app.name, uses: app.uses }))),
+  ];
+}
+
+/** 今のAIDEの機能（MCPの登録簿と機能一覧の宣言）と図の宣言を突き合わせる。 */
+export function syncMap(registry: ToolRegistry): SyncResult {
+  return collectSync({ tools: registry.list(), endpoints: ENDPOINTS, declared: declaredUses() });
+}
+
+function goneByOwner(result: SyncResult): GoneByOwner {
+  const gone: GoneByOwner = new Map();
+  for (const feature of result.removed) {
+    for (const owner of feature.owners) gone.set(owner, [...(gone.get(owner) ?? []), feature.name]);
+  }
+  return gone;
+}
+
+function goneChips(owner: string, gone: GoneByOwner): string {
+  const names = gone.get(owner);
+  if (!names?.length) return "";
+  return `<span class="chips">${names
+    .map((name) => `<span class="gone" title="いまのAIDEには無い"><s>${escapeHtml(name)}</s>　－ 実在しない</span>`)
+    .join("")}</span>`;
+}
+
+/** 「実在しない」印が付いた最初の行。結果欄のリンクの飛び先。 */
+function firstGoneAnchor(gone: GoneByOwner): string | null {
+  for (const caller of CALLERS) if (gone.has(caller.name)) return `from-${caller.id}`;
+  for (const app of GROUPS.flatMap((group) => group.apps)) if (gone.has(app.name)) return `to-${app.id}`;
+  return null;
+}
+
+/** Issueの起票の結果。`POST /map/issue` の戻り（`?issue=` `?issue_error=`）から作る。 */
+export type IssueView = { kind: "done"; number?: number; url?: string } | { kind: "failed" };
+
+/** 同期した結果の見せ方。`renderMapPage` へ渡すと、結果欄と「未掲載の機能」が出る。 */
+export interface SyncView {
+  result: SyncResult;
+  /** 同期した日時（JST。`formatSyncedAt`）。 */
+  syncedAt: string;
+  /** Issueの起案を出すか。起票の設定が無い環境では出さない（設定の有無は画面に書かない）。 */
+  canDraftIssue: boolean;
+  /** 起票先の表記（`guchi-apps/aide`）。 */
+  issueTarget: string;
+  issue?: IssueView | undefined;
+}
+
+const SYNC_ICON =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 5.5A5.75 5.75 0 0 0 3.2 4.6L2.5 5.8"/><path d="M2.5 2.5v3.3h3.3"/><path d="M2.5 10.5a5.75 5.75 0 0 0 10.3.9l.7-1.2"/><path d="M13.5 13.5v-3.3h-3.3"/></svg>';
+
+/**
+ * 同期ボタン。**読み取りだけなので素のフォーム（GET）で送る。** JavaScriptが動かなくても押せ、
+ * 何も書き換えないのでCSRFの心配も要らない。
+ */
+function syncButton(sync: SyncView | undefined): string {
+  const note = sync ? `同期 ${escapeHtml(sync.syncedAt)}` : "押すと、今のAIDEの機能と突き合わせます";
+  return `<form class="sync-area" method="get" action="/map" data-busy="確認しています…">
+<input type="hidden" name="sync" value="1">
+<button type="submit" class="sync">${SYNC_ICON}<span class="sync-label">機能を同期</span></button>
+<span class="synced-at">${note}</span>
+</form>`;
+}
+
+function counts(result: SyncResult): string {
+  return `<div class="counts"><span class="count add">＋ 追加 <b>${result.added.length}</b></span>` +
+    `<span class="count del">－ 削除 <b>${result.removed.length}</b></span>` +
+    `<span class="count same">＝ 変更なし <b>${result.same}</b></span></div>`;
+}
+
+/** 起案の確認。押すと起票内容（タイトルと本文）を見せ、「起票する」で `POST /map/issue` へ送る。 */
+function issueDraft(result: SyncResult, syncedAt: string, target: string): string {
+  const draft = buildIssueDraft(result, syncedAt);
+  const button =
+    '<button type="button" class="sync primary" popovertarget="issue-draft" aria-haspopup="dialog">Issueを起案…</button>' +
+    '<span class="hint">図を直すIssueを、この差から作ります。押すと内容を確認できます。</span>';
+  const dialog = `<section id="issue-draft" class="detail-popover draft" popover="auto" role="dialog" aria-labelledby="issue-draft-title">
+<div class="popover-head"><h2 id="issue-draft-title">Issueを起案</h2>
+<button type="button" class="popover-close" popovertarget="issue-draft" popovertargetaction="hide" aria-label="閉じる">×</button></div>
+<p>${escapeHtml(target)} に、ラベル <span class="mono">${escapeHtml(DEFAULT_LABELS.join(" / "))}</span> を付けて作成します。内容は同期の結果から自動で組み立てられ、ここでは編集できません。</p>
+<dl><dt>タイトル</dt><dd>${escapeHtml(draft.title)}</dd><dt>本文</dt><dd><pre>${escapeHtml(draft.body)}</pre></dd></dl>
+<form class="draft-actions" method="post" action="/map/issue" data-busy="起票しています…">
+<button type="button" class="sync quiet" popovertarget="issue-draft" popovertargetaction="hide">やめる</button>
+<button type="submit" class="sync primary"><span class="sync-label">起票する</span></button>
+</form></section>`;
+  return `<div class="actions">${button}</div>${dialog}`;
+}
+
+/** 同期の結果欄。差の有無・起票の結果に応じて中身が変わる。 */
+function syncResult(sync: SyncView): string {
+  const { result, syncedAt, issue } = sync;
+  const time = `<span class="t">${escapeHtml(syncedAt)}</span>`;
+
+  if (!hasDifference(result) && issue?.kind !== "done") {
+    return `<section class="result calm" aria-live="polite">
+<div class="result-head"><h2>差はありません</h2>${time}</div>${counts(result)}
+<p class="result-note">図に載っている機能は、いまのAIDEの機能と一致しています。</p></section>`;
+  }
+
+  if (issue?.kind === "done") {
+    const link = issue.url
+      ? `<a href="${escapeHtml(issue.url)}" rel="noopener noreferrer">${escapeHtml(sync.issueTarget)} #${issue.number} を開く</a>`
+      : "";
+    return `<section class="result done" aria-live="polite">
+<div class="result-head"><h2>Issueを起票しました</h2>${time}</div>${counts(result)}
+<div class="actions"><button type="button" class="sync" disabled>起票済み</button>${link}</div>
+<p class="result-note">ラベルは ${escapeHtml(DEFAULT_LABELS.join(" / "))} です。着手するかは issue-deck で決めます。</p></section>`;
+  }
+
+  const gone = goneByOwner(result);
+  const goneAnchor = firstGoneAnchor(gone);
+  const jumps =
+    (result.added.length > 0 ? '<a href="#found">未掲載の機能へ</a>' : "") +
+    (goneAnchor ? `<a href="#${goneAnchor}">実在しない項目へ</a>` : "");
+  const fail =
+    issue?.kind === "failed"
+      ? '<p class="fail" role="alert">Issueを起票できませんでした。直前に同じ内容を起票していないか確認し、時間をおいてもう一度お試しください。</p>'
+      : "";
+  return `<section class="result" aria-live="polite">
+<div class="result-head"><h2>同期しました</h2>${time}</div>${counts(result)}
+${jumps ? `<div class="jump">${jumps}</div>` : ""}${fail}
+${sync.canDraftIssue ? issueDraft(result, syncedAt, sync.issueTarget) : ""}
+<p class="result-note">対象はMCPツールと /api/ のエンドポイントです。図の宣言は書き換えません。図へ載せる・外すにはコードの修正が要ります。</p></section>`;
+}
+
+/** 図に載っていない機能。宣言（`CALLERS` / `GROUPS`）には無いので、同期のたびに集め直して出す。 */
+function foundCard(result: SyncResult): string {
+  if (result.added.length === 0) return "";
+  const items = result.added
+    .map((feature) => {
+      const meta = feature.meta ? `${feature.kind}・${feature.meta}` : feature.kind;
+      return `<li><span class="head"><span class="nm">${escapeHtml(feature.name)}</span><span class="mt">${escapeHtml(meta)}</span><span class="b new">＋ 追加</span></span>` +
+        `<span class="ds">${escapeHtml(feature.description)}</span></li>`;
+    })
+    .join("");
+  return `<section class="card wide found" id="found">
+<div class="card-head"><h2>未掲載の機能</h2><span class="n">${result.added.length}</span></div>
+<div class="card-body"><p class="sub">同期で見つかった、図にまだ載っていない機能です。</p><ul class="items">${items}</ul></div></section>`;
 }
 
 const LEGEND = `<ul class="legend">
@@ -518,7 +689,7 @@ const arriveAt = (target) => {
   target.classList.add("arrived");
   target.scrollIntoView({ behavior: "smooth", block: "center" });
 };
-document.querySelectorAll('.mapcard a[href^="#"]').forEach((link) => {
+document.querySelectorAll('.mapcard a[href^="#"], .result .jump a[href^="#"]').forEach((link) => {
   link.addEventListener("click", (event) => {
     const href = link.getAttribute("href");
     const target = href ? document.getElementById(href.slice(1)) : null;
@@ -534,35 +705,66 @@ addEventListener("popstate", () => {
 });
 </script>`;
 
+/**
+ * 送信中の表示。ボタンを押せなくして文言を差し替える（二重に起票させないためでもある）。
+ * 送信そのものはJavaScriptに頼らない素のフォームなので、ここは見た目だけ。
+ * 戻る操作でページが復元されたときは、押せる状態へ戻す。
+ */
+const BUSY_SCRIPT = `<script>
+document.querySelectorAll("form[data-busy]").forEach((form) => {
+  const button = form.querySelector('button[type="submit"]');
+  const label = button && button.querySelector(".sync-label");
+  if (!button || !label) return;
+  const original = label.textContent;
+  form.addEventListener("submit", () => {
+    label.textContent = form.dataset.busy;
+    button.setAttribute("aria-busy", "true");
+    button.disabled = true;
+  });
+  addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    label.textContent = original;
+    button.removeAttribute("aria-busy");
+    button.disabled = false;
+  });
+});
+</script>`;
+
 export interface MapPageOptions {
   /** ヘッダー右端（ログイン中の表示・ログアウト）。 */
   headerAction?: string;
   /** 認証が無効な環境か。無効なら画面の先頭で警告する。 */
   authDisabled?: boolean;
+  /** 「機能を同期」を押した後の結果。無ければ従来どおりの画面（ボタンだけが出る）。 */
+  sync?: SyncView;
 }
 
 /** ページのHTMLを組み立てる純粋関数。テストはここに当てる。 */
 export function renderMapPage(options: MapPageOptions = {}): string {
   const catalog = featureCatalog();
   const popovers: MapPopover[] = [];
+  const gone = options.sync ? goneByOwner(options.sync.result) : new Map<string, string[]>();
   const warning = options.authDisabled
     ? `<p class="notice">認証が無効です（AIDE_AUTH_DISABLED=1）。この画面もMCPも誰でも開けます。</p>`
     : "";
   const body = `<section class="hero">
-<div class="hero-top"><h1>アプリ連携</h1></div>
+<div class="hero-top"><h1>アプリ連携</h1>${syncButton(options.sync)}</div>
 <p class="lead">AIDEを中心に、どのアプリがどうつながっているかを示します。左（スマホでは上）がAIDEを使うアプリ、右（スマホでは下）がAIDEが読みに行く・書き込む先です。アプリを押すと、下の一覧の該当する行へ移ります。</p>
 ${LEGEND}${warning}
 </section>
+${options.sync ? syncResult(options.sync) : ""}
 <section class="mapcard">
 <div class="map-wide"><div class="maphead"><span>AIDEを使うアプリ</span><span>AIDEがつなぐ先</span></div>${renderWideMap()}</div>
 <div class="map-narrow">${renderNarrowMap()}</div>
 </section>
 <div class="grid">
-${callersCard(catalog, popovers)}
-${GROUPS.map((group) => groupCard(group, catalog, popovers)).join("\n")}
+${options.sync ? foundCard(options.sync.result) : ""}
+${callersCard(catalog, popovers, gone)}
+${GROUPS.map((group) => groupCard(group, catalog, popovers, gone)).join("\n")}
 </div>
 ${popovers.map(renderPopover).join("\n")}
-${CENTER_TARGET_SCRIPT}`;
+${CENTER_TARGET_SCRIPT}
+${BUSY_SCRIPT}`;
 
   return renderPage({
     title: "AIDE のアプリ連携",
@@ -573,11 +775,120 @@ ${CENTER_TARGET_SCRIPT}`;
   });
 }
 
-export async function handleMapPage(req: IncomingMessage, res: ServerResponse, options: LoginOptions): Promise<void> {
-  await handleGatedPage(req, res, options, "/map", (session) =>
-    renderMapPage({
+/** テストで差し替えられるよう、時計と起票の口を外から渡せるようにしてある。 */
+export interface MapDeps {
+  now?: () => Date;
+  /** 起票の設定。無ければ null（＝起案のボタンを出さない）。 */
+  readIssueConfig?: typeof readGitHubWriteConfig;
+  createIssue?: typeof createIssue;
+  /** ログインの判定。テストが本物のセッション鍵ファイルを作らずに済むよう差し替えられる。 */
+  currentSession?: typeof currentSession;
+}
+
+/** 起票の設定が無い環境で、表記にだけ使う組織名（`github/index.ts` の既定と同じ）。 */
+const DEFAULT_ISSUE_ORG = "guchi-apps";
+
+/** Issue番号として受け付ける形。**戻り先のクエリはそのまま信用せず、数字だけを通す。** */
+const ISSUE_NUMBER = /^\d{1,9}$/;
+
+function issueViewFrom(params: URLSearchParams, deps: MapDeps): IssueView | undefined {
+  if (params.has("issue_error")) return { kind: "failed" };
+  const raw = params.get("issue");
+  if (raw === null) return undefined;
+  if (raw === "ok") return { kind: "done" };
+  if (!ISSUE_NUMBER.test(raw)) return undefined;
+  const org = (deps.readIssueConfig ?? readGitHubWriteConfig)()?.org;
+  const number = Number(raw);
+  return org
+    ? { kind: "done", number, url: `https://github.com/${org}/${ISSUE_REPO}/issues/${number}` }
+    : { kind: "done", number };
+}
+
+export async function handleMapPage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: LoginOptions,
+  deps: MapDeps = {},
+): Promise<void> {
+  const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+  // 起票の戻り（?issue=・?issue_error=）は、結果欄を出すために同期も兼ねる。
+  const issue = issueViewFrom(params, deps);
+  const wantsSync = params.get("sync") === "1" || issue !== undefined;
+
+  await handleGatedPage(req, res, options, "/map", (session) => {
+    const config = wantsSync ? (deps.readIssueConfig ?? readGitHubWriteConfig)() : null;
+    const sync: SyncView | undefined = wantsSync
+      ? {
+          result: syncMap(options.registry),
+          syncedAt: formatSyncedAt((deps.now ?? (() => new Date()))()),
+          canDraftIssue: config !== null,
+          issueTarget: `${config?.org ?? DEFAULT_ISSUE_ORG}/${ISSUE_REPO}`,
+          issue,
+        }
+      : undefined;
+    return renderMapPage({
       headerAction: accountAction(session, options.authConfig.enabled),
       authDisabled: !options.authConfig.enabled,
-    }),
-  );
+      ...(sync ? { sync } : {}),
+    });
+  });
+}
+
+function redirect(res: ServerResponse, location: string): void {
+  res.writeHead(303, { Location: location, "Cache-Control": "no-store" }).end();
+}
+
+/**
+ * 同期の結果からIssueを起票する（`POST /map/issue`）。
+ *
+ * **本文はここで同期し直して組み立て、画面からの入力は一切使わない。** 送られてくるのは
+ * ボタンを押したという事実だけで、起票の内容を利用者が書き換える口は持たない。
+ * ログインの関門は他の画面と同じ `currentSession` を通す（Cookieは SameSite=Lax で、
+ * 別サイトからの送信には付かない）。結果は303で `/map` へ戻して画面に出すため、
+ * 再読み込みしても二重には起票されない。
+ *
+ * 失敗の理由は画面へ出さず（トークンの名前などが混ざるため）ログにだけ残す。
+ */
+export async function handleMapIssue(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: LoginOptions,
+  deps: MapDeps = {},
+): Promise<void> {
+  // 本文は使わないので読まずに捨てる。
+  req.resume();
+
+  const session = await (deps.currentSession ?? currentSession)(req, options);
+  if (!session) {
+    redirect(res, "/map");
+    return;
+  }
+
+  const result = syncMap(options.registry);
+  if (!hasDifference(result)) {
+    redirect(res, "/map?sync=1");
+    return;
+  }
+
+  const config = (deps.readIssueConfig ?? readGitHubWriteConfig)();
+  if (!config) {
+    redirect(res, "/map?sync=1&issue_error=1");
+    return;
+  }
+
+  const draft = buildIssueDraft(result, formatSyncedAt((deps.now ?? (() => new Date()))()));
+  const outcome = await (deps.createIssue ?? createIssue)(config, {
+    repo: ISSUE_REPO,
+    title: draft.title,
+    body: draft.body,
+    footnote: MAP_SYNC_FOOTNOTE,
+  });
+
+  if (!outcome.ok) {
+    console.warn(`[map-sync] 起票せず: ${outcome.reason ?? "理由不明"}`);
+    redirect(res, "/map?sync=1&issue_error=1");
+    return;
+  }
+  console.log(`[map-sync] 起票: ${outcome.repo}#${outcome.number}`);
+  redirect(res, `/map?sync=1&issue=${typeof outcome.number === "number" ? outcome.number : "ok"}`);
 }

@@ -80,6 +80,13 @@ describe("buildBody", () => {
     assert.equal(buildBody(undefined), FOOTNOTE);
     assert.equal(buildBody("   "), FOOTNOTE);
   });
+
+  it("別の経路から起票するときは、渡した脚注に差し替わり、Claudeアプリの名乗りは残らない", () => {
+    const body = buildBody("本文。", "画面から起票しました。");
+    assert.equal(body, "本文。\n\n画面から起票しました。");
+    assert.ok(!body.includes(FOOTNOTE));
+    assert.equal(buildBody(undefined, "画面から起票しました。"), "画面から起票しました。");
+  });
 });
 
 describe("CreationGuard", () => {
