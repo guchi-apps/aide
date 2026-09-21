@@ -120,6 +120,9 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .items .nm{font-family:${FONT_MONO};font-size:.84rem;font-weight:500;color:var(--accent);overflow-wrap:anywhere}
 .items .mt{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);margin-left:.5rem}
 .items .ds{font-size:.82rem;color:var(--ink-2)}
+/* 説明文のインラインMarkdown（src/web/markdown.ts）。機能一覧と、アプリ連携のポップアップで共通。 */
+.items .ds strong,.detail-popover strong{color:var(--ink);font-weight:600}
+.items .ds code,.detail-popover code{font-family:${FONT_MONO};font-size:.92em;padding:0 .25em;background:var(--panel-2);border:1px solid var(--line-2)}
 .connect{background:var(--accent-soft);border:1px solid var(--accent);padding:.7rem .9rem;
  display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .9rem;font-size:.84rem;align-items:baseline}
 .connect dt{color:var(--accent)}
