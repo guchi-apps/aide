@@ -438,6 +438,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻 |
 | `aide_room_sensors` | いまの部屋の測定値。センサーごとの室温・湿度・気圧・CO2・照度、屋外との気温差 |
 | `aide_aircon_status` | エアコンの運転状態（電源・運転モード・設定温度・風量・online）。**読み取りだけ** |
+| `aide_printer_status` | 3Dプリンター（Bambu Lab A1 mini）の状態。印刷状態・進捗率・残り時間・レイヤー・温度・AMS Lite・エラー・最終更新。**鮮度を必ず返し、切れているときは現在の状態を返さない**（詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）。**読み取りだけ** |
 | `aide_room_buttons` | 照明など、AIDEから押せる機器のボタンの一覧（myroom に登録済みの Nature Remo のボタン）。読み取りだけ |
 | `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで。`dryRun` で押さずに確認できる） |
 | `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
@@ -1301,6 +1302,7 @@ src/core/connectors/myroom/
   index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
   control.ts 照明などの操作（ボタンの一覧と押す。aide#317）
 src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
+src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後述。aide#378）
 ```
 
 ### 経路
@@ -1380,6 +1382,143 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 
 **操作（`aide_room_buttons` / `aide_room_press`）とは別**。読み取りと書き込みを畳むと、
 クライアント側で「常に許可」にしたときに操作まで素通しになる。
+
+
+## コネクタ: 3Dプリンター（myroom経由。#378）
+
+3Dプリンター（Bambu Lab A1 mini）の進捗・残り時間・完了・エラー。**AIDEはプリンターへ直接繋がない。**
+サブPCの常駐プロセスがLAN内のローカルMQTTから状態を集め、[myroom](https://github.com/guchi-apps/myroom)
+が正規化して内部API（`GET /api/internal/printer-state`）で返す（myroom#428）。AIDEはそれを
+`aide_printer_status` へ畳み、状態遷移を Signaly へ通知する。Bambu のシリアル番号・アクセスコード・
+ホストは**myroomのサブPC側にしか無く、AIDEは持たない**。
+
+```
+src/core/connectors/myroom/index.ts   fetchPrinterState（room-state と同じ通信・同じ AIDE_MYROOM_TOKEN）
+src/core/views/printer.ts             正規化と鮮度判定（summarizePrinter は純粋関数。テストはここ）
+src/mcp/tools/printer.ts              aide_printer_status
+src/worker/jobs/printer-watch.ts      状態遷移の見張り（2分ごと）
+src/worker/printer-notify.ts          遷移の判定（decidePrinterEvents）と通知本文
+deploy/systemd/aide-printer-watch.*   サブPCの systemd timer
+```
+
+### 契約はAIDE側で先に決めた（myroom#428 の実装より前）
+
+着手時点で myroom#428 は計画段階で、APIの形が決まっていなかった。`room-state` の流儀（camelCase・
+`fetchedAt`・`staleThresholdMinutes`）に揃えて、**AIDEが期待する形を `src/core/connectors/myroom/types.ts`
+の `MyRoomPrinterSnapshot` として先に決めた。** myroom が別の形で実装した場合、直すのは
+`src/core/views/printer.ts` の正規化だけで、ツール・通知・テストの形は変わらない。
+
+```jsonc
+// GET /api/internal/printer-state  （Authorization: Bearer <AIDE_MYROOM_TOKEN>）
+{
+  "fetchedAt": "2026-09-21T12:00:00+09:00",
+  "staleThresholdMinutes": 10,        // 鮮度切れとみなす分数（無ければAIDEは10分）
+  "printer": null | {                 // 収集が一度も届いていなければ null
+    "name": "A1 mini",
+    "online": true,                   // 収集プロセスがプリンターと接続できているか
+    "updatedAt": "2026-09-21T11:59:10+09:00",   // プリンターから最後に受信した時刻
+    "ageMinutes": 1, "stale": false,
+    "state": "printing",              // idle / preparing / printing / paused / finished / failed
+                                      // （Bambu の gcode_state や日本語表記もAIDEが読み替える）
+    "jobName": "benchy.3mf", "progressPercent": 42, "layer": 84, "totalLayers": 200,
+    "remainingMinutes": 35, "estimatedEndAt": "2026-09-21T12:35:00+09:00",
+    "nozzleTemperature": 219.6, "nozzleTargetTemperature": 220,
+    "bedTemperature": 59.8, "bedTargetTemperature": 60,
+    "speedMode": "標準",
+    "ams": [{ "slot": 1, "material": "PLA", "color": "#FF0000", "remainPercent": 80 }],
+    "errors": [{ "code": "0300_0100", "message": "フィラメントが切れた" }]
+  }
+}
+```
+
+読み取り専用の内部APIで、`room-state` と同じ `INTERNAL_API_KEY`（AIDE側は `AIDE_MYROOM_TOKEN`）で通る。
+新しい資格情報も環境変数も足していない。**未実装のバージョンに対しては404が返り、ツールは
+「内部APIが未実装のバージョン」を `unavailable` に入れて返す**（例外にしない）。
+
+### 鮮度：古い値を現在の状態として答えない
+
+プリンターは電源を切れば黙って消える。myroom が最後に受け取った「印刷中 75%」をそのまま返すと、
+電源が切れた後も「まだ印刷中で、あと12分」と答え続ける。**ツールは必ず鮮度を返し、`fresh` でない
+ときは現在の値（`printer`）を空にする。**
+
+| `freshness` | 意味 | `printer` | `lastKnown` |
+|---|---|---|---|
+| `fresh` | 最終更新がしきい値以内で、接続できている | **入る** | なし |
+| `stale` | 最終更新がしきい値を超えている（電源断・収集停止・ネットワーク断） | null | 最後に確認できた値（`asOf` 付き） |
+| `disconnected` | 収集がプリンターと接続できていないと myroom が報告している | null | 同上 |
+| `unknown` | 最終更新時刻が読めず、新しいか判断できない | null | なし |
+| `never` | 収集が一度も届いていない | null | なし |
+
+- **判定は myroom の `stale` とAIDEが `updatedAt` から数え直した経過分の両方を見て、どちらかが切れていれば切れている。**
+  片方だけを信じると、どちらかの時計・判定のずれがそのまま「古い値を現在値」にする
+- **`lastKnown` には残り時間・終了予測・温度を入れない。** 時間が経てば意味を失い、現在値と読み違えやすい。
+  入れるのは状態・ジョブ名・進捗・エラーだけで、`asOf`（その時刻時点の値）を必ず添える
+- 完了・待機・失敗では `remainingMinutes` / `estimatedEndAt` を返さない（「あと何分」の材料にしない）
+- `complete: false` は「取得そのものができていない」（myroom未対応・トークン不一致・未設定）で、
+  プリンターが止まっていることとは別。どちらも例外にはせず、理由を添えて状態として返す
+
+**キャッシュを挟まない。** 進捗も完了も鮮度そのものが価値で、ジョブ間隔ぶん古くなると「終わったか」に
+答えられなくなる（README「どこまでを『重い取得』とみなすか」の右側）。
+
+### 状態遷移の通知（`printer-watch`）
+
+サブPCの systemd timer が2分ごとに `printer-watch` を走らせ、myroom の内部APIを読んで前回の記録と
+比べ、次の3つだけを Signaly へ送る（通知の基盤は[ジョブ失敗の通知](#ジョブ失敗の通知)と同じ）。
+
+| 通知 | 条件 |
+|---|---|
+| 印刷が完了 | 状態が変わって `finished` になった |
+| 印刷が停止 | 状態が変わって `failed` になった（Bambuは利用者が中止したときも `FAILED`） |
+| エラーが発生 | 前回通知していない新しいエラーが現れた（一時停止を伴うことが多い） |
+
+- **初回は通知せず基準だけ作る。** 昨日終わった印刷の「完了」を導入した瞬間に送らないため
+- **進捗の実況・印刷開始・エラーを伴わない一時停止は通知しない。** 毎回送ると完了・失敗が埋もれる。
+  エラーが続いている間は再送せず、消えたあとに同じエラーが起きればまた送る
+- **鮮度が切れている間は何もせず、記録も進めない。** 電源が入っていない間の「最後の値」から遷移を
+  作らない。切れている間に印刷が終わっていれば復帰後に「完了」が1回届く（本文に「プリンターの最終更新」と
+  「検知時刻」を並べるので、遅れは読み取れる）
+- **送れなかったときは記録を進めず、ジョブを失敗させる。** 進めるとその遷移は二度と通知されない。
+  次の実行で送り直し、失敗はジョブ失敗として記録・通知される
+- 記録は `data/worker/printer-watch.json`。**状態・エラーの署名・時刻だけ**で、取得した値もジョブ名も残さない
+
+**通知は状態の変化を送るだけで、ポーリングの取りこぼしは埋めない。** 2分より短い印刷や、2分の間に
+`finished` を経ずに次の印刷が始まった場合は通知されない（Bambu は `FINISH` を次のジョブまで保つため、
+通常は起きない）。
+
+### 認証情報を出さない
+
+- **接続情報（ホスト・シリアル番号・アクセスコード）は型に宣言していない。** 正規化は列挙した項目だけを
+  写すため、myroom が誤って余計な項目を返しても、応答・ログ・通知には出ない（`printer.test.ts`）
+- 文字列は長さを切り詰める（ジョブ名120・エラー本文200など）
+- 失敗理由はHTTPステータスと例外の種別まで丸める（既存のmyroomコネクタと同じ。例外の `message` にはURLが載る）
+- トークン（`AIDE_MYROOM_TOKEN`）は応答・ログ・通知に出さない
+
+### 設定とリリース順
+
+`printer-watch` は**サブPCで動き、myroom の公開URLを読む**（VPSの `127.0.0.1` には届かない）。
+ツール（`aide_printer_status`）はVPSのサーバーが読むので、既定のlocalhostのままでよい。
+
+| 場所 | 設定 |
+|---|---|
+| VPS（サーバー） | 追加なし。既存の `AIDE_MYROOM_TOKEN` をそのまま使う |
+| サブPCの `~/apps/aide/.env` | `AIDE_MYROOM_URL`（myroom の公開URL。`https://myroom.gucchii.com`）・`AIDE_MYROOM_TOKEN`（myroom の `INTERNAL_API_KEY` と同じ値）・`AIDE_SIGNALY_WEBHOOK_URL`（既存） |
+
+**リリース順は myroom#428 が先。** myroom が `main` で `printer-state` を返す状態になってから、
+サブPCの `.env` を設定し、`aide-printer-watch.timer` を有効にする。順序が逆だと、ツールは
+「内部APIが未実装」を返すだけで壊れないが、`printer-watch` は404で失敗し続ける
+（[ジョブ失敗の通知](#ジョブ失敗の通知)が6時間に1回まで送る）。
+
+**ユニットの配置と有効化はサブPCのリポジトリ（`guchi-apps/subpc`）の `setup.sh` が持つ**
+（`SYSTEMD_USER_UNITS` に `aide-printer-watch.timer` を足す。手で `cp` しない。[systemdユニット](#systemdユニット)）。
+このリポジトリが持つのはユニットの実体（`deploy/systemd/aide-printer-watch.*`）だけ。
+
+### MCP層では1本にしている
+
+進捗・残り時間・完了・エラー・温度・レイヤー・AMS Lite は、同じ1台の同じ時点の値で、どれを尋ねられても
+同じ鮮度の確認が要る。分けると確認を何度も要求することになるため、`aide_printer_status` 1本にしている
+（#373の「1つの問い」は「3Dプリンターはいまどうなっているか」）。部屋の温度・CO2（`aide_room_sensors`）とは
+問いが違うので別ツールで、説明文で互いを名指ししている。**プリンターを操作する口（印刷の開始・停止・
+一時停止）は持たない。**
 
 
 ## コネクタ: DaySpan（予定・タスク・日付リマインド・移動）
@@ -1855,6 +1994,7 @@ npm run worker zaim-sync        # 巡回してキャッシュ更新（重い、1
 npm run worker zaim-keep-alive  # セッション延長のみ（軽い、30分ごと想定）
 npm run worker weather-sync     # 天気予報を取得（軽い、1時間ごと想定）
 npm run worker claude-sessions-sync  # Claude Codeのセッションを収集（軽い、2分ごと想定）
+npm run worker printer-watch    # 3Dプリンターの完了・停止・エラーを通知（軽い、2分ごと想定。#378）
 ```
 
 常駐させずワンショットで実行し、スケジューリングは外（cron / systemd timer / PM2）に任せる。常駐プロセスを増やさずに済み、失敗しても次回実行で自然に復旧する。失敗時は終了コード1を返すので、スケジューラ側から検知できる。
@@ -1915,11 +2055,14 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 
 ユニットは `deploy/systemd/` にある。**実行場所はサブPCの `~/.config/systemd/user/`** で、リポジトリからは自動反映されない（VPSへの `deploy.yml` が触るのはサーバー側だけ）。間隔を変えたら手で反映する。
 
+**新しい定期ジョブのタイマーを足すときは、`guchi-apps/subpc` の `setup.sh`（`SYSTEMD_USER_UNITS`）にも足す。** サブPCでは `./setup.sh --only systemd` がここのユニットを配置して `.timer` を enable し、日次のドリフト検知も回している。リストに無いタイマーは `cp` で置いても、次の反映・検知で「管理外」として差分に出る（#378 の `aide-printer-watch.timer` で気づいた）。以下の手動手順は `setup.sh` を使えない環境向け。
+
 ```bash
 cp deploy/systemd/*.timer deploy/systemd/*.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now aide-zaim-refresh.timer   # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（未導入のユニット）
+systemctl --user enable --now aide-printer-watch.timer  # 初回のみ（未導入のユニット。myroom#428 のリリース後）
 systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-money-sync.timer  # 初回のみ（未導入のユニット）
 systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer aide-zaim-money-sync.timer
@@ -1973,6 +2116,8 @@ URLに含まれる `channel_id` が宛先の識別子そのもの（Webhook自�
 **同じ理由で失敗し続けている間は6時間に1回まで**に抑えている（30分ごとの `zaim-keep-alive` がセッション失効すると、抑制しないと48件/日届く）。理由が変わった場合は抑制せずに送る。抑制で黙っている状態と直った状態を区別できるように、復旧通知だけは出している。
 
 未解決の失敗は `data/worker/notify-state.json` に持つ（ジョブ名・失敗理由の署名・時刻・回数だけ。取得データも認証情報も入れない）。**通知の送信失敗でジョブを二重に失敗させない。** 送信・記録まわりの例外はすべて握りつぶし、ログに一行残すだけにする。送れなかった回は通知済みにせず、次の実行で送り直す。
+
+**3Dプリンターの状態遷移（完了・停止・エラー）も同じ Signaly へ送る**（`printer-watch`。失敗・復旧の通知とは別物で、抑制や記録も別。詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）。
 
 **プロセスが起動する前に落ちるケース（node が起動しない・OOMで強制終了）は拾えない。** そこまで拾うなら systemd の `OnFailure=` が要る（ユニットは `deploy/systemd/` にある）。
 

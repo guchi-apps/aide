@@ -1,0 +1,15 @@
+[Unit]
+Description=AIDE: 3Dプリンターの状態遷移の通知（2分ごと）
+
+[Timer]
+OnBootSec=2min
+# 完了の通知は早いほど価値がある（造形物を取り出す・失敗に気づく）。一方で2分の遅れは
+# 許容できるので、Bambu へは触れず myroom が持っている最新値を2分ごとに見るだけにする。
+OnUnitActiveSec=2min
+# 既定（1分）のままだと実際の間隔が最大3分まで伸びる。ジョブ自体が軽いので締めておく。
+AccuracySec=10s
+# 止まっていた間の実行を後から走らせても意味が無い（欲しいのは「いまの状態」だけ）。
+Persistent=false
+
+[Install]
+WantedBy=timers.target
