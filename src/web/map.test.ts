@@ -129,6 +129,12 @@ describe("アプリ連携の画面", () => {
     assert.ok(html.includes("popovertargetaction=\"hide\""));
   });
 
+  it("説明のポップアップでも **太字** を記号のまま出さない（#364）", () => {
+    const html = renderMapPage();
+    assert.ok(/<p>[^<]*<strong>/.test(html), "ポップアップ本文に太字が出ていない");
+    assert.ok(!html.includes("**"), "ポップアップに ** が記号のまま残っている");
+  });
+
   it("認証が無効なら警告する", () => {
     assert.ok(renderMapPage({ authDisabled: true }).includes("認証が無効です"));
     assert.ok(!renderMapPage().includes("認証が無効です"));

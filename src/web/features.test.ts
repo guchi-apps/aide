@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, it } from "node:test";
+import { buildToolRegistry } from "../mcp/catalog.ts";
 import { ToolRegistry } from "../mcp/registry.ts";
 import type { Tool } from "../mcp/types.ts";
 import { balancesTool } from "../mcp/tools/money.ts";
@@ -100,6 +101,25 @@ describe("機能一覧ページ", () => {
     assert.ok(html.includes("&lt;script&gt;alert"));
     assert.ok(html.includes("&amp;"));
     assert.ok(html.includes("&#39;quoted&#39;"));
+  });
+
+  it("説明文の **太字** と `コード` を記号のまま出さず、太字・等幅にする（#364）", () => {
+    const marked: Tool = {
+      name: "aide_marked",
+      description: "**書き込みを伴う。** `on` / `off` を返す。",
+      inputSchema: { type: "object" },
+      handler: () => ({ content: [] }),
+    };
+    const html = render(registryWith(marked));
+    assert.ok(html.includes('<span class="ds"><strong>書き込みを伴う。</strong> <code>on</code> / <code>off</code> を返す。</span>'));
+    // 名前・注記は説明文ではないため変換しない。
+    assert.ok(html.includes('<span class="nm">aide_marked</span>'));
+  });
+
+  it("実際に登録されているツールの説明に、記号のままの ** が残らない（#364）", () => {
+    const html = render(buildToolRegistry());
+    assert.ok(html.includes("<strong>"), "太字が1つも出ていない");
+    assert.ok(!html.includes("**"), "説明文に ** が記号のまま残っている");
   });
 
   it("ツールが1つも無くても壊れない", () => {
