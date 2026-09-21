@@ -121,7 +121,7 @@ describe("アプリ連携の画面", () => {
 
   it("MCPツールとHTTP APIのチップを押すと説明を開ける", () => {
     const html = renderMapPage();
-    assert.match(html, /<button type="button" class="detail-trigger" popovertarget="map-detail-\d+" aria-haspopup="dialog">aide_money_summary<\/button>/);
+    assert.match(html, /<button type="button" class="detail-trigger" popovertarget="map-detail-\d+" aria-haspopup="dialog">aide_balances<\/button>/);
     assert.match(html, /<button type="button" class="detail-trigger" popovertarget="map-detail-\d+" aria-haspopup="dialog">\/api\/money\/summary<\/button>/);
     assert.ok(html.includes("残高一覧・保有銘柄"));
     assert.ok(html.includes("個人アプリ向けの読み取りAPI。"));

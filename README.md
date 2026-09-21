@@ -13,7 +13,7 @@ AIDEがやること:
 - 外部サービスからの**データ取得**（Zaim、GitHub、Google系、Notion 等）
 - 必要な範囲への**フィルタリング**
 - サービスごとに異なる形式の**共通フォーマットへの整形**
-- 複数ソースを1回の呼び出しに畳んだ**横断ビュー**の提供
+- 生のAPIではなく、問いの単位に畳んだ**ビュー**の提供
 - **他のどこからも塞がっている経路に限った書き込み**（後述。持っているものは下の表が正で、ここには数を書かない）
 
 AIDEがやらないこと:
@@ -227,18 +227,47 @@ aide-bot向けの3ツールと `aide_research_desk_import_weekly_report` は、*
 
 | レイヤー | 対象 | 方針 |
 |---|---|---|
-| Core（`src/core/`） | Notion・Google系・Zaim・GitHub **すべて** | 公式APIを直接叩く。横断ビューとワーカーに必要なので**フルスコープ** |
-| MCP層（`src/mcp/`） | 横断ビュー ＋ **公開のリモートMCPが無いもの** **のみ** | 同じ機能のツールが2セット並ぶと、ツール選択が曖昧になりコンテキストも食う。呼び出し側が公式のリモートMCP（Notion等）へ直接繋げるものは、AIDEに口を作らない |
+| Core（`src/core/`） | Notion・Google系・Zaim・GitHub **すべて** | 公式APIを直接叩く。ビューとワーカーに必要なので**フルスコープ** |
+| MCP層（`src/mcp/`） | **公開のリモートMCPが無いもの** **のみ**。ツールは**1つの問い**ごとに立てる | 同じ機能のツールが2セット並ぶと、ツール選択が曖昧になりコンテキストも食う。呼び出し側が公式のリモートMCP（Notion等）へ直接繋げるものは、AIDEに口を作らない |
 
-Core をフルスコープで作っておけば、MCP層で「出す／出さない」は後からいくらでも変えられる。判断を先送りできるので、**Core は広く、MCP層は狭く**始める。
+Core をフルスコープで作っておけば、MCP層で「出す／出さない」は後からいくらでも変えられる。判断を先送りできるので、**Core は広く**始める。
 
-**単機能ツールを出している例外がZaimへの登録**（`aide_zaim_master` / `aide_zaim_payment`。aide#135）。
-横断ビューではないが、Zaimに公式MCPは無く、外部のClaude Codeから届く経路も他に無い。
-判断の根拠は[書き込みをどこまで持つか](#書き込みをどこまで持つか)に置いている。
+### ツールは「1つの問い」ごとに立てる（#373）
 
-**もう1つの例外が、Asset Manager のサブスク一覧の読み取り**（`asset_manager_subscriptions`。#345）。
-横断ビューではないが、Asset Manager には公開のリモートMCPが無く（MCP層に出す条件の「公開のリモートMCPが
-無いもの」に当たる）、呼び出し元から届く経路が他に無い。`aide_money_summary` のような横断ビューへ
+以前ここには「MCP層は**横断ビュー**のみ。単機能ツールは増やさない」と書いていた。往復とトークンを
+減らすために、複数のソースを1本のツールへ畳む方針だった。**畳みすぎると別の形で高くつく。**
+
+- 「いくら持っているか」に答えるだけで、サブスク契約の全明細まで返っていた（`aide_money_summary`）
+- 「残枠はどれくらい」に答えるだけで、全ホストのCPU・メモリ・ディスク・systemd まで返っていた
+  （`aide_ops_status`）
+- 起票に使うラベルの候補が欲しいだけで、コミット・Issue・Pull Request の一覧まで返っていた
+  （`aide_dev_status` の `repo` 付き）
+
+**基準を「情報源が同じか」から「問いが同じか」へ移した。** 1本のツールが答えるのは1つの問いまでで、
+別の問いは別のツールにする。同じ上流APIを2本以上のツールが叩くことになってもよい
+（ops・room は実際にそうしている。localhost へのHTTP GETなので許容できる）。
+
+**畳んだままにしているもの**もある。`aide_host_status` は6本のうちホスト指標の部分を、
+`aide_schedule` はGoogleカレンダーとNotionを統合済みで受け取ったものを返す——どちらも
+**利用者から見て問いが1つ**（「サーバーに異常はないか」「いつ空いているか」）だから。
+
+**分けたら、分けた相手を description で名指しする。** 「◯◯は返さない（それは△△）」を両側に書く。
+書かないと、似た問いでどちらを呼べばよいかをClaudeが決められない。
+`src/mcp/catalog.test.ts` がこの名指しを機械的に確かめている。
+
+### 読み取りと書き込みは必ず分ける
+
+`aide_zaim_master` / `aide_zaim_payment`（aide#135）、`aide_room_buttons` / `aide_room_press`（#317）、
+`aide_schedule` / `aide_create_event`（#243）、`asset_manager_subscriptions` /
+`asset_manager_create_subscription`（#345・#346）はいずれもこの理由で2本になっている。
+**1本に畳むと、クライアント側で「常に許可」にしたときに書き込みまで素通しになる。**
+
+**書き込みツールは `dryRun` を持つ**（#373）。どれもこの経路から取り消せないため、送る前に
+「何が登録・操作されるか」だけを返せるようにしてある。検査・突き合わせ・二重登録の判定は
+本番と同じものを通し、**外部サービスへ出る直前で止める**。副作用の記録（Zaimの冪等キー、
+ボタンの連打ガード）にも触れない——下見のつもりの呼び出しが本番の判定を狂わせるため。
+
+**Asset Manager のサブスク一覧**（`asset_manager_subscriptions`。#345）を `aide_fixed_costs` へ
 畳まないのは、Zaim等と合成する情報が無く、相手が計算済みで返す内容（月額換算・次回請求日・契約状況・
 円換算）をそのまま渡すだけだから。取得は取り込みと同じ通信ヘルパー（`src/mcp/tools/asset-manager.ts` の
 `callAssetManager`）を共有するため `src/core/connectors/` へは切り出していない。
@@ -336,7 +365,7 @@ src/
       image-mail/       Gmail送信（画像メール・業界ニュース週報メール共通）・画像メールの冪等記録・履歴（#230）
       news-mail/         業界ニュース週報メールの冪等記録・履歴（#257）
     models/            共通データモデル
-    views/             横断ビュー
+    views/             読み取りのビュー
   web/                 人間向けのHTMLページ（アプリ連携・機能一覧・ログイン）と共通レイアウト
   worker/              サブPC側で動くもの
     run.ts             定期実行ジョブのエントリポイント
@@ -385,20 +414,26 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | ツール | 内容 |
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
-| `aide_money_summary` | 資産・残高と月額固定費の現況。残高・保有銘柄はキャッシュを読むだけ（取得時刻と経過分数を併せて返す）、固定費は subscription-lists を都度叩く |
+| `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
+| `aide_fixed_costs` | 毎月出ていく固定費。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。subscription-lists を都度叩く |
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
-| `aide_ops_status` | VPS・サブPCの稼働状況。ops-dashboard の読み取りAPIを都度叩いて「いま異常があるか」の粒度に畳む |
-| `aide_room_status` | いまの部屋の状態。myroom の読み取りAPIを都度叩き、センサーごとの室温・湿度・気圧・CO2・照度、エアコンの運転状態、屋外との気温差に畳む |
+| `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
+| `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
+| `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻 |
+| `aide_room_sensors` | いまの部屋の測定値。センサーごとの室温・湿度・気圧・CO2・照度、屋外との気温差 |
+| `aide_aircon_status` | エアコンの運転状態（電源・運転モード・設定温度・風量・online）。**読み取りだけ** |
 | `aide_room_buttons` | 照明など、AIDEから押せる機器のボタンの一覧（myroom に登録済みの Nature Remo のボタン）。読み取りだけ |
-| `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで） |
-| `aide_daily_briefing` | 今日1日の見通し。今日の予定・交通・今日と明日の天気を1回に畳む。**ソースごとに独立して失敗する**（取れたものだけ返る） |
-| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「明日の予定」「今週の予定」「何時なら空いているか」に答えるためのもので（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）、今日1日の見通しは `aide_daily_briefing` |
-| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
-| `aide_dev_status` | 各リポジトリの開発状況。最新リリース・未リリースの差分・Issue/PR・確認待ち・直近コミット・CIの成否。`repo` を指定すると1リポジトリの詳細（起票に使えるラベルの候補を含む） |
-| `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない） |
+| `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで。`dryRun` で押さずに確認できる） |
+| `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
+| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325） |
+| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |
+| `aide_dev_status` | 各リポジトリの開発状況を**俯瞰で**返す。最新リリース・未リリースの差分・Issue/PRの件数・確認待ち・直近コミット・CIの成否。引数は取らない |
+| `aide_repo_status` | リポジトリ1件の詳細。俯瞰の項目に加えて、直近コミットの一覧・確認待ちのIssue・open な Pull Request |
+| `aide_repo_labels` | リポジトリ1件に定義されているラベル（名前・色・説明）。`aide_create_issue` に渡す候補 |
+| `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない。`dryRun` で起票せず確認できる） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 | `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
-| `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない） |
+| `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
@@ -1070,9 +1105,9 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 
 VPS・サブPCの稼働状況。**AIDEは指標を集めない。** [ops-dashboard](https://github.com/guchi-apps/ops-dashboard)
 が既にホスト指標・外形監視・AI/GitHub/1Password の残枠を集約しているため、その読み取りAPIを叩いて
-1本のMCPツール（`aide_ops_status`）に畳むだけにしている。
+MCPツール（`aide_host_status` / `aide_uptime_monitors` / `aide_service_quotas`）へ畳むだけにしている。
 
-Zaimと違い「公式APIが無いから自分で取りに行く」ケースではなく、**既にある集約を横断ビューへ畳む**
+Zaimと違い「公式APIが無いから自分で取りに行く」ケースではなく、**既にある集約をビューへ畳む**
 ケースにあたる。ここで指標収集を作り直すと ops-dashboard と二重になる。
 
 ```
@@ -1130,13 +1165,26 @@ CPU 100% を「いま高負荷」として報告してしまう。
 `ok`（判定できた範囲で異常なし）と `complete`（全ソースを取得できた）は別に返す。1本だけ落ちるケース
 （1Password CLIが無い等）は普通に起きるため、全体を失敗にすると「他は正常だった」という情報まで失う。
 
+### MCP層では3本に分ける（#373）
+
+ホスト指標・外形監視・残枠は別々の問いなので、`aide_host_status` / `aide_uptime_monitors` /
+`aide_service_quotas` に分けて出している。**ビュー（`summarizeOps`）は1つのまま**で、MCP層が
+自分の区画だけを切り出す。3本まとめて呼ばれると ops-dashboard を3回叩くが、localhost への
+HTTP GETなので許容する。
+
+**`problems` は `source`（`hosts` / `monitors` / `quotas`）で振り分ける。** 文面で見分けようとすると、
+メッセージを書き換えた瞬間に振り分けが黙って壊れる。
+
+**`ok` は区画ごとに判定し直す。** 全体の `ok` をそのまま渡すと、残枠だけを尋ねられたときに
+別ホストのディスク逼迫で `false` になり、問いと関係ない理由で「異常あり」と読まれる。
+
 
 ## コネクタ: subscription-lists
 
 月額固定費（サブスクリプション）と次の支払予定。**AIDEは契約情報を持たない。**
 [subscription-lists](https://github.com/guchi-apps/subscription-lists) が既に管理しているため、
-サーバー間参照用の読み取りAPI（`GET /api/internal/subscriptions`）を叩いて `aide_money_summary` の
-`fixedCosts` に畳むだけにしている。ops-dashboard と同じ「既にある集約を横断ビューへ畳む」ケース。
+サーバー間参照用の読み取りAPI（`GET /api/internal/subscriptions`）を叩いて `aide_fixed_costs` に
+畳むだけにしている。ops-dashboard と同じ「既にある集約をビューへ畳む」ケース。
 
 ```
 src/core/connectors/subscriptions/
@@ -1186,6 +1234,11 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 `MoneySummary.totals`（残高・保有銘柄）へは**足さない**。あちらは「いま持っている額」（ストック）で
 固定費は「毎月出ていく額」（フロー）にあたり、同じ合計に混ぜると意味が壊れる。
 
+**MCP層でもストックとフローで分けている**（#373）。`aide_balances` が残高・保有銘柄、
+`aide_fixed_costs` が月額固定費を返す。問いが別なだけでなく、分けたことで残高だけを尋ねられた
+ときに subscription-lists を叩かなくなり、固定費だけを尋ねられたときにZaimのキャッシュを
+読まなくなった。**読み取りAPI（`GET /api/money/summary`）は両方を合わせた1本のまま。**
+
 通貨は `JPY` / `USD` の混在を許すため、**合計は通貨別**で返す。円換算値（`monthlyJpy`）は相手が
 Frankfurter のレートで計算した参考値で、取得できていなければ `null` になる。
 
@@ -1195,8 +1248,8 @@ Frankfurter のレートで計算した参考値で、取得できていなけ�
 いまの部屋の状態（室温・湿度・気圧・CO2・照度とエアコンの運転状態）。**AIDEはセンサーの値を
 集めない。** [myroom](https://github.com/guchi-apps/myroom) が Raspberry Pi からの受信・保存・
 鮮度判定まで持っているため、サーバー間参照用の読み取りAPI（`GET /api/internal/room-state`）を
-叩いて `aide_room_status` に畳むだけにしている。ops-dashboard・subscription-lists と同じ
-「既にある集約を横断ビューへ畳む」ケース。
+叩いて `aide_room_sensors` と `aide_aircon_status` へ畳むだけにしている。
+ops-dashboard・subscription-lists と同じ「既にある集約をビューへ畳む」ケース。
 
 ```
 src/core/connectors/myroom/
@@ -1251,7 +1304,7 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 
 **結果は「myroom が Nature Remo へ送信を依頼できたか」まで。** 赤外線は片方向で、機器が反応したかは
 返ってこない（myroom#106）。応答を待ちきれなかったときは送れたか分からないため `unknown` を返し、
-再送せずに利用者へ確かめるよう案内する。照明なら `aide_room_status` の照度の変化でも確かめられる。
+再送せずに利用者へ確かめるよう案内する。照明なら `aide_room_sensors` の照度の変化でも確かめられる。
 
 ### 鮮度と判定
 
@@ -1274,14 +1327,24 @@ src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純�
 **キャッシュを挟まない。** 部屋の状態は鮮度そのものが価値であり、ジョブ間隔ぶん古くなると
 「いま暑いか」に答えられなくなる（README「どこまでを『重い取得』とみなすか」の右側）。
 
+### MCP層では2本に分ける（#373）
+
+測定値（`aide_room_sensors`）とエアコン（`aide_aircon_status`）は別の問いなので分けている。
+「エアコンはついているか」に答えるだけで全センサーの値と屋外との対比まで返るのは過剰だった。
+ビュー（`summarizeRoom`）は1つのままで、`problems` は `source`（`sensors` / `aircons`）で
+振り分ける（ops と同じ立て付け）。
+
+**操作（`aide_room_buttons` / `aide_room_press`）とは別**。読み取りと書き込みを畳むと、
+クライアント側で「常に許可」にしたときに操作まで素通しになる。
+
 
 ## コネクタ: DaySpan（予定・タスク・日付リマインド・移動）
 
 今日・今週の予定と空き時間。**AIDEはGoogleカレンダーへ直接繋がない。**
 [DaySpan](https://github.com/guchi-apps/dayspan) が Google Calendar の予定・Notion のタスクと
 日付リマインド・移動を1つのカレンダーへ統合済みなので、サーバー間参照用の読み取りAPI
-（`GET /api/internal/schedule`）を叩いて `aide_schedule` と `aide_daily_briefing` の予定に畳む。
-ops-dashboard・subscription-lists・myroom と同じ「既にある集約を横断ビューへ畳む」ケース。
+（`GET /api/internal/schedule`）を叩いて `aide_schedule` の予定に畳む。
+ops-dashboard・subscription-lists・myroom と同じ「既にある集約をビューへ畳む」ケース。
 
 ```
 src/core/connectors/dayspan/
@@ -1391,7 +1454,7 @@ GitHub取得は既に3実装ある。**AIDEはこれらを置き換えない。*
 | `portfolio` | 公開用のリポジトリ情報取り込み |
 
 issue-deck はGitHub Appの認証・webhook受信・書き込みが本体で、AIDE経由にすると往復が増えるだけ。
-AIDEが持つのは**横断ビュー**と、下記のIssue起票だけに限る。
+AIDEが持つのは読み取りのビューと、下記のIssue起票だけに限る。
 
 ### GitHubへの書き込みはIssueの起票1本だけ
 
@@ -1424,9 +1487,14 @@ Cookie認証のため、Claudeアプリから叩けるものが1つも無かっ�
 ツールは追加しない。返す量が大きくなるうえ「MCP層は狭く」の方針とぶつかる。コードの詳細は
 Claude Code（CLI）とissue-deckが担当する。
 
-取得のツールは**1本だけ**（`aide_dev_status`）。「全体の俯瞰」と「1リポジトリの詳細」を別ツールに
-割るとツール選択が曖昧になるため、引数 `repo` の有無で深さを切り替えている
-（起票の `aide_create_issue` は用途が別なので分けている。上記「GitHubへの書き込みはIssueの起票1本だけ」）。
+取得のツールは**3本**（`aide_dev_status` / `aide_repo_status` / `aide_repo_labels`）。
+以前は `aide_dev_status` 1本で、引数 `repo` の有無で「全体の俯瞰」と「1リポジトリの詳細」を
+切り替えていたが、**同じツールが答えの形ごと変わる**うえ、起票に使うラベルの候補が欲しいだけの
+ときにもコミット・Issue・Pull Request の一覧まで返っていた。#373 で問いの単位へ分けた
+（起票の `aide_create_issue` は上記「GitHubへの書き込みはIssueの起票1本だけ」）。
+
+**3本とも取得は `buildDevStatus()` 1つを共有する。** 詳細モード（`repo` 付き）は
+GitHubへのGraphQLを1回叩き、`aide_repo_status` と `aide_repo_labels` は返す区画だけが違う。
 
 `attention` に注意点が1行ずつ入り、これだけ読めば答えられるようにしている。しきい値は
 `src/core/views/dev.ts` の `DEFAULTS` にまとめてある。
@@ -1438,9 +1506,10 @@ Claude Code（CLI）とissue-deckが担当する。
 **どのラベルが実在するかを知る手段が無かった**ため。実在しない名前は起票時に黙って落ちるので、
 知らないまま渡すと「付けたつもりのラベルが付いていない」だけの結果になる。
 
-**ラベル取得専用のツールは足さない。** 3本目のGitHubツールを増やすとツール選択が曖昧になり、
-「MCP層は狭く」の方針とぶつかる。起票先のリポジトリは1件に決まっているので、
-**詳細モードの一部**として返せば足りる。
+**ラベルは専用のツール（`aide_repo_labels`）で返す**（#373）。もとは詳細モードの一部
+（`detail.labels`）として返しており、ラベルの候補が欲しいだけのときにもコミット・Issue・
+Pull Request の一覧が付いてきた。起票の前段としては重すぎるため分けた。
+取得そのものは詳細モードと同じクエリを使う。
 
 - **クエリはフラグメントの外に置く**（`query.ts` の `DEV_REPO_QUERY`）。共有すると俯瞰でも
   26リポジトリぶんのラベルが返り、要らない情報でレスポンスが数倍になる
@@ -1531,7 +1600,7 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 | CC BY 4.0 の帰属表示 | `WeatherForecast.attribution` に同梱し、**機能一覧ページ（`/features`）に出す** |
 
 帰属表示を `/features` に置いたのは、天気を見られる人が限られるため。天気そのものはキャッシュと
-横断ビュー（＝認証の内側）にしか出ず、`/features` も同じくログインの内側にある（#332）。
+ビュー（＝認証の内側）にしか出ず、`/features` も同じくログインの内側にある（#332）。
 帰属表示はデータ自体にも同梱しているので、見る人の手元には必ず届く。取得元が増えたら `/features` へ足す。
 
 ### キャッシュを挟む理由
@@ -1651,46 +1720,37 @@ Issueが挙げた「放置セッションかの判断がつかない」に直接
 URLは開けばそのセッションを操作できるもので、ログへ残す粒度ではない。ジョブが残すのは
 件数だけにしてある。
 
-## 横断ビュー: 朝のブリーフィング
+## 天気
 
-Claudeアプリから「今日はどんな感じ？」と聞いたときに、**今日の予定・交通・天気**を1回の呼び出しで
-返す（guchi-apps/question#7・aide#36）。3ソースをClaudeに個別に叩かせると往復もトークンも増えるため、
-AIDE側で1本に畳む。
+Claudeアプリから「今日の天気は」「傘は要るか」と聞いたときに、**今日・明日の予報**を返す
+（guchi-apps/question#7・aide#36）。
 
 ```
-src/core/views/briefing.ts   セクションの器・天気の畳み込み・未接続の表現（純粋関数。テストはここ）
-src/mcp/tools/briefing.ts    aide_daily_briefing
+src/core/views/weather.ts   予報の器・畳み込み（純粋関数。テストはここ）
+src/mcp/tools/weather.ts    aide_weather
 ```
 
-**天気・交通の単機能ツール（`aide_weather`・`aide_transit_delay`）は作らない。** 各コネクタは
-Core に置き、MCP層へ出す口はこのビューへ集約する（「Core は広く、MCP層は狭く」）。
+### 朝のブリーフィングを畳んだ（#373）
 
-**予定だけは `aide_schedule` を別に持つ**（aide#173）。こちらは日付が今日に固定で、天気・交通と
-一緒に「今日1日の見通し」を返すもの。「今週の予定は」「何時なら空いているか」には期間の指定と
-空き時間が要り、このビューでは答えられない。**両方のツールの説明文で用途を書き分ける**——
-横断ビュー同士でも、選択が曖昧になればMCP層を狭くしている意味が無くなる
-（`aide_room_status` との棲み分けと同じ）。
+もとは `aide_daily_briefing` という横断ビューで、**今日の予定・交通・天気**を1回の呼び出しで
+返していた。3ソースをClaudeに個別に叩かせると往復もトークンも増えるため、という理由だった。
 
-### ソースごとに独立して失敗させる
+#373 でMCPツールを**「1つの問い」ごと**に分け直したさいに、この畳み込みは解いた。
 
-「予定は取れたが交通が取れなかった」を表現できるように、セクションごとに `state` を持たせ、
-**1つの失敗で全体を落とさない**。`state` は4つ。
+- **予定は `aide_schedule` が既に答えていた。** あちらは期間を指定して予定と空き時間を返すもので、
+  日付を省けば今日ぶんになる。今日だけ答えが2本に割れており、ツール選択が曖昧になっていた
+- **交通は取得元が未定**（trainrouteの廃止により白紙。aide#265）。`not_connected` とだけ返す欄を
+  毎回持ち回っても、答えは良くならない
+- 残った天気は単独の問い（「傘は要るか」）として立つので、そのままツール1本にした
 
-| 値 | 意味 |
-|---|---|
-| `ok` | 中身が入っている |
-| `unavailable` | 接続は設定されているが取得できなかった（対象日ぶんが無い場合も含む） |
-| `not_configured` | 接続が設定されていない（トークン等が未設定） |
-| `not_connected` | コネクタ自体がまだ無い。依存Issueの完了待ち |
-
-`unavailable` と `not_connected` を分けているのは、**前者は直せば取れる／後者はまだ存在しない**という
-違いをClaudeに伝えるため。どちらも「情報が無い」だが、言うべきことが違う。
+**「今日はどんな感じ」のように予定と天気の両方が要る問いでは、Claudeが2本呼ぶことになる。**
+畳んでいた頃より呼び出しは1回増える。両ツールの説明文でこの関係を書き分けてある。
 
 ### 「今日」はJSTの暦日で切る
 
 `Asia/Tokyo` の暦日（`YYYY-MM-DD`）を対象日とし、深夜も暦日どおりに扱う。ツールは引数を取らない。
 
-**天気は日付で突き合わせる。配列の先頭を「今日」とみなさない。** キャッシュは日付をまたいで残るため、
+**日付で突き合わせる。配列の先頭を「今日」とみなさない。** キャッシュは日付をまたいで残るため、
 添字で取ると日付が変わった直後に昨日の予報を「今日」として返してしまう。対象日が含まれていない場合は
 `unavailable` にして、取得済みの時刻と理由を添える。
 
@@ -1700,34 +1760,25 @@ Core に置き、MCP層へ出す口はこのビューへ集約する（「Core �
 走るまでは、キャッシュの中身が「前日・当日」のまま**になり、`tomorrow` が見つからない。このとき
 キャッシュ自体は新しいので `stale` にはならない（180分に満たない）。
 
-セクション全体は落とさず `tomorrow` だけを `null` にし、**「明日の天気が無い」と読まれないよう `note` に
+全体は落とさず `tomorrow` だけを `null` にし、**「明日の天気が無い」と読まれないよう `note` に
 断り書きを添える**。日をまたいだ直後だけ毎日起きる状態なので、鮮度の判定で表現しようとすると壊れる。
 
-### `aide_room_status` との棲み分け
+### `aide_room_sensors` との棲み分け
 
-`aide_daily_briefing` が返す天気は**今日・明日の予報**、`aide_room_status` が返すのは**いまの実測**
+`aide_weather` が返すのは**今日・明日の予報**、`aide_room_sensors` が返すのは**いまの実測**
 （室温・湿度・CO2と、myroom 経由の屋外の気温・湿度・気圧）。「いま暑いか」は後者、「今日は暑くなるか」
-「傘は要るか」は前者にあたる。**両方のツールの説明文でこの違いを書き分ける**——横断ビュー同士でも、
-選択が曖昧になればMCP層を狭くしている意味が無くなる。
+「傘は要るか」は前者にあたる。**両方のツールの説明文でこの違いを書き分ける**——
+選択が曖昧になれば、分けた意味が無くなる。
 
-### 鮮度はビュー全体で揃えない
+### 取得できなかったことを「そういう天気だ」と読ませない
 
-天気は毎時更新のキャッシュ、交通は分単位、予定は都度と性質が違うため、1つの `stale` に潰すと意味が
-壊れる。`fetchedAt` / `ageMinutes` / `stale` は**セクションごとに持つ**。
+`state` で区別する。`ok` は中身が入っている、`unavailable` は取得できなかった（対象日ぶんが
+キャッシュに無い場合を含む）。**どちらも `data` の有無では見分けられない**ため、理由（`reason`）を
+添えて返す。
 
-### 揃った順に足す
+**MCPの同期リクエスト内で重い取得は行わない。** 天気は weather-sync が毎時書いたキャッシュを読むだけ
+（「どこまでを『重い取得』とみなすか」）。
 
-天気（キャッシュ）と予定（[DaySpan](#コネクタ-dayspan予定タスク日付リマインド移動)・aide#173）は
-実データを返し、交通（aide#33）は `not_connected` のまま。セクションは名前付きフィールドと共通の器
-（`BriefingSection<T>`）にしてあるので、コネクタが入ったら該当セクションを差し替えるだけで足せる。
-ニュース（question#7 で保留中）を後から加える場所も同じ。
-
-**MCPの同期リクエスト内で重い取得は行わない。** 天気はキャッシュを読むだけ。予定は localhost への
-HTTP GETを1本、短いタイムアウト付きで叩く（「どこまでを『重い取得』とみなすか」）。交通を足すときも同じ。
-
-**予定は取得できても `ok` にならないことがある。** DaySpanが部分的な失敗を返した場合は、取れたぶんを
-`data` に残したまま `unavailable` にする。捨てると天気だけの答えになり、`ok` にすると欠けたことが
-伝わらないため。
 
 ## キャッシュと worker
 
@@ -1737,7 +1788,7 @@ HTTP GETを1本、短いタイムアウト付きで叩く（「どこまでを�
 src/core/cache/store.ts    JSONファイルのキャッシュ
 src/worker/run.ts          ジョブのエントリポイント（ワンショット実行）
 src/worker/jobs/           個々のジョブ
-src/core/views/            キャッシュを読んで横断ビューを組み立てる
+src/core/views/            キャッシュを読んでビューを組み立てる
 ```
 
 ### なぜキャッシュを挟むか
@@ -1883,7 +1934,7 @@ URLに含まれる `channel_id` が宛先の識別子そのもの（Webhook自�
 
 ### 金額の扱い
 
-`balances`（残高一覧）には証券口座の**合計**が含まれ、`holdings`（保有銘柄）はその**内訳**にあたる。両者を足すと証券分を二重に数えるため、横断ビューでは合算値を出していない。
+`balances`（残高一覧）には証券口座の**合計**が含まれ、`holdings`（保有銘柄）はその**内訳**にあたる。両者を足すと証券分を二重に数えるため、ビューでは合算値を出していない。
 
 
 ## worker とサーバーが別マシンである問題
@@ -1943,7 +1994,7 @@ Claudeアプリ等へMCPで出しているのと同じデータを、既存の�
 | | |
 |---|---|
 | エンドポイント | `GET /api/money/summary` |
-| 返す内容 | `aide_money_summary` と同じ横断ビュー（`buildMoneySummary()`） |
+| 返す内容 | `aide_balances` と `aide_fixed_costs` を合わせたビュー（`buildMoneySummary()`）。**MCP層だけが2本に分かれており、この読み取りAPIは1本のまま**（#373） |
 | 認証 | `Authorization: Bearer $AIDE_READ_SECRET` |
 
 ```bash
@@ -2043,7 +2094,7 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 
 ### キャッシュを素で返さない理由
 
-`GET /api/cache/:key`（書き込みと対称な形）ではなく横断ビューを出している。外へ見せる契約が1本で済み、
+`GET /api/cache/:key`（書き込みと対称な形）ではなくビューを出している。外へ見せる契約が1本で済み、
 キャッシュの構造を後から変えられる余地が残る。素で返す口は、必要になった時点で足す。
 
 ### 読み取りと書き込みでシークレットを分ける
@@ -2360,13 +2411,13 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 - **解約予定（`SCHEDULED_TO_END`）は合計に含まれる**（まだ払っているため）。「解約したもの」は `ENDED` だけ
 - `usdJpyRate` が `null` のときドル建ては合計から外れる。**`summary.excludedFromTotal` が空かを見てから**合計を答える
 
-### `aide_money_summary` の固定費との関係
+### `aide_fixed_costs` との関係
 
-`aide_money_summary` の固定費は今も旧ソース（[subscription-lists](#コネクタ-subscription-lists)）由来で、
-同じ問いに2本のツールが答えうる。**移行が済むまでは `aide_money_summary` が正、移行後は Asset Manager が正**とする。
+`aide_fixed_costs` は今も旧ソース（[subscription-lists](#コネクタ-subscription-lists)）由来で、
+同じ問いに2本のツールが答えうる。**移行が済むまでは `aide_fixed_costs` が正、移行後は Asset Manager が正**とする。
 Asset Manager へのデータ移行（asset-manager#492）は利用者の手作業のため、それまでこのツールは契約0件を返しうる
-（ツールの説明で「0件なら移行前の可能性があるので `aide_money_summary` の固定費も見る」と指示している）。
-移行後の `aide_money_summary` の参照先の付け替えと subscription-lists 側の撤去は、このツールとは別に行う。
+（ツールの説明で「0件なら移行前の可能性があるので `aide_fixed_costs` も見る」と指示している）。
+移行後の `aide_fixed_costs` の参照先の付け替えと subscription-lists 側の撤去は、このツールとは別に行う。
 
 ## Asset Managerのサブスクを登録・料金追加する（MCP）
 

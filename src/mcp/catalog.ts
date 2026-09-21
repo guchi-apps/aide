@@ -1,21 +1,21 @@
 import { ToolRegistry } from "./registry.ts";
-import { dailyBriefingTool } from "./tools/briefing.ts";
 import { claudeSessionsTool } from "./tools/claude-sessions.ts";
 import { createEventTool } from "./tools/create-event.ts";
-import { devStatusTool } from "./tools/dev.ts";
+import { devStatusTool, repoLabelsTool, repoStatusTool } from "./tools/dev.ts";
 import { createIssueTool } from "./tools/issue.ts";
-import { moneySummaryTool } from "./tools/money.ts";
+import { balancesTool, fixedCostsTool } from "./tools/money.ts";
 import {
   createNotificationTool,
   createTaskCandidateTool,
   saveDailyBriefTool,
 } from "./tools/notifications.ts";
-import { opsStatusTool } from "./tools/ops.ts";
+import { hostStatusTool, serviceQuotasTool, uptimeMonitorsTool } from "./tools/ops.ts";
 import { pingTool } from "./tools/ping.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
-import { roomStatusTool } from "./tools/room.ts";
+import { airconStatusTool, roomSensorsTool } from "./tools/room.ts";
 import { scheduleTool } from "./tools/schedule.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
+import { weatherTool } from "./tools/weather.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
 import {
   assetManagerAddSubscriptionPriceTool,
@@ -31,23 +31,37 @@ import { researchDeskImportWeeklyReportTool } from "./tools/research-desk.ts";
  * `src/server.ts` のモジュール直下で組み立てていたものを関数へ切り出した（#328）。
  * `server.ts` は読み込んだ時点で認証設定を読み `listen()` まで走るためテストから読み込めず、
  * アプリ連携の図（`src/web/map.ts`）に全ツールが載っているかを本物の登録簿で確かめられなかった。
+ *
+ * **ツールは「1つの問い」ごとに立てる**（#373）。1本に複数の問いを畳むと、片方だけ
+ * 尋ねられたときにも全部が返り、応答がその問いに対して大きすぎる。読み取りと書き込みは
+ * 必ず別のツールにする（クライアント側で「常に許可」にしたときに書き込みまで素通しになる）。
  */
 export function buildToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(pingTool);
-  registry.register(moneySummaryTool);
-  // 電気代・ガス代（#324）。種類と期間を取るため aide_money_summary へは畳まない。
+  // お金は「いま持っている額」（ストック）と「毎月出ていく額」（フロー）で分ける（#373）。
+  registry.register(balancesTool);
+  registry.register(fixedCostsTool);
+  // 電気代・ガス代（#324）。種類と期間を取るため固定費・残高へは畳まない。
   registry.register(utilityBillsTool);
-  registry.register(opsStatusTool);
-  registry.register(roomStatusTool);
+  // 運用は区画ごとに分ける（#373）。ホスト指標・外形監視・残枠は別々の問い。
+  registry.register(hostStatusTool);
+  registry.register(uptimeMonitorsTool);
+  registry.register(serviceQuotasTool);
+  // 部屋も測定値とエアコンで問いが違う（#373）。
+  registry.register(roomSensorsTool);
+  registry.register(airconStatusTool);
   // 照明などの操作（#317）。**一覧と押すを分けている**（Zaimと同じ理由）。
   registry.register(roomButtonsTool);
   registry.register(roomPressTool);
-  registry.register(dailyBriefingTool);
+  registry.register(weatherTool);
   registry.register(scheduleTool);
   // 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
   registry.register(createEventTool);
+  // 開発状況は俯瞰・1リポジトリの詳細・起票用ラベルで分ける（#373）。
   registry.register(devStatusTool);
+  registry.register(repoStatusTool);
+  registry.register(repoLabelsTool);
   registry.register(createIssueTool);
   registry.register(claudeSessionsTool);
   // Zaimへの支出登録（#135）。**読み取り（候補の一覧）と書き込み（登録）を分けている。**

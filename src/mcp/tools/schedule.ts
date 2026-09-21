@@ -7,7 +7,7 @@ import {
 import type { Tool } from "../types.ts";
 
 /**
- * 予定の横断ビュー（aide#173）。
+ * 予定の読み取り（aide#173）。
  *
  * **Claudeアプリには公式のGoogleカレンダーコネクタがあるが、それはAnthropic製品側の機能で、
  * Messages APIから叩ける公開のリモートMCPサーバーのURLが存在しない。** そのため
@@ -18,9 +18,9 @@ import type { Tool } from "../types.ts";
  * 取得先はGoogleカレンダーではなくDaySpanで、予定・タスク・日付リマインド・移動が
  * 統合済みのものを受け取る（`src/core/connectors/dayspan/index.ts`）。
  *
- * **`aide_daily_briefing` とは用途を書き分ける。** あちらは「今日1日の見通し」を天気・交通と
- * 一緒に1回で返すもので、日付も今日に固定されている。こちらは**期間を指定して予定そのものと
- * 空き時間を見る**ためのもの。書き分けないと、横断ビュー同士でツール選択が曖昧になる。
+ * **今日の予定もこのツールが答える**（#373）。以前は「今日1日の見通し」を天気・交通と
+ * 一緒に返す `aide_daily_briefing` があり、今日ぶんだけ答えが2本に割れていた。
+ * MCPツールを問いの単位へ分け直したさいにあちらを畳み、天気は `aide_weather` へ移した。
  */
 
 /** 一度に返す日数の上限。DaySpan側の上限は31日だが、応答が膨らむため短く切る。 */
@@ -116,7 +116,8 @@ export const scheduleTool: Tool = {
     "configured が false なら接続が未設定、complete が false なら取得できなかったものがあり、" +
     "**どちらも「予定が無い」という意味ではない**。" +
     "sources.googleConnected が false のときも events が空になるが、これは未接続を意味する。" +
-    "**今日1日の見通し（予定に加えて天気・交通）が欲しいときは aide_daily_briefing を呼ぶこと。**",
+    "**今日の予定もこのツールで引く**（date・offsetDays を省略すると今日）。" +
+    "天気は返さないので、「今日はどんな感じ」のように天気も要る問いでは aide_weather も呼ぶこと。",
   inputSchema: {
     type: "object",
     properties: {

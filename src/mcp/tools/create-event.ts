@@ -15,6 +15,9 @@ import type { Tool, ToolResult } from "../types.ts";
  *
  * **作成だけ。編集・削除は持たない。** 一度登録した予定を動かす・消すにはDaySpanの画面から
  * 行う必要がある（`aide_zaim_payment` と同じ理由——取り消せない操作をサーバー間経路へ出さない）。
+ *
+ * **`dryRun` を持つ**（#373）。この経路から取り消せないので、登録前に「何が入るか」だけを
+ * 確かめられるようにしてある。検査は本番と同じものを通し、DaySpanへは送らない。
  */
 function json(payload: unknown): ToolResult {
   return {
@@ -35,7 +38,9 @@ export const createEventTool: Tool = {
     "**登録前にタイトル・日時を復唱し、利用者に確認を取ってから呼ぶこと**" +
     "（間違えてもこの経路からは取り消せないため）。" +
     "startTime・endTime は両方指定するか両方省略する（省略すると終日の予定になる）。" +
-    "作成できたら予定の url を返すので、「入れました」の案内に使うこと。",
+    "作成できたら予定の url を返すので、「入れました」の案内に使うこと。" +
+    "**日時があやふやなまま登録したくないときは dryRun: true で呼ぶ**と、" +
+    "登録せずに「何が入るか」だけを返す。",
   inputSchema: {
     type: "object",
     properties: {
@@ -54,6 +59,13 @@ export const createEventTool: Tool = {
         type: "string",
         description: "登録先のカレンダーID。省略するとDaySpan側の既定の保存先へ登録する。",
       },
+      dryRun: {
+        type: "boolean",
+        description:
+          "**登録せずに、何が登録されるかだけを返す。** 入力の検査は本番と同じものを通すため、" +
+          "日付・時刻の形が誤っていればここで分かる。" +
+          "利用者に内容を確かめてもらってから、dryRun を外して呼び直す。",
+      },
     },
     required: ["title", "date"],
     additionalProperties: false,
@@ -69,6 +81,16 @@ export const createEventTool: Tool = {
 
     const normalized = normalizeCreateEventInput(args);
     if ("error" in normalized) return json({ ok: false, kind: "invalid", reason: normalized.error });
+
+    if (args["dryRun"] === true) {
+      return json({
+        ok: true,
+        dryRun: true,
+        // 正規化後の値を返す。呼び出し側の綴りではなく、実際に送られる内容を見せる。
+        wouldCreate: normalized.input,
+        note: "登録していません。この内容でよければ dryRun を外して呼び直してください。",
+      });
+    }
 
     const outcome = await createDaySpanEvent(config, normalized.input);
     if (!outcome.ok) return json({ ok: false, kind: outcome.kind, reason: outcome.reason });
