@@ -8,6 +8,7 @@ import {
   handleZaimMaster,
   handleZaimPayment,
   handleZaimWebGenreEdit,
+  handleZaimWebMemoEdit,
   handleZaimWebPayment,
 } from "./api/zaim.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
@@ -216,6 +217,12 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 上と同じくPlaywrightとログイン状態がある実行環境（サブPC）でだけ成立する。
   if (path === "/api/zaim/payment/web/genre") {
     await handleZaimWebGenreEdit(req, res);
+    return;
+  }
+  // 既存明細（自動連携明細を含む）のメモだけを編集画面から書き換える口（#354）。
+  // 上と同じくPlaywrightとログイン状態がある実行環境（サブPC）でだけ成立する。
+  if (path === "/api/zaim/payment/web/memo") {
+    await handleZaimWebMemoEdit(req, res);
     return;
   }
   if (path === "/api/zaim/master") {
