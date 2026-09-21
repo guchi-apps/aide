@@ -6,6 +6,7 @@ import type { ToolRegistry } from "../mcp/registry.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { ENDPOINTS, type FeatureItem } from "./features.ts";
 import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
+import { renderInlineMarkdown } from "./markdown.ts";
 import {
   buildIssueDraft,
   collectSync,
@@ -451,14 +452,14 @@ function renderPopover(popover: MapPopover): string {
         .map(
           (item) =>
             `<li><span class="mono">${escapeHtml(item.name)}</span>${item.meta ? ` <span class="popover-meta">${escapeHtml(item.meta)}</span>` : ""}` +
-            `<span>${escapeHtml(item.description)}</span></li>`,
+            `<span>${renderInlineMarkdown(item.description)}</span></li>`,
         )
         .join("")}</ul>`
     : "";
   return `<section id="${popover.id}" class="detail-popover" popover="auto" role="dialog" aria-labelledby="${popover.id}-title">
 <div class="popover-head"><h2 id="${popover.id}-title">${escapeHtml(popover.title)}</h2>${meta}
 <button type="button" class="popover-close" popovertarget="${popover.id}" popovertargetaction="hide" aria-label="閉じる">×</button></div>
-<p>${escapeHtml(popover.description)}</p>${items}</section>`;
+<p>${renderInlineMarkdown(popover.description)}</p>${items}</section>`;
 }
 
 function detailTrigger(value: string, catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
