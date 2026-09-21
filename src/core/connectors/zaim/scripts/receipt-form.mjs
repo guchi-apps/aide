@@ -32,12 +32,52 @@ export function resolveReceiptUrl() {
 }
 
 /**
- * 既存明細の編集画面のURL（`/money/<id>/edit`）。moneyIdはWeb版の一覧の編集リンク
- * （`parse.ts` の `extractZaimMoneyId()`）が取り出すのと同じ値。
+ * 既存明細の編集UIを開くために読む、家計簿一覧（`/money?month=YYYYMM`）のURL。
+ *
+ * **編集画面（`/money/<moneyId>/edit`）を直接開いても編集UIは出ない**（#409。実物で確認）。
+ * 編集UIは一覧の鉛筆アイコンから開く「家計簿の編集」モーダルでだけ成立し、`/edit` を
+ * 直接開くと真っ白のまま（`$ is not defined`・`receipt_edit` の描画失敗）で、入力欄が無い。
+ * だから一覧を開き、対象の明細の鉛筆アイコンを押してモーダルを出す。
+ *
+ * 基点は巡回（`money-list.mjs`）と同じ `ZAIM_MONEY_URL`。月は明細の日付（`YYYY-MM-DD`）から取る。
  */
-export function resolveReceiptEditUrl(moneyId) {
-    const base = process.env.ZAIM_RECEIPT_EDIT_URL_BASE || "https://zaim.net/money"
-    return `${base}/${moneyId}/edit`
+export function resolveReceiptListUrl(date) {
+    const matched = /^(\d{4})-(\d{2})-\d{2}$/.exec(date ?? "")
+    if (!matched) throw new Error(`date を YYYY-MM-DD 形式で指定してください: ${date}`)
+    const base = process.env.ZAIM_MONEY_URL || "https://zaim.net/money"
+    return `${base}?month=${matched[1]}${matched[2]}`
+}
+
+/**
+ * 一覧の中で、`moneyId` の明細の編集を開く要素（鉛筆アイコン）を指すセレクタ。
+ *
+ * 一覧の行は `data-url="/money/<moneyId>/edit"` を持つ（`money-list.mjs` が編集リンクとして
+ * 読んでいるのと同じ属性）。鉛筆アイコンは `a[href]` ではないため、この属性で当てる。
+ * `/money/1/edit` は `/money/11/edit` に部分一致しない（直前の `/` まで含めて照合する）。
+ */
+export function receiptEditTriggerSelector(moneyId) {
+    if (!Number.isInteger(moneyId) || moneyId <= 0) {
+        throw new Error(`moneyId を正の整数で指定してください: ${moneyId}`)
+    }
+    return `[data-url*="/money/${moneyId}/edit"]`
+}
+
+/**
+ * 編集モーダルの明細行のうち、**書き換える行**を決める。
+ *
+ * モーダルには品目の行が複数並ぶ（新規登録画面と同じく、空の行も含めて描画される）。
+ * 金額が入っている行だけが実際の品目なので、その行がちょうど1つのときだけ対象にする。
+ * 0個（読めていない）も2個以上（複数品目の明細。どの行か決められない）も、
+ * 決められないものとして -1 を返す。
+ *
+ * @param amounts 各行の金額（`parseAmountValue()` の結果。空欄は null）
+ */
+export function pickFilledRowIndex(amounts) {
+    const filled = []
+    amounts.forEach((amount, index) => {
+        if (amount !== null && amount > 0) filled.push(index)
+    })
+    return filled.length === 1 ? filled[0] : -1
 }
 
 /**
