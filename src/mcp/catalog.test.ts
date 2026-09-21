@@ -67,7 +67,13 @@ describe("MCPツールの登録簿", () => {
 
   it("書き込みツールは dryRun を持つ", () => {
     // **どれも取り消せない経路。** 送る前に内容を確かめる口を必ず残す。
-    for (const name of ["aide_zaim_payment", "aide_create_issue", "aide_create_event", "aide_room_press"]) {
+    for (const name of [
+      "aide_zaim_payment",
+      "aide_create_issue",
+      "aide_create_event",
+      "aide_room_press",
+      "aide_aircon_control",
+    ]) {
       const properties = tool(name).inputSchema["properties"] as Record<string, unknown>;
       assert.ok(properties["dryRun"], `dryRun が無い: ${name}`);
       assert.match(tool(name).description, /dryRun/, `dryRun の案内が説明に無い: ${name}`);
@@ -84,6 +90,9 @@ describe("MCPツールの登録簿", () => {
       ["aide_service_quotas", /aide_host_status/],
       ["aide_room_sensors", /aide_aircon_status/],
       ["aide_aircon_status", /aide_room_sensors/],
+      ["aide_aircon_status", /aide_aircon_control/],
+      ["aide_aircon_control", /aide_aircon_status/],
+      ["aide_room_buttons", /aide_aircon_control/],
       ["aide_printer_status", /aide_room_sensors/],
       ["aide_room_sensors", /aide_printer_status/],
       ["aide_weather", /aide_room_sensors/],

@@ -50,7 +50,7 @@ export const roomButtonsTool: Tool = {
     "「電気をつけて」「照明を消して」のように機器の操作を頼まれたら、まずこれを呼んで押すボタンを探す。" +
     "各ボタンの name（「グループ名 / ボタン名」）と id を aide_room_press に渡す。" +
     "読み取りだけで、機器は操作しない。部屋の室温・照度などの測定値は aide_room_sensors、" +
-    "エアコンの運転状態は aide_aircon_status。",
+    "エアコンの運転状態は aide_aircon_status、エアコンの操作は aide_aircon_control（このボタンでは操作できない）。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
     const config = readMyRoomControlConfig();

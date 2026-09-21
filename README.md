@@ -50,6 +50,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
+| `aide_aircon_control`（aide#316） | myroom経由でのエアコンの電源・運転モード・設定温度・風量の変更（白くまくんへ運転指示を送る） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（照明の操作と共用。読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
 | `asset_manager_create_subscription` / `asset_manager_add_subscription_price`（#346） | Asset Managerへのサブスク・初回料金の登録と、料金改定履歴の追加 | 満たす | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（取り込み・サブスクの読み取りと共用。下記） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
@@ -174,10 +175,27 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 2. **読み取りとは別の資格情報。** 読み取り用の `AIDE_MYROOM_TOKEN` とは別に
    `AIDE_MYROOM_CONTROL_TOKEN` を持つ。myroom側も読み取り用の `INTERNAL_API_KEY` とは別の
    `INTERNAL_CONTROL_API_KEY` で守る（[myroom#419](https://github.com/guchi-apps/myroom/issues/419)）
-3. **例外。** 押せるのは myroom の画面で登録済みのボタンだけで、Nature Remo の signal を直接送る口や
-   エアコンの設定変更は持たない
+3. **例外。** 押せるのは myroom の画面で登録済みのボタンだけで、Nature Remo の signal を直接送る口は
+   持たない。エアコン（白くまくん）の運転指示はこのツールでは送らない（[別のツール](#エアコンの操作は条件3の例外aide316)）
 
 誤操作の防ぎ方は[照明などの操作](#照明などの操作aide317)。**この例外を前例として使わない。**
+状態を変える書き込みを次に持ち込むときは、この節を根拠にせずIssueで改めて決める。
+
+#### エアコンの操作は条件3の例外（aide#316）
+
+`aide_aircon_control` は myroom 経由で白くまくん（AirCloud Home）へ運転指示を送り、エアコンの電源・
+運転モード・設定温度・風量を変える。**部屋の機器の状態を変える操作で、「作成だけ」ではない。**
+**照明の操作（aide#317）の例外を前例にせず、Issue #316 で改めて判断した。** 持つのは、変更前の状態を
+応答に返すので、その値を指定し直せば元に戻せる取り返しのつく操作だから（Issueでユーザーが決定）。
+
+1. **他のどこからも塞がっている経路。** myroom のエアコン操作（#213）はログインしたブラウザ専用で、
+   Claude / ChatGPT から届く経路は他に無い
+2. **読み取りとは別の資格情報。** 照明の操作と同じ `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の
+   `AIDE_MYROOM_TOKEN` とは別）。**白くまくんのログイン情報はAIDEに持たない**（myroom が持つ）
+3. **例外。** 変えられるのは電源・運転モード・設定温度・風量の4項目だけ。風向・湿度など他の設定や、
+   タイマー・スケジュールの登録は持たない
+
+誤操作の防ぎ方は[エアコンの操作](#エアコンの操作aide316)。**この例外を前例として使わない。**
 状態を変える書き込みを次に持ち込むときは、この節を根拠にせずIssueで改めて決める。
 
 #### ChatGPTのスケジュールからの取り込みは条件1・2を満たす（#199・aide#205・aide#211）
@@ -274,7 +292,7 @@ Core をフルスコープで作っておけば、MCP層で「出す／出さな
 ### 読み取りと書き込みは必ず分ける
 
 `aide_zaim_master` / `aide_zaim_payment`（aide#135）、`aide_room_buttons` / `aide_room_press`（#317）、
-`aide_schedule` / `aide_create_event`（#243）、`asset_manager_subscriptions` /
+`aide_aircon_status` / `aide_aircon_control`（#316）、`aide_schedule` / `aide_create_event`（#243）、`asset_manager_subscriptions` /
 `asset_manager_create_subscription`（#345・#346）はいずれもこの理由で2本になっている。
 **1本に畳むと、クライアント側で「常に許可」にしたときに書き込みまで素通しになる。**
 
@@ -441,6 +459,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_printer_status` | 3Dプリンター（Bambu Lab A1 mini）の状態。印刷状態・進捗率・残り時間・レイヤー・温度・AMS Lite・エラー・最終更新。**鮮度を必ず返し、切れているときは現在の状態を返さない**（詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）。**読み取りだけ** |
 | `aide_room_buttons` | 照明など、AIDEから押せる機器のボタンの一覧（myroom に登録済みの Nature Remo のボタン）。読み取りだけ |
 | `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで。`dryRun` で押さずに確認できる） |
+| `aide_aircon_control` | エアコンの電源・運転モード・設定温度・風量を変更する。**部屋の機器を操作するツール**（`acId` と名前を myroom のいまの状態と突き合わせてから送る。オフラインには送らない。結果は変更前の状態と送信後の読み戻しまで返す。`dryRun` で送らずに確認できる。詳細は[エアコンの操作](#エアコンの操作aide316)） |
 | `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
 | `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）。予定には中止・不参加の記録（`outcome`）と本文（300文字まで）が付く（#388） |
 | `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |
@@ -1316,6 +1335,7 @@ src/core/connectors/myroom/
   types.ts   myroom のレスポンスのうち、AIDEが使うフィールドだけを再宣言
   index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
   control.ts 照明などの操作（ボタンの一覧と押す。aide#317）
+  aircon-control.ts エアコンの操作（状態の読み取り・運転指示・入力の検証。aide#316）
 src/core/views/room.ts       しきい値判定と圧縮（summarizeRoom は純粋関数。テストはここ）
 src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後述。aide#378）
 ```
@@ -1344,7 +1364,8 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 操作そのものは myroom が持っている（`backend/remote.py`。Nature Remo へ赤外線の送信を依頼する）。
 **AIDEは Nature Remo を直接叩かず、myroom の画面で登録済みのボタンをIDで押すだけにする。**
 直接叩くとボタンの定義・表示名が myroom と二重になり、Nature Remo のレート制限（30回/5分）も
-両者で食い合う。対象は Nature Remo のボタンだけで、エアコン（白くまくん）の操作は持たない。
+両者で食い合う。**このツールの対象は Nature Remo のボタンだけ**で、エアコン（白くまくん）の操作は
+別のツール（[エアコンの操作](#エアコンの操作aide316)）。
 
 | myroom の内部API | 使うツール |
 |---|---|
@@ -1366,6 +1387,40 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 **結果は「myroom が Nature Remo へ送信を依頼できたか」まで。** 赤外線は片方向で、機器が反応したかは
 返ってこない（myroom#106）。応答を待ちきれなかったときは送れたか分からないため `unknown` を返し、
 再送せずに利用者へ確かめるよう案内する。照明なら `aide_room_sensors` の照度の変化でも確かめられる。
+
+### エアコンの操作（aide#316）
+
+操作そのものは myroom が持っている（`backend/aircon_control.py`。白くまくん〔AirCloud Home〕へ運転指示を
+送る）。**AIDEは白くまくんへ直接繋がず、サインインもトークンの更新も持たない。** 直接叩くと、ログイン状態・
+レート制限（429）の管理が myroom と二重になり、資格情報がもう1か所に増える。
+
+| myroom の内部API | 使うもの |
+|---|---|
+| `GET /api/internal/aircon/units/{ac_id}/state` | `aide_aircon_control`（送る前の状態と、送った後の読み戻し。**DBではなく白くまくんから直接読む**） |
+| `POST /api/internal/aircon/units/{ac_id}/control` | `aide_aircon_control`（受けるのは電源・運転モード・設定温度・風量の4項目だけ） |
+
+どちらも照明の操作と同じ `INTERNAL_CONTROL_API_KEY`（AIDE側は `AIDE_MYROOM_CONTROL_TOKEN`）で通る。
+**契約は AIDE 側で先に決めた**（[myroom#439](https://github.com/guchi-apps/myroom/issues/439) の実装より前）。
+**myroom が未実装のバージョンなら 404 が返り、何も送らずに `unsupported` として止まる。**
+**リリースは myroom → AIDE の順**（AIDE を先に出しても、安全に失敗するだけで何も送らない）。
+
+誤操作は次で防ぐ。
+
+- **`acId` と名前の両方を受け取り、送る直前に myroom の今の状態と突き合わせる。** 一致しなければ
+  送らずに `mismatch` を返す。名前は `aide_aircon_status` の値をそのまま渡す
+- **オフライン（`online: false`）のエアコンには送らない。** 送っても反映されないのに、成功に見える
+- **今と同じ値なら送らない**（`changed: false`）。絶対値で指定するので二重に送っても結果は変わらないが、
+  送れたか分からない状況での再試行が白くまくんの回数制限を食うだけになるため
+- **設定温度は16〜32℃の0.5℃刻みだけを受け、丸めない。** 27.3 を 27.5 にして送ると頼んだ値と違う
+- **自動運転（`AUTO`）では設定温度を受けない。** 自動運転の「設定温度」は室温からのシフト量で意味が違う。
+  自動運転との行き来で温度の指定が無いときは、myroom が既定値へ置き換える旨を `warning` で返す
+- **送る前に、対象の名前と変更内容を利用者へ伝えて確認を取る**よう、ツールの説明文でClaudeに求める。
+  迷うときは `dryRun` で「変更前→変更後」だけを見られる
+
+**結果は「送れたか」と「指定どおりの状態になったか」を分けて返す。** 送信後に状態を読み戻し、
+`readback.matches` に一致の有無を入れる。**`false` でも失敗とは限らない**（白くまくんの反映に時間がかかる
+ことがある）ので、再送せずしばらくしてから確かめるよう案内する。応答を待ちきれなかったときは送れたか分からない
+ため `unknown` を返し、再送しない。応答の `before` は変更前の状態で、間違えたときはその値で元に戻せる。
 
 ### 鮮度と判定
 

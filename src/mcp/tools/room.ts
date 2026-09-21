@@ -82,7 +82,8 @@ export const airconStatusTool: Tool = {
     "**部屋の室温・湿度・CO2・照度は返さない**（それは aide_room_sensors）。" +
     "power は機器が返した文字列そのままで、`on` / `off` 以外が入ることがある。" +
     "aircons が空ならエアコンの情報を取得できておらず、**エアコンが無い・止まっているという意味ではない**。" +
-    "**このツールは読み取りだけで、エアコンは操作しない。** 照明などの操作は aide_room_buttons と aide_room_press。",
+    "**このツールは読み取りだけで、エアコンは操作しない。** エアコンの電源・モード・設定温度・風量の変更は " +
+    "aide_aircon_control（そこへ渡す acId と name はここで確かめる）。照明などの操作は aide_room_buttons と aide_room_press。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
     const status = await buildRoomStatus();
