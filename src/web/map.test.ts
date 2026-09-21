@@ -222,7 +222,7 @@ describe("機能の同期（差がある結果）", () => {
 
   it("図に残っている実在しない機能に、取り消し線つきの印を付け、その行へのリンクを出す", () => {
     const html = renderMapPage({ sync: diffView() });
-    assert.match(html, /<span class="gone" title="いまのAIDEには無い"><s>aide_money_summary<\/s>　－ 実在しない<\/span>/);
+    assert.match(html, /<span class="gone" title="いまのAIDEには無い"><s>aide_balances<\/s>　－ 実在しない<\/span>/);
     // 最初に印が付く行（使う側の先頭）へ飛ぶ。
     assert.ok(html.includes('<a href="#from-claude">実在しない項目へ</a>'));
   });
