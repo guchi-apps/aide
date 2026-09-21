@@ -31,8 +31,18 @@ const THRESHOLDS = {
   co2Ppm: { warn: 1000, danger: 1500 },
 } as const;
 
+/**
+ * その問題がどの区画のものか。
+ *
+ * MCP層はセンサー（`aide_room_sensors`）とエアコン（`aide_aircon_status`）でツールを
+ * 分けているため、**どちらが拾うべき問題かを文面から判定させない**（ops ビューと同じ）。
+ */
+export type RoomProblemSource = "sensors" | "aircons";
+
 export interface RoomProblem {
   severity: Exclude<RoomSeverity, "ok">;
+  /** どの区画の問題か。MCP層が自分のぶんだけ拾うのに使う。 */
+  source: RoomProblemSource;
   message: string;
 }
 
@@ -185,16 +195,16 @@ function summarizeAircon(aircon: MyRoomAircon): RoomAirconSummary {
  */
 function sensorProblems(sensor: RoomSensorSummary): RoomProblem[] {
   if (sensor.measuredAt === null) {
-    return [{ severity: "warn", message: `${sensor.name} の記録がまだ1件も無い` }];
+    return [{ severity: "warn", source: "sensors", message: `${sensor.name} の記録がまだ1件も無い` }];
   }
   if (sensor.stale) {
     const age = sensor.ageMinutes === null ? "" : `（最終測定 ${sensor.ageMinutes}分前）`;
-    return [{ severity: "warn", message: `${sensor.name} からの受信が止まっている${age}` }];
+    return [{ severity: "warn", source: "sensors", message: `${sensor.name} からの受信が止まっている${age}` }];
   }
 
   const problems: RoomProblem[] = [];
   const add = (severity: RoomSeverity, message: string): void => {
-    if (severity !== "ok") problems.push({ severity, message });
+    if (severity !== "ok") problems.push({ severity, source: "sensors", message });
   };
 
   if (sensor.temperature !== null) {
@@ -238,7 +248,7 @@ export function summarizeRoom(snapshot: MyRoomSnapshot, now: Date): RoomStatus {
   const problems: RoomProblem[] = sensors.flatMap(sensorProblems);
   for (const aircon of aircons) {
     if (aircon.online === false) {
-      problems.push({ severity: "warn", message: `${aircon.name} がオフライン` });
+      problems.push({ severity: "warn", source: "aircons", message: `${aircon.name} がオフライン` });
     }
   }
 

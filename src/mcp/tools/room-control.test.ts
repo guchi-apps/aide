@@ -167,6 +167,31 @@ describe("aide_room_press", () => {
     assert.deepEqual(sent, []);
   });
 
+  it("dryRun では押さず、押すことになるボタンの名前を返す", async () => {
+    const payload = parse(
+      await roomPressTool.handler({ id: "l-on", expectedName: "照明 / 点ける", dryRun: true }, CTX),
+    );
+    assert.equal(payload["ok"], true);
+    assert.equal(payload["dryRun"], true);
+    assert.equal(payload["wouldPress"], "照明 / 点ける");
+    assert.deepEqual(sent, []);
+  });
+
+  it("dryRun は連打ガードを数え始めない（確認した直後に押せる）", async () => {
+    await roomPressTool.handler({ id: "l-on", expectedName: "照明 / 点ける", dryRun: true }, CTX);
+    const real = parse(await roomPressTool.handler({ id: "l-on", expectedName: "照明 / 点ける" }, CTX));
+    assert.equal(real["ok"], true);
+    assert.deepEqual(sent, ["l-on"]);
+  });
+
+  it("dryRun でも登録との突き合わせは本番と同じものを通す", async () => {
+    const payload = parse(
+      await roomPressTool.handler({ id: "l-on", expectedName: "照明 / 消す", dryRun: true }, CTX),
+    );
+    assert.equal(payload["kind"], "mismatch");
+    assert.deepEqual(sent, []);
+  });
+
   it("同じボタンを続けて押すと断り、allowRepeat を付ければ押す", async () => {
     await roomPressTool.handler({ id: "l-on", expectedName: "照明 / 点ける" }, CTX);
     const second = parse(await roomPressTool.handler({ id: "l-on", expectedName: "照明 / 点ける" }, CTX));

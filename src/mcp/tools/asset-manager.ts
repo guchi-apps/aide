@@ -393,7 +393,7 @@ export const assetManagerImportPaymentTool: Tool = {
  * サブスクの一覧の読み取り（#345。Asset Manager 側は asset-manager#491 の `GET /api/subscriptions`）。
  *
  * 応答は加工せずそのまま返す。月額換算・次回請求日・契約状況・円換算は向こうが計算済みで、
- * こちらで再計算すればズレる（`aide_money_summary` の固定費と同じ「計算はしない」方針）。
+ * こちらで再計算すればズレる（`aide_fixed_costs` と同じ「計算はしない」方針）。
  */
 export const assetManagerSubscriptionsTool: Tool = {
   name: "asset_manager_subscriptions",
@@ -407,8 +407,8 @@ export const assetManagerSubscriptionsTool: Tool = {
     "status が SCHEDULED_TO_END（解約予定）のものはまだ払っているので summary の合計に含まれる。「解約したもの」として扱うのは ENDED だけ。" +
     "usdJpyRate が null（為替レートを取れなかった）のとき、ドル建ては monthlyAmountJpy が null になり合計から外れる。" +
     "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
-    "aide_money_summary の固定費は旧ソース（subscription-lists）由来で、こちらは移管先の契約データ。" +
-    "契約が0件のときは Asset Manager へのデータ移行前の可能性があるので、aide_money_summary の固定費も確認する。",
+    "aide_fixed_costs は旧ソース（subscription-lists）由来で、こちらは移管先の契約データ。" +
+    "契約が0件のときは Asset Manager へのデータ移行前の可能性があるので、aide_fixed_costs も確認する。",
   inputSchema: {
     type: "object",
     properties: {

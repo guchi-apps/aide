@@ -3,6 +3,7 @@ import type { ToolRegistry } from "../mcp/registry.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { accountAction, handleGatedPage, type LoginOptions } from "./login.ts";
+import { renderInlineMarkdown } from "./markdown.ts";
 
 /**
  * 機能一覧ページ（`GET /features`）。
@@ -66,7 +67,13 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/map",
     meta: "GET",
     description:
-      "アプリ連携の画面。AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを図で示す。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+      "アプリ連携の画面。AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを図で示す。「機能を同期」（?sync=1）で、図に載っていない機能・実在しない機能を突き合わせて出す。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+  },
+  {
+    name: "/map/issue",
+    meta: "POST",
+    description:
+      "アプリ連携の「機能を同期」で見つけた差から、図を直すIssueを起票する。本文は同期し直して組み立て、画面からの入力は使わない。ログインが要る。結果は /map へ戻して出す。",
   },
   {
     name: "/status/auth/start",
@@ -133,7 +140,7 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/api/money/summary",
     meta: "GET",
     description:
-      "個人アプリ向けの読み取りAPI。aide_money_summary と同じ内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数・月額固定費）をJSONで返す。読み取り専用の共有シークレットで認証する。",
+      "個人アプリ向けの読み取りAPI。aide_balances と aide_fixed_costs を合わせた内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数・月額固定費）をJSONで返す。読み取り専用の共有シークレットで認証する。",
   },
   {
     name: "/api/money/transactions",
@@ -218,7 +225,7 @@ export function buildSections(registry: ToolRegistry): FeatureSection[] {
 function renderItem(item: FeatureItem): string {
   const meta = item.meta ? `<span class="mt">${escapeHtml(item.meta)}</span>` : "";
   return `<li><span><span class="nm">${escapeHtml(item.name)}</span>${meta}</span>
-<span class="ds">${escapeHtml(item.description)}</span></li>`;
+<span class="ds">${renderInlineMarkdown(item.description)}</span></li>`;
 }
 
 function renderSection(section: FeatureSection): string {

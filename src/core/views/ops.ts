@@ -43,8 +43,19 @@ const THRESHOLDS = {
 /** これを超えて活動の無い tmux セッションを「放置」とみなす。 */
 const TMUX_IDLE_HOURS = 24;
 
+/**
+ * その問題がどの区画のものか。
+ *
+ * MCP層は区画ごとにツールを分けている（`aide_host_status` / `aide_uptime_monitors` /
+ * `aide_service_quotas`）ため、**どのツールが拾うべき問題かを文面から判定させない。**
+ * メッセージで見分けようとすると、文面を変えた瞬間に振り分けが黙って壊れる。
+ */
+export type OpsProblemSource = "hosts" | "monitors" | "quotas";
+
 export interface OpsProblem {
   severity: Exclude<OpsSeverity, "ok">;
+  /** どの区画の問題か。MCP層が自分のぶんだけ拾うのに使う。 */
+  source: OpsProblemSource;
   message: string;
 }
 
@@ -193,6 +204,7 @@ function hostProblems(host: OpsHostSummary): OpsProblem[] {
     return [
       {
         severity: "danger",
+        source: "hosts",
         message: `${host.label} が応答なし（最終受信 ${formatAge(host.ageSeconds)}）`,
       },
     ];
@@ -200,7 +212,7 @@ function hostProblems(host: OpsHostSummary): OpsProblem[] {
 
   const problems: OpsProblem[] = [];
   const add = (severity: OpsSeverity, message: string): void => {
-    if (severity !== "ok") problems.push({ severity, message });
+    if (severity !== "ok") problems.push({ severity, source: "hosts", message });
   };
 
   add(
@@ -231,14 +243,19 @@ function hostProblems(host: OpsHostSummary): OpsProblem[] {
   }
 
   for (const service of host.failedServices) {
-    problems.push({ severity: "danger", message: `${host.label}: ${service.name} が ${service.state}` });
+    problems.push({
+      severity: "danger",
+      source: "hosts",
+      message: `${host.label}: ${service.name} が ${service.state}`,
+    });
   }
   if (host.rebootRequired) {
-    problems.push({ severity: "warn", message: `${host.label} は再起動待ち` });
+    problems.push({ severity: "warn", source: "hosts", message: `${host.label} は再起動待ち` });
   }
   if (host.tmux && host.tmux.idleOver24h > 0) {
     problems.push({
       severity: "warn",
+      source: "hosts",
       message: `${host.label} に ${TMUX_IDLE_HOURS}時間以上 放置の tmux セッションが ${host.tmux.idleOver24h}件`,
     });
   }
@@ -355,17 +372,21 @@ export function summarizeOps(raw: OpsDashboardRaw, now: Date): OpsStatus {
 
   if (monitors) {
     if (monitors.down.length > 0) {
-      problems.push({ severity: "danger", message: `外形監視が停止: ${monitors.down.join("・")}` });
+      problems.push({
+        severity: "danger",
+        source: "monitors",
+        message: `外形監視が停止: ${monitors.down.join("・")}`,
+      });
     }
     if (monitors.pending > 0) {
-      problems.push({ severity: "warn", message: `確認中の外形監視が ${monitors.pending}件` });
+      problems.push({ severity: "warn", source: "monitors", message: `確認中の外形監視が ${monitors.pending}件` });
     }
   }
 
   for (const quota of quotas) {
     const severity = lowIsBad(quota.remainingPercent, THRESHOLDS.quotaRemainingPercent);
     if (severity !== "ok") {
-      problems.push({ severity, message: `${quota.name} の残りが ${quota.remainingPercent}%` });
+      problems.push({ severity, source: "quotas", message: `${quota.name} の残りが ${quota.remainingPercent}%` });
     }
   }
 

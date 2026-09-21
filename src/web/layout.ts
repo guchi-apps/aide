@@ -32,9 +32,21 @@ const FONT_SANS =
 const FONT_MONO = 'ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace';
 
 /**
+ * 図から移動した一覧の行を目立たせる動き。3.5秒（70%）は淡い色を保ち、残りの1.5秒で消える。
+ * **時間を変えるのは `.apps li` の `animation` の秒数だけ**で、JSは時間を持たない。
+ *
+ * 同じ動きを名前だけ変えて2つ出す。`:target`（直接URL・戻る操作・JS無効）と `.arrived`（JSでの移動）で
+ * 名前が違えば、`:target` が残っていても `.arrived` を付け直したときに最初からやり直せる。
+ * 名前が同じだと、規則が当たり続けるためアニメーションが再開しない。
+ */
+const ARRIVE_KEYFRAMES = (name: string) =>
+  `@keyframes ${name}{0%,70%{background:var(--focus);outline-color:var(--focus-line)}100%{background:transparent;outline-color:transparent}}`;
+
+/**
  * 配色は明暗の2組。切り替えスイッチは置かず、端末の設定にそのまま従う。
  * 差し色（青）は「読む・AIDEへ流れる」、茶（`--wr`）は「書く・AIDEから流れる」に使う
- * （アプリ連携の図）。赤（`--bad`）はエラー表示にしか使わない。
+ * （アプリ連携の図）。赤（`--bad`）はエラー表示と「実在しない」印、緑（`--ok`）は「追加」の
+ * 印にしか使わない（機能の同期。#355）。色だけに頼らず、＋・－の記号と語も併せて出す。
  */
 const STYLE = `
 :root{
@@ -45,6 +57,7 @@ const STYLE = `
  --focus:#f1f6f8;--focus-line:#9dbbc9;
  --wr:#7a4d12;--wr-bg:#f6ecdc;
  --bad:#a52f26;--bad-bg:#f8e3e0;
+ --ok:#2c6a3a;--ok-bg:#e2f0e4;
 }
 @media (prefers-color-scheme:dark){
  :root{
@@ -55,6 +68,7 @@ const STYLE = `
   --focus:#172a34;--focus-line:#356071;
   --wr:#e0b070;--wr-bg:#33260f;
   --bad:#ef8175;--bad-bg:#3a1c19;
+  --ok:#7fc48a;--ok-bg:#14301a;
  }
 }
 *{box-sizing:border-box}
@@ -109,9 +123,13 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .items .nm{font-family:${FONT_MONO};font-size:.84rem;font-weight:500;color:var(--accent);overflow-wrap:anywhere}
 .items .mt{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);margin-left:.5rem}
 .items .ds{font-size:.82rem;color:var(--ink-2)}
+/* 説明文のインラインMarkdown（src/web/markdown.ts）。機能一覧と、アプリ連携のポップアップで共通。 */
+.items .ds strong,.detail-popover strong{color:var(--ink);font-weight:600}
+.items .ds code,.detail-popover code{font-family:${FONT_MONO};font-size:.92em;padding:0 .25em;background:var(--panel-2);border:1px solid var(--line-2)}
 .connect{background:var(--accent-soft);border:1px solid var(--accent);padding:.7rem .9rem;
  display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .9rem;font-size:.84rem;align-items:baseline}
 .connect dt{color:var(--accent)}
+.connect dd{margin:0;min-width:0;overflow-wrap:anywhere}
 
 /* ---- アプリ連携（図と一覧） ---- */
 /* 図は横長（PC・iPad）と縦長（スマホ）の2枚を出し分ける。1枚を縮めるとスマホで字が読めない。 */
@@ -150,7 +168,11 @@ svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
 .apps li{padding:.55rem 0;border-bottom:1px solid var(--line-2);display:grid;
  grid-template-columns:minmax(0,1fr) auto;gap:.1rem .6rem;align-items:baseline;scroll-margin-top:1rem}
 .apps li:last-child{border-bottom:0}
-.apps li:target{background:var(--focus);outline:1px solid var(--focus-line);outline-offset:0}
+.apps li:target,.apps li.arrived{outline:1px solid transparent;outline-offset:0}
+.apps li:target{animation:arrive 5s ease-out forwards}
+.apps li.arrived{animation:arrive-again 5s ease-out forwards}
+${ARRIVE_KEYFRAMES("arrive")}
+${ARRIVE_KEYFRAMES("arrive-again")}
 .apps .nm{font-family:${FONT_MONO};font-size:.86rem;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
 .apps .dir{display:flex;gap:.25rem}
 .b{font-size:.7rem;font-weight:700;padding:0 .4rem;border:1px solid;white-space:nowrap}
@@ -173,6 +195,54 @@ svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
 .popover-items{list-style:none;margin:0;padding:0}.popover-items li{padding:.55rem 0;border-top:1px solid var(--line-2)}
 .popover-items li>.mono{color:var(--accent);font-size:.84rem;overflow-wrap:anywhere}.popover-items li>span:last-child{display:block;font-size:.8rem;color:var(--ink-2)}
 .notice{margin:0;padding:.55rem .7rem;background:var(--bad-bg);border-left:3px solid var(--bad);font-size:.86rem}
+
+/* ---- 機能の同期（アプリ連携。#355） ---- */
+.sync-area{margin:0;display:flex;flex-direction:column;align-items:stretch;gap:.25rem;flex:1 1 100%}
+@media (min-width:720px){.sync-area{align-items:flex-end;flex:none}}
+.sync{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;font:inherit;font-size:.86rem;font-weight:700;
+ padding:.5rem .95rem;background:var(--panel);color:var(--accent);border:1px solid var(--accent);cursor:pointer;min-height:2.4rem}
+.sync:hover{background:var(--accent-soft)}
+.sync.primary{background:var(--accent);color:var(--on-accent)}
+.sync.primary:hover{opacity:.9}
+.sync.quiet{color:var(--ink-2);border-color:var(--line)}
+.sync svg{flex:none}
+.sync[aria-busy="true"]{cursor:progress;background:var(--accent-soft);color:var(--muted);border-color:var(--line)}
+.sync[aria-busy="true"] svg{animation:spin 1s linear infinite}
+.sync[disabled]:not([aria-busy]){cursor:default;background:var(--panel-2);color:var(--muted);border-color:var(--line)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.sync[aria-busy="true"] svg{animation:none}}
+.synced-at{font-size:.74rem;color:var(--muted);font-family:${FONT_MONO};text-align:center}
+@media (min-width:720px){.synced-at{text-align:right}}
+.result{border:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+.result-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:.2rem .7rem;padding:.65rem .9rem;border-bottom:1px solid var(--line-2)}
+.result-head h2{font-size:.92rem;margin:0;font-weight:700}
+.result-head .t{font-family:${FONT_MONO};font-size:.74rem;color:var(--muted);margin-left:auto}
+.counts{display:flex;flex-wrap:wrap;gap:.5rem;padding:.75rem .9rem 0}
+.count{display:flex;align-items:baseline;gap:.45rem;padding:.3rem .7rem;border:1px solid;font-size:.82rem;font-weight:700;white-space:nowrap}
+.count b{font-family:${FONT_MONO};font-size:1.15rem}
+.count.add{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)}
+.count.del{color:var(--bad);background:var(--bad-bg);border-color:var(--bad)}
+.count.same{color:var(--muted);background:var(--panel-2);border-color:var(--line)}
+.jump{display:flex;flex-wrap:wrap;gap:.3rem 1.2rem;padding:.6rem .9rem 0;font-size:.84rem}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;padding:.75rem .9rem 0}
+.actions .sync{width:100%}
+@media (min-width:720px){.actions .sync{width:auto}}
+.actions .hint{font-size:.78rem;color:var(--muted);flex:1 1 14rem}
+.result-note{margin:0;padding:.65rem .9rem .75rem;font-size:.78rem;color:var(--muted)}
+.result.calm .result-head h2,.result.done .result-head h2{color:var(--ok)}
+.result.calm .result-note,.result.done .result-note{padding-top:.55rem;color:var(--ink-2);font-size:.84rem}
+.fail{margin:.75rem .9rem 0;padding:.5rem .7rem;background:var(--bad-bg);border-left:3px solid var(--bad);font-size:.84rem}
+.card.found{border-style:dashed;border-color:var(--ok)}
+.b.new{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)}
+.items .head{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+.items .head .mt{margin-left:0}
+.chips span.gone{color:var(--bad);background:var(--bad-bg);border-color:var(--bad)}
+/* Issue起案の確認。ポップオーバー本体には display を与えない（閉じているときの非表示が効かなくなる）。 */
+.draft dl{margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:.35rem .8rem;font-size:.82rem}
+.draft dt{color:var(--muted)}
+.draft dd{margin:0;overflow-wrap:anywhere}
+.draft pre{margin:0;padding:.55rem .7rem;background:var(--panel-2);border:1px solid var(--line-2);font-family:${FONT_MONO};font-size:.74rem;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.draft-actions{margin:.8rem 0 0;display:flex;flex-wrap:wrap;gap:.5rem;justify-content:flex-end}
 
 /* ---- ログイン（画面のログイン・接続の許可） ---- */
 body.centered{justify-content:center;align-items:center;padding:2rem 1rem}

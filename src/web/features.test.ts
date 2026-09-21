@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, it } from "node:test";
+import { buildToolRegistry } from "../mcp/catalog.ts";
 import { ToolRegistry } from "../mcp/registry.ts";
 import type { Tool } from "../mcp/types.ts";
-import { moneySummaryTool } from "../mcp/tools/money.ts";
+import { balancesTool } from "../mcp/tools/money.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { buildSections, ENDPOINTS, handleFeaturesPage, renderFeaturesPage } from "./features.ts";
@@ -21,8 +22,8 @@ function registryWith(...tools: Tool[]): ToolRegistry {
 
 describe("機能一覧ページ", () => {
   it("登録済みのMCPツールが名前と説明つきで載る", () => {
-    const html = render(registryWith(pingTool, moneySummaryTool));
-    for (const tool of [pingTool, moneySummaryTool]) {
+    const html = render(registryWith(pingTool, balancesTool));
+    for (const tool of [pingTool, balancesTool]) {
       assert.ok(html.includes(tool.name), `${tool.name} が出力に含まれていない`);
       // 説明は分割して連結しているため、先頭の一節だけ照合する。
       assert.ok(html.includes(tool.description.slice(0, 12)), `${tool.name} の説明が出力に含まれていない`);
@@ -80,6 +81,14 @@ describe("機能一覧ページ", () => {
     assert.ok(render(registryWith(pingTool), "https://aide.example.com").includes("https://aide.example.com/mcp"));
   });
 
+  it("接続先URLが狭い画面で枠からはみ出さないよう、値の列を折り返せるようにする", () => {
+    // 切れ目のないURLは、値の列が min-width:0 と折り返しの許可を持たないと枠を突き抜ける（#356）。
+    const html = render(registryWith(pingTool));
+    const rule = html.match(/\.connect dd\{([^}]*)\}/)?.[1] ?? "";
+    assert.ok(rule.includes("min-width:0"), ".connect dd に min-width:0 が無い");
+    assert.ok(rule.includes("overflow-wrap:anywhere"), ".connect dd に overflow-wrap:anywhere が無い");
+  });
+
   it("ツールの説明に含まれるHTMLをエスケープする", () => {
     const evil: Tool = {
       name: "aide_<script>",
@@ -92,6 +101,25 @@ describe("機能一覧ページ", () => {
     assert.ok(html.includes("&lt;script&gt;alert"));
     assert.ok(html.includes("&amp;"));
     assert.ok(html.includes("&#39;quoted&#39;"));
+  });
+
+  it("説明文の **太字** と `コード` を記号のまま出さず、太字・等幅にする（#364）", () => {
+    const marked: Tool = {
+      name: "aide_marked",
+      description: "**書き込みを伴う。** `on` / `off` を返す。",
+      inputSchema: { type: "object" },
+      handler: () => ({ content: [] }),
+    };
+    const html = render(registryWith(marked));
+    assert.ok(html.includes('<span class="ds"><strong>書き込みを伴う。</strong> <code>on</code> / <code>off</code> を返す。</span>'));
+    // 名前・注記は説明文ではないため変換しない。
+    assert.ok(html.includes('<span class="nm">aide_marked</span>'));
+  });
+
+  it("実際に登録されているツールの説明に、記号のままの ** が残らない（#364）", () => {
+    const html = render(buildToolRegistry());
+    assert.ok(html.includes("<strong>"), "太字が1つも出ていない");
+    assert.ok(!html.includes("**"), "説明文に ** が記号のまま残っている");
   });
 
   it("ツールが1つも無くても壊れない", () => {

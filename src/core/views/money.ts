@@ -317,8 +317,11 @@ export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCosts
  *
  * subscription-lists が落ちていても残高・保有銘柄は返せるため、
  * ここで throw すると答えられたはずの問いまで答えられなくなる。
+ *
+ * **`aide_fixed_costs` からも直接呼ぶ。** 「毎月の固定費は」にだけ答えるとき、
+ * `buildMoneySummary()` を通すとZaimのキャッシュまで読むことになり、問いと関係ない。
  */
-async function loadFixedCosts(now: Date): Promise<FixedCostsView> {
+export async function loadFixedCosts(now: Date = new Date()): Promise<FixedCostsView> {
   const config = readSubscriptionsConfig();
   if (!config) return fixedCostsNotConfigured();
 
@@ -331,21 +334,19 @@ async function loadFixedCosts(now: Date): Promise<FixedCostsView> {
 }
 
 /**
- * お金まわりの横断ビュー。
+ * 残高・保有銘柄だけの区画。`MoneySummary` から固定費（フロー）を除いたもの。
  *
- * 情報源は Zaim（残高・保有銘柄）と subscription-lists（月額固定費）。
- * 将来 meisai-lab（給与）を足す場所もここになる。
- *
- * **Zaimの巡回結果はキャッシュを読むだけで、取得は行わない**（Playwrightで十数秒かかるため）。
- * 固定費は同じVPS上へのHTTP GETで数ミリ秒のため、都度取得する。README「どこまでを『重い取得』
- * とみなすか」の判断に従っている。
+ * 「いくら持っているか」と「毎月いくら出ていくか」は別の問いなので、MCP層では
+ * `aide_balances` と `aide_fixed_costs` に分けて出している。
  */
-export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySummary> {
-  // 固定費の取得（数ミリ秒・失敗しても投げない）とキャッシュの読み出しは互いに独立。
-  const [cached, fixedCosts] = await Promise.all([
-    readCache<ZaimSnapshot>(ZAIM_CACHE_KEY),
-    loadFixedCosts(now),
-  ]);
+export type BalancesView = Omit<MoneySummary, "fixedCosts">;
+
+/**
+ * 残高・保有銘柄を返す。**Zaimの巡回結果はキャッシュを読むだけで、取得は行わない**
+ * （Playwrightで十数秒かかるため）。
+ */
+export async function buildBalances(now: Date = new Date()): Promise<BalancesView> {
+  const cached = await readCache<ZaimSnapshot>(ZAIM_CACHE_KEY);
 
   if (!cached) {
     return {
@@ -358,7 +359,6 @@ export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySu
       holdings: [],
       onlineAccounts: [],
       staleAccounts: [],
-      fixedCosts,
       note: "残高・保有銘柄はまだ一度も取得していない。worker の zaim-sync ジョブを実行する必要がある。",
     };
   }
@@ -388,7 +388,24 @@ export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySu
     holdings: cached.data.holdings,
     onlineAccounts,
     staleAccounts: freshness.staleAccounts,
-    fixedCosts,
     note: notes.join(" "),
   };
+}
+
+/**
+ * お金まわりの横断ビュー。
+ *
+ * 情報源は Zaim（残高・保有銘柄）と subscription-lists（月額固定費）。
+ * 将来 meisai-lab（給与）を足す場所もここになる。
+ *
+ * **読み取りAPI（`GET /api/money`・`/status`）はこの形のまま。** MCP層だけが
+ * `aide_balances` / `aide_fixed_costs` の2本へ分かれている。
+ *
+ * 固定費は同じVPS上へのHTTP GETで数ミリ秒のため都度取得する。README「どこまでを『重い取得』
+ * とみなすか」の判断に従っている。
+ */
+export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySummary> {
+  // 固定費の取得（数ミリ秒・失敗しても投げない）とキャッシュの読み出しは互いに独立。
+  const [balances, fixedCosts] = await Promise.all([buildBalances(now), loadFixedCosts(now)]);
+  return { ...balances, fixedCosts };
 }
