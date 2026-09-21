@@ -68,11 +68,31 @@ describe("ログイン画面", () => {
   });
 });
 
-describe("ヘッダーのログアウト", () => {
-  it("ログイン中のメールアドレスとログアウトを出す", () => {
+describe("ヘッダーのアカウントメニュー", () => {
+  it("ログイン中のメールアドレスとログアウトをメニューの中に出す", () => {
     const html = accountAction({ email: "me@example.com" }, true);
-    assert.ok(html.includes("me@example.com"));
+    const menu = html.slice(html.indexOf('class="account-menu"'));
+    assert.ok(menu.includes("me@example.com"));
+    assert.ok(menu.includes('action="/status/logout"'));
+    // メールアドレスとログアウトは、ボタンの側（常時見える場所）には出さない。
+    const button = html.slice(0, html.indexOf('class="account-menu"'));
+    assert.ok(!button.includes("me@example.com"));
+    assert.ok(!button.includes("ログアウト"));
+  });
+
+  it("ボタンがメニューを開く（popover）ように結ばれている", () => {
+    const html = accountAction({ email: "me@example.com" }, true);
+    const target = /popovertarget="([^"]+)"/.exec(html)?.[1];
+    assert.ok(target, "ボタンに popovertarget が無い");
+    assert.ok(html.includes(`id="${target}"`));
+    assert.ok(html.includes('popover="auto"'));
+    assert.ok(html.includes('aria-label="アカウント"'));
+  });
+
+  it("メールアドレスが無いセッションでも、ログアウトだけは出す", () => {
+    const html = accountAction({ email: null }, true);
     assert.ok(html.includes('action="/status/logout"'));
+    assert.ok(!html.includes("ログイン中"));
   });
 
   it("認証が無効なら何も出さない", () => {
