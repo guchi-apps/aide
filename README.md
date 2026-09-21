@@ -65,7 +65,7 @@ AIDEだけ**だから。差を見つけた画面から、そのまま図を直�
 
 条件2は `aide_create_issue` と同じ書き込み専用のトークン（`AIDE_GITHUB_ISSUE_TOKEN`）を共用する
 （取得用のトークンには書き込み権限を足していない）。条件3（作成のみ）は満たし、既定の
-`70.confirm` が付くため実装フローへ自動では乗らない。**本文は同期し直した差からサーバーが組み立て、
+`70.needs-decision` が付くため実装フローへ自動では乗らない。**本文は同期し直した差からサーバーが組み立て、
 画面からの入力は一切使わない**ので、利用者が起票の内容を書き換える口は無い。
 
 詳細は[機能の同期](#機能の同期アプリ連携ページ)。
@@ -195,7 +195,7 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
    （`AIDE_BOT_*`・`AIDE_RESEARCH_DESK_*` は取り込みのコネクタからしか参照しない）。「取得用のトークンに
    書き込み権限を足した」形にはならず、各シークレットはこの登録専用。サーバー側の値はAIDEの環境変数に
    だけあり、MCPの引数・応答・ログへは出さない。
-   **Asset Manager は取り込み・サブスクの読み取り・作成を持つ**（`asset_manager_subscriptions`、`asset_manager_create_subscription`、`asset_manager_add_subscription_price`。#345、#346）。
+   **Asset Manager は取り込み・サブスクの読み取り・作成を持つ**（月額固定費の `aide_fixed_costs` も同じ読み取り口を使う。`asset_manager_subscriptions`、`asset_manager_create_subscription`、`asset_manager_add_subscription_price`。#345、#346）。
    `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` は Asset Manager 側で `POST /api/zaim/sync`・
    `POST /api/receipts/import`・`GET /api/subscriptions` のどれも同じ `ZAIM_SYNC_SECRET` で照合される。
    AIDE側は取り込みと同じ値で読む（新しい設定を持たない）。**条件2が避けたいのは「取得用の
@@ -341,7 +341,7 @@ Playwright を使うZaim取得のような重い処理は **worker が定期実�
 
 | | 分離する | 都度叩く |
 |---|---|---|
-| 例 | Zaim巡回（Playwright・十数秒・メモリが跳ねる） | ops-dashboard・subscription-lists（localhostへのHTTP GET・数ミリ秒） |
+| 例 | Zaim巡回（Playwright・十数秒・メモリが跳ねる） | ops-dashboard（localhostへのHTTP GET・数ミリ秒）・Asset Manager（同じVPS上のHTTP GET・数十ミリ秒） |
 | 判断 | 同期リクエストに載せるとVPSが持たない | 載せても問題なく、キャッシュのほうが害になる |
 
 都度叩く場合は**短いタイムアウトを必ず掛ける**（相手が落ちてもMCPツールが固まらないように）。
@@ -431,7 +431,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻とセッションIDを返す |
 | `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
-| `aide_fixed_costs` | 毎月出ていく固定費。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。subscription-lists を都度叩く |
+| `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
@@ -572,7 +572,7 @@ HTTPエンドポイント・コネクタ・workerに散っていて、機械的�
 
 **表示するだけで、図の宣言（`map.ts`）は書き換えない。** 本番のサーバーはソースを書き換えられず、
 書き換えるにはコードの修正（PR）が要るため。代わりに、差があるときだけ「Issueを起案…」を出す。押すと
-起票内容（タイトルと本文）を確認でき、「起票する」（`POST /map/issue`）で `aide` に `70.confirm` 付きの
+起票内容（タイトルと本文）を確認でき、「起票する」（`POST /map/issue`）で `aide` に `70.needs-decision` 付きの
 Issueを作る。結果は303で `/map` へ戻して番号とリンクを出す（再読み込みしても二重には起票されない）。
 書き込みの位置づけは[書き込みをどこまで持つか](#書き込みをどこまで持つか)の表にある。
 
@@ -1224,54 +1224,66 @@ HTTP GETなので許容する。
 別ホストのディスク逼迫で `false` になり、問いと関係ない理由で「異常あり」と読まれる。
 
 
-## コネクタ: subscription-lists
+## コネクタ: Asset Manager（月額固定費）
 
-月額固定費（サブスクリプション）と次の支払予定。**AIDEは契約情報を持たない。**
-[subscription-lists](https://github.com/guchi-apps/subscription-lists) が既に管理しているため、
-サーバー間参照用の読み取りAPI（`GET /api/internal/subscriptions`）を叩いて `aide_fixed_costs` に
-畳むだけにしている。ops-dashboard と同じ「既にある集約をビューへ畳む」ケース。
+月額固定費（サブスク・保険・税金・分割払いなど）と次の請求日。**AIDEは契約情報を持たない。**
+[asset-manager](https://github.com/guchi-apps/asset-manager) が管理しているため（サブスク管理は
+asset-manager#491 で旧 subscription-lists から移管。データ移行は#492）、サーバー間参照用の読み取りAPI
+（`GET /api/subscriptions`）を叩いて `aide_fixed_costs` に畳むだけにしている。
+ops-dashboard と同じ「既にある集約をビューへ畳む」ケース。**参照先は #347 で subscription-lists から付け替えた。**
 
 ```
-src/core/connectors/subscriptions/
-  types.ts   subscription-lists のレスポンスのうち、AIDEが使うフィールドだけを再宣言
+src/core/connectors/asset-manager/
+  types.ts   Asset Manager のレスポンスのうち、AIDEが使うフィールドだけを再宣言
   index.ts   1本のGET。設定・タイムアウト・失敗理由の丸め
 src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summarizeFixedCosts は純粋関数。テストはここ）
 ```
 
 ### 経路
 
-両方とも同じVPS上で動くため **localhost で届き、subscription-lists を外部公開する必要がない**。
-`fetch` しか使わないので実行時依存も増えない。
+認証・宛先は MCP の `asset_manager_*` ツール（取り込み・サブスクの読み書き）と同じで、
+**新しい環境変数・secret は要らない**。`fetch` しか使わないので実行時依存も増えない。
 
 | 環境変数 | 未設定のとき | 設定したとき |
 |---|---|---|
-| `AIDE_SUBSCRIPTIONS_URL` | `http://127.0.0.1:3107` | そのURLへ問い合わせる |
-| `AIDE_SUBSCRIPTIONS_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+| `AIDE_ASSET_MANAGER_URL` | `https://asset.gucchii.com` | そのURLへ問い合わせる |
+| `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
 
-トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**。1Passwordでは値を
-複製せず提供側の `op://` をそのまま参照する（#217）。取得に失敗しても Zaim 由来の残高・保有銘柄は
-従来どおり返す。失敗の理由はHTTPステータスと例外の種別まで丸める（例外の `message` にはURLが
-載るため）。
+シークレットは Asset Manager 側の `ZAIM_SYNC_SECRET` と**同じ値**で、**認証情報として扱う**。
+取得に失敗しても Zaim 由来の残高・保有銘柄は従来どおり返す。失敗の理由はHTTPステータスと例外の
+種別まで丸める（例外の `message` にはURLが載るため）。
+
+**Asset Manager → AIDE → Asset Manager と往復する。** Asset Manager の Zaim 連携は AIDE の
+`GET /api/money/summary` を読み（残高だけが目的）、そのレスポンスに固定費が含まれるため、AIDE は
+そのたびに Asset Manager の `GET /api/subscriptions` を叩く。再帰にはならないが、固定費の取得の
+制限時間は Asset Manager 側の待ち時間（10秒）より短い5秒にしてある。
 
 ### 計算はしない
 
-月額換算・次回支払日・契約状況は**相手が計算済みで返す**。月末クランプ（`billingDay=31` の2月）・
-料金改定履歴の期間切り替え・請求サイクルの判定は向こうの `src/lib/billing.ts` にあり、こちらで
-再実装すれば必ずズレる。仕様は subscription-lists の
-[`docs/internal-api.md`](https://github.com/guchi-apps/subscription-lists/blob/develop/docs/internal-api.md)。
+月額換算・次回請求日・契約状況・円換算は**相手が計算済みで返す**。月末クランプ（`billingDay=31` の2月）・
+料金改定履歴の期間切り替え・請求サイクルの判定は向こうの `lib/subscription-billing.ts` にあり、こちらで
+再実装すれば必ずズレる。仕様は asset-manager の `docs/subscriptions.md`。
 
-**基準日（`referenceDate`）は日本時間で渡す。** VPSのタイムゾーンはUTCで、渡さないと日本時間の
-00:00〜09:00 が前日基準で計算される。
+**基準日は相手が決める**（レスポンスの `asOf`。JST）。旧 subscription-lists と違い、こちらから渡さない。
 
 ### 返す粒度と、totals へ足さない理由
 
-通貨別の月額合計・**支払方法別の月額合計**・契約ごとの明細（契約状況と支払方法つき）・
-**31日以内の支払予定**まで。契約IDやラベルは返さない（詳細は subscription-lists の画面がある）。
+通貨別の月額合計・**支払方法別の月額合計**・契約ごとの明細（区分・契約状況・支払方法つき）・
+**31日以内の支払予定**まで。契約IDやラベル・料金改定の履歴は返さない（それは `asset_manager_subscriptions`）。
 
-支払方法別の合計は相手の `totals` に無いため、**AIDE側で明細から積み上げている**（`summarizeByPaymentMethod`）。
-通貨別合計と同じく**通貨をまたいで加算せず**、支払方法と通貨の組で束ねる。積み上げの都合で
-浮動小数の誤差が出るため小数2桁へ丸めており、相手が計算した `monthlyByCurrency` とは末尾が
-一致しないことがある。
+**固定費はサブスクだけではない。** Asset Manager の契約には区分（`SUBSCRIPTION` / `INSURANCE` /
+`TAX` / `INSTALLMENT` / `OTHER_FIXED_COST`）があり、旧 subscription-lists にはなかった保険・税金・
+分割払いも「毎月出ていく額」にあたるため含める。明細の `category` で区別できる。相手の
+`summary.monthlyTotalJpy` はサブスク区分だけの集計なので使わず、全区分の `summary.fixedCostMonthlyTotalJpy` を
+円換算の合計（`monthlyJpy`）に使う。**円換算できない契約（`summary.excludedFromTotal`）が1件でもあれば
+`monthlyJpy` は null にする**（部分的な合計を返すと、実際より少ない額が固定費として読まれるため）。
+
+通貨別の合計と支払方法別の合計は相手の集計に無いため、**AIDE側で明細から積み上げている**
+（`summarizeByCurrency` / `summarizeByPaymentMethod`）。**通貨をまたいで加算せず**、支払方法別は支払方法と
+通貨の組で束ねる。積み上げの都合で浮動小数の誤差が出るため小数2桁へ丸めている。
+
+「次にいくら払うか」（`upcoming` の `amount`）は1回あたりの請求額、明細の `monthlyAmount` は月あたりの
+換算額で、**別物**（年払い・3ヶ月ごとの契約があるため）。
 
 契約状況（`contractStatus`）は既定で解約済み（`ENDED`）が取得対象から外れるため、実質
 `AUTO_RENEWING` / `SCHEDULED_TO_END` の2値になる。その旨は `note` に添えている。
@@ -1281,11 +1293,14 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 **MCP層でもストックとフローで分けている**（#373）。`aide_balances` が残高・保有銘柄、
 `aide_fixed_costs` が月額固定費を返す。問いが別なだけでなく、分けたことで残高だけを尋ねられた
-ときに subscription-lists を叩かなくなり、固定費だけを尋ねられたときにZaimのキャッシュを
+ときに Asset Manager を叩かなくなり、固定費だけを尋ねられたときにZaimのキャッシュを
 読まなくなった。**読み取りAPI（`GET /api/money/summary`）は両方を合わせた1本のまま。**
 
 通貨は `JPY` / `USD` の混在を許すため、**合計は通貨別**で返す。円換算値（`monthlyJpy`）は相手が
 Frankfurter のレートで計算した参考値で、取得できていなければ `null` になる。
+
+**動作状況（`/api/status` のチェック名・接続先の設定状況）の名前は `asset-manager`。**
+以前は `subscription-lists` だった。ops-dashboard 側でこの名前を使っている場合は追従が要る。
 
 
 ## コネクタ: myroom
@@ -1294,7 +1309,7 @@ Frankfurter のレートで計算した参考値で、取得できていなけ�
 集めない。** [myroom](https://github.com/guchi-apps/myroom) が Raspberry Pi からの受信・保存・
 鮮度判定まで持っているため、サーバー間参照用の読み取りAPI（`GET /api/internal/room-state`）を
 叩いて `aide_room_sensors` と `aide_aircon_status` へ畳むだけにしている。
-ops-dashboard・subscription-lists と同じ「既にある集約をビューへ畳む」ケース。
+ops-dashboard・Asset Manager と同じ「既にある集約をビューへ畳む」ケース。
 
 ```
 src/core/connectors/myroom/
@@ -1527,7 +1542,7 @@ deploy/systemd/aide-printer-watch.*   サブPCの systemd timer
 [DaySpan](https://github.com/guchi-apps/dayspan) が Google Calendar の予定・Notion のタスクと
 日付リマインド・移動を1つのカレンダーへ統合済みなので、サーバー間参照用の読み取りAPI
 （`GET /api/internal/schedule`）を叩いて `aide_schedule` の予定に畳む。
-ops-dashboard・subscription-lists・myroom と同じ「既にある集約をビューへ畳む」ケース。
+ops-dashboard・Asset Manager・myroom と同じ「既にある集約をビューへ畳む」ケース。
 
 ```
 src/core/connectors/dayspan/
@@ -1567,8 +1582,8 @@ Google Calendar と Notion を叩くため、localhost で完結する相手と�
 ### 日付はDaySpanに解釈させる
 
 **基準日を渡さなければ、DaySpanが利用者の設定タイムゾーン（既定 `Asia/Tokyo`）で「今日」を決める。**
-VPSのタイムゾーンはUTCだが、呼び出し側でJSTの日付を作る必要はない（subscription-lists の
-`referenceDate` とは扱いが逆なので注意）。
+VPSのタイムゾーンはUTCだが、呼び出し側でJSTの日付を作る必要はない（Asset Manager の `asOf` と
+同じく、相手が決める）。
 
 **朝のブリーフィングからは日付を明示して渡している。** あちらは自分でJSTの暦日を決めており、
 省略すると schedule だけ別の日を返しうるため。
@@ -1655,12 +1670,19 @@ Cookie認証のため、Claudeアプリから叩けるものが1つも無かっ�
   取り込むため、どちらから作っても同じように画面へ出る
 - **暴発を機械的に止める。** Claudeは会話の流れでツールを自発的に呼ぶため、1回の呼び出しで1件・
   1時間あたり100件・直前と同一タイトルは拒否、という上限をコード側に持つ（`write.ts`）。
-  当初は10分あたり3件だったが、起票したIssueは既定で `70.confirm` が付き実装へ自動では乗らない
+  当初は10分あたり3件だったが、起票したIssueは既定で `70.needs-decision` が付き実装へ自動では乗らない
   ため、まとめて起票できるよう緩めた（#319）
 - **ラベルを勝手に作らない。** GitHubのIssue作成APIは未知のラベル名を渡すとラベルごと新規作成
   してしまう。起票前に対象リポジトリのラベル一覧を引き、実在するものだけを付ける
-  （既定は `70.confirm`。無いリポジトリでは黙って落ちる）。落としたラベルがあったときは、
+  （既定は `70.needs-decision`。無いリポジトリでは落ちる）。落としたラベルがあったときは、
   実在するラベル名を `availableLabels` に添えて返す（下記「起票に使うラベルの候補」）
+- **既定ラベルが落ちたら、起票は止めずに `warning` で知らせる**（#382）。既定ラベルは「人が判断する
+  まで無人実行へ乗せない」ガードで、外れたまま黙って起票すると無人実行が着手し得る。ラベル体系の
+  改名（`70.needs-decision` への改名）では、落ちた事実が `droppedLabels` に載るだけで誰も
+  気づけなかった。起票を止めないのは、ラベル一覧が引けないときや issue-deck を使わないリポジトリで
+  何も起票できなくなるのを避けるため。`warning` は `labels` を省略した（既定ラベルの）起票のときだけ
+  返し、サーバーのログにも残す。アプリ連携画面（`POST /map/issue`）は、付いた旨の代わりに
+  「付けられなかった」旨を出す
 - **出所を本文に残す。** 口述の書き起こしは人が自分で書いたIssueと精度が違うため、本文末尾に
   AIDE経由で起票した旨と `<!-- aide:created-via-mcp -->` を必ず付ける
 
@@ -1770,7 +1792,7 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 使っており、取得元が揃う。**APIキーが要らない**ので新しい認証経路が増えず、`fetch` だけで
 書けるので実行時依存も増えない。
 
-**myroom 経由にはしない。** ops-dashboard・subscription-lists をあの形にしたのは「認証情報を
+**myroom 経由にはしない。** ops-dashboard・Asset Manager をあの形にしたのは「認証情報を
 1か所へ閉じる」「スケジューラを集約する」ためで、天気はAPIキーも巡回も持たないためどちらにも
 当たらない。挟むと結合が増えるだけになる。
 
@@ -2585,7 +2607,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 ## Asset Managerのサブスクを読む（MCP）
 
 「いま何にいくら払っているか」「次に何が更新されるか」に答えるための読み取りツール
-`asset_manager_subscriptions`（#345）。asset-manager#491 でサブスク管理アプリ（subscription-lists）の
+`asset_manager_subscriptions`（#345）。asset-manager#491 でサブスク管理アプリ（旧 subscription-lists）の
 機能が Asset Manager へ移管され、その読み出し口 `GET /api/subscriptions[?includeEnded=1]` を呼ぶ。
 実装は `src/mcp/tools/asset-manager.ts`。引数は `includeEnded`（真偽値。既定は解約済みを含めない）だけ。
 
@@ -2602,11 +2624,19 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 
 ### `aide_fixed_costs` との関係
 
-`aide_fixed_costs` は今も旧ソース（[subscription-lists](#コネクタ-subscription-lists)）由来で、
-同じ問いに2本のツールが答えうる。**移行が済むまでは `aide_fixed_costs` が正、移行後は Asset Manager が正**とする。
-Asset Manager へのデータ移行（asset-manager#492）は利用者の手作業のため、それまでこのツールは契約0件を返しうる
-（ツールの説明で「0件なら移行前の可能性があるので `aide_fixed_costs` も見る」と指示している）。
-移行後の `aide_fixed_costs` の参照先の付け替えと subscription-lists 側の撤去は、このツールとは別に行う。
+**どちらも同じ Asset Manager の `GET /api/subscriptions` を読む**（#347。以前は `aide_fixed_costs` だけが
+旧ソース subscription-lists を読んでいて、同じ問いに別のデータで答えうる状態だった）。
+役割は**粒度**で分ける。
+
+| | `aide_fixed_costs` | `asset_manager_subscriptions` |
+|---|---|---|
+| 返すもの | 畳んだ要約。通貨別の月額合計・支払方法別の合計・明細・31日以内の支払予定 | APIの応答そのまま。契約ごとのプラン・料金改定の履歴・ラベル・契約期間・解約予定の終了日など |
+| 対象 | 固定費全体（サブスク・保険・税金・分割払いなど） | 全区分。`summary.monthlyTotalJpy` はサブスク区分だけ、全体は `summary.fixedCost*` |
+| 使いどころ | 「毎月いくら出ていくか」「どのカードから落ちるか」 | 契約の中身を見る・料金改定の履歴を調べる・登録前に `id` や支払方法名を確かめる |
+
+固定費を `asset_manager_subscriptions` に任せて `aide_fixed_costs` を外す案は採らなかった。支払方法別の
+合計と31日以内の支払予定は Asset Manager の応答に無くAIDE側で積み上げており、`GET /api/money/summary` の
+`fixedCosts` も同じ器で読まれているため、外すと読み手が壊れる。
 
 ## Asset Managerのサブスクを登録・料金追加する（MCP）
 

@@ -75,7 +75,7 @@ describe("アプリ連携の図", () => {
 
   it("読むと書くで矢じりの向きを分ける", () => {
     const svg = renderWideMap();
-    // subscription-lists は読むだけ、aide-bot は書くだけ。
+    // ops-dashboard は読むだけ、aide-bot は書くだけ。
     assert.match(svg, /marker-start="url\(#mw-r\)"/);
     assert.match(svg, /marker-end="url\(#mw-w\)"/);
   });
@@ -261,7 +261,7 @@ describe("機能の同期（Issueの起案）", () => {
     assert.match(html, /<section id="issue-draft" class="detail-popover draft" popover="auto" role="dialog"/);
     assert.match(html, /<form class="draft-actions" method="post" action="\/map\/issue"/);
     assert.ok(html.includes("guchi-apps/aide に、ラベル"));
-    assert.ok(html.includes("70.confirm"));
+    assert.ok(html.includes("70.needs-decision"));
     assert.ok(html.includes("アプリ連携の図を機能の実態に合わせる（追加1・削除"));
     assert.ok(html.includes("`aide_brand_new`"));
   });
@@ -399,6 +399,13 @@ describe("GET /map（同期）", () => {
     assert.ok(captured.body.includes("https://github.com/guchi-apps/aide/issues/379"));
   });
 
+  it("?label_dropped=1 なら、ラベルが付いたとは言わず、手で付けるよう促す", async () => {
+    const { res, captured } = fakeRes();
+    await handleMapPage(fakeReq("/map?sync=1&issue=379&label_dropped=1"), res, loginOptions(), issueDeps().deps);
+    assert.ok(captured.body.includes("を付けられませんでした"));
+    assert.ok(!captured.body.includes("着手するかは issue-deck で決めます"));
+  });
+
   it("番号でない ?issue= の値は信用せず、リンクにしない", async () => {
     for (const value of ["abc", "1/../../x", "379%22%3E%3Cscript%3E", "12345678901"]) {
       const { res, captured } = fakeRes();
@@ -470,6 +477,15 @@ describe("POST /map/issue", () => {
     await handleMapIssue(fakeReq("/map/issue", "POST"), res, loginOptions(), deps);
     assert.equal(captured.headers["Location"], "/map?sync=1&issue_error=1");
     assert.ok(!String(captured.headers["Location"]).includes("403"));
+  });
+
+  it("既定ラベルが落ちた起票は、警告つきで戻す", async () => {
+    const { deps } = issueDeps({
+      createIssue: async () => ({ ok: true, number: 379, warning: "既定ラベルを付けられませんでした" }),
+    });
+    const { res, captured } = fakeRes();
+    await handleMapIssue(fakeReq("/map/issue", "POST"), res, loginOptions(), deps);
+    assert.equal(captured.headers["Location"], "/map?sync=1&issue=379&label_dropped=1");
   });
 
   it("番号が返らなかった成功は、番号なしの起票済みとして戻す", async () => {

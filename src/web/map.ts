@@ -175,18 +175,12 @@ export const GROUPS: DestinationGroup[] = [
         ],
       },
       {
-        id: "subscription-lists",
-        name: "subscription-lists",
-        dir: "read",
-        what: "月額固定費を読む",
-        uses: ["aide_fixed_costs"],
-      },
-      {
         id: "asset-manager",
         name: "Asset Manager",
         dir: "both",
-        what: "サブスクを読む／登録・料金追加／請求メールを取り込む",
+        what: "月額固定費・サブスクを読む／登録・料金追加／請求メールを取り込む",
         uses: [
+          "aide_fixed_costs",
           "asset_manager_subscriptions",
           "asset_manager_create_subscription",
           "asset_manager_add_subscription_price",
@@ -576,7 +570,9 @@ function firstGoneAnchor(gone: GoneByOwner): string | null {
 }
 
 /** Issueの起票の結果。`POST /map/issue` の戻り（`?issue=` `?issue_error=`）から作る。 */
-export type IssueView = { kind: "done"; number?: number; url?: string } | { kind: "failed" };
+export type IssueView =
+  | { kind: "done"; number?: number; url?: string; labelDropped?: boolean }
+  | { kind: "failed" };
 
 /** 同期した結果の見せ方。`renderMapPage` へ渡すと、結果欄と「未掲載の機能」が出る。 */
 export interface SyncView {
@@ -648,7 +644,11 @@ function syncResult(sync: SyncView): string {
     return `<section class="result done" aria-live="polite">
 <div class="result-head"><h2>Issueを起票しました</h2>${time}</div>${counts(result)}
 <div class="actions"><button type="button" class="sync" disabled>起票済み</button>${link}</div>
-<p class="result-note">ラベルは ${escapeHtml(DEFAULT_LABELS.join(" / "))} です。着手するかは issue-deck で決めます。</p></section>`;
+${
+      issue.labelDropped
+        ? `<p class="fail" role="alert">ラベル ${escapeHtml(DEFAULT_LABELS.join(" / "))} を付けられませんでした。無人実行が着手し得るので、GitHubの画面でラベルを付けてください。</p>`
+        : `<p class="result-note">ラベルは ${escapeHtml(DEFAULT_LABELS.join(" / "))} です。着手するかは issue-deck で決めます。</p>`
+    }</section>`;
   }
 
   const gone = goneByOwner(result);
@@ -809,13 +809,15 @@ function issueViewFrom(params: URLSearchParams, deps: MapDeps): IssueView | unde
   if (params.has("issue_error")) return { kind: "failed" };
   const raw = params.get("issue");
   if (raw === null) return undefined;
-  if (raw === "ok") return { kind: "done" };
+  // 真偽だけを取り出す。値そのものは画面に出さないので、クエリの中身は信用しなくてよい。
+  const labelDropped = params.get("label_dropped") === "1";
+  if (raw === "ok") return { kind: "done", labelDropped };
   if (!ISSUE_NUMBER.test(raw)) return undefined;
   const org = (deps.readIssueConfig ?? readGitHubWriteConfig)()?.org;
   const number = Number(raw);
   return org
-    ? { kind: "done", number, url: `https://github.com/${org}/${ISSUE_REPO}/issues/${number}` }
-    : { kind: "done", number };
+    ? { kind: "done", number, labelDropped, url: `https://github.com/${org}/${ISSUE_REPO}/issues/${number}` }
+    : { kind: "done", number, labelDropped };
 }
 
 export async function handleMapPage(
@@ -904,5 +906,7 @@ export async function handleMapIssue(
     return;
   }
   console.log(`[map-sync] 起票: ${outcome.repo}#${outcome.number}`);
-  redirect(res, `/map?sync=1&issue=${typeof outcome.number === "number" ? outcome.number : "ok"}`);
+  if (outcome.warning) console.warn(`[map-sync] ${outcome.repo}#${outcome.number}: ${outcome.warning}`);
+  const dropped = outcome.warning ? "&label_dropped=1" : "";
+  redirect(res, `/map?sync=1&issue=${typeof outcome.number === "number" ? outcome.number : "ok"}${dropped}`);
 }

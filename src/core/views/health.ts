@@ -13,7 +13,7 @@ import { readGitHubConfig, readGitHubWriteConfig } from "../connectors/github/in
 import { readMyRoomControlConfig } from "../connectors/myroom/control.ts";
 import { readMyRoomConfig } from "../connectors/myroom/index.ts";
 import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
-import { readSubscriptionsConfig } from "../connectors/subscriptions/index.ts";
+import { readAssetManagerConfig } from "../connectors/asset-manager/index.ts";
 import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
 import { zaimWebUpstreamUrl } from "../connectors/zaim/web-payment-forward.ts";
 import type { ZaimSnapshot } from "../connectors/zaim/types.ts";
@@ -296,12 +296,12 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       note: "予定・タスク・日付リマインド・移動の取得元（aide_schedule）。",
     },
     {
-      key: "subscription-lists",
-      label: "subscription-lists",
+      key: "asset-manager",
+      label: "Asset Manager",
       side: "server",
-      configured: readSubscriptionsConfig() !== null,
+      configured: readAssetManagerConfig() !== null,
       probeable: true,
-      note: "月額固定費の取得元（aide_fixed_costs）。",
+      note: "月額固定費の取得元（aide_fixed_costs）と、サブスクの読み書き・請求メールの取り込み先（asset_manager_*）。",
     },
     {
       key: "zaim",

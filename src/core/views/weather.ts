@@ -1,6 +1,6 @@
 import { readCache } from "../cache/store.ts";
 import type { CachedValue } from "../cache/store.ts";
-import { tokyoDate } from "../connectors/subscriptions/index.ts";
+import { tokyoDate } from "../tokyo-date.ts";
 import type { WeatherDay, WeatherForecast } from "../connectors/weather/types.ts";
 import { WEATHER_CACHE_KEY } from "../../worker/jobs/weather-sync.ts";
 
