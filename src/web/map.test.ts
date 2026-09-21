@@ -73,6 +73,25 @@ describe("アプリ連携の図", () => {
     });
   }
 
+  for (const [label, render, box] of [
+    ["横長", renderWideMap, { left: 408, right: 592 }],
+    ["縦長", renderNarrowMap, { left: 90, right: 270 }],
+  ] as const) {
+    it(`${label}の図の中央は AIde のロゴで、旧 AIDE のブロックは残っていない`, () => {
+      const svg = render();
+      assert.equal(svg.match(/aria-label="AIde"/g)?.length, 1, "ロゴがちょうど1つ載っていない");
+      assert.ok(!svg.includes("hub-name"), "旧AIDEの文字が残っている");
+      assert.doesNotMatch(svg, /<text[^>]*>AIDE<\/text>/);
+      // 取得・整形・中継は画像に焼かず、文字として残す。
+      assert.match(svg, /<text[^>]*class="hub-sub">取得・整形・中継<\/text>/);
+      // ロゴが囲みからはみ出して、周りの矢印と重ならない。
+      const logo = /<svg class="logo" x="([\d.]+)" y="[\d.]+" width="(\d+)" height="\d+"/.exec(svg);
+      assert.ok(logo, "ロゴの位置が読めない");
+      const x = Number(logo[1]);
+      assert.ok(x >= box.left && x + Number(logo[2]) <= box.right, `ロゴが囲み（${box.left}〜${box.right}）に収まっていない`);
+    });
+  }
+
   it("読むと書くで矢じりの向きを分ける", () => {
     const svg = renderWideMap();
     // ops-dashboard は読むだけ、aide-bot は書くだけ。
