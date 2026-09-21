@@ -98,11 +98,31 @@ nav{display:flex;gap:.15rem;margin-right:auto;flex-wrap:wrap}
 nav a{font-size:.85rem;text-decoration:none;color:var(--muted);padding:.25rem .6rem;border:1px solid transparent}
 nav a.on{color:var(--ink);border-color:var(--line);background:var(--panel-2)}
 nav a:hover{color:var(--ink)}
-.topbar form{margin:0}
-.linkish{font:inherit;font-size:.8rem;color:var(--muted);background:none;border:0;
- border-bottom:1px solid var(--line);padding:0;cursor:pointer}
-.linkish:hover{color:var(--ink)}
-.who{font-family:${FONT_MONO};font-size:.74rem;color:var(--muted);overflow-wrap:anywhere}
+
+/* ---- アカウントメニュー（ヘッダー右上。#414） ---- */
+/* 開閉は popover 属性（JSなし）。メニューはトップレイヤーに出るため、位置は祖先ではなく
+   ボタン自身（anchor）か画面の右上から決める。非対応のブラウザは右上固定に落ちる。
+   本体には display を与えない（閉じているときの非表示が効かなくなる）。 */
+.account{display:flex}
+.account-btn{anchor-name:--account;display:inline-flex;align-items:center;justify-content:center;
+ width:2.25rem;height:2.25rem;padding:0;font:inherit;background:var(--panel-2);color:var(--ink-2);
+ border:1px solid var(--line);cursor:pointer}
+.account-btn:hover{color:var(--ink);border-color:var(--muted)}
+.account-btn:has(+ .account-menu:popover-open){background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.account-menu{inset:auto;top:4.2rem;right:1rem;margin:0;padding:0;width:max-content;min-width:15rem;
+ max-width:min(21rem,calc(100vw - 2rem));background:var(--panel);color:var(--ink);
+ border:1px solid var(--line);box-shadow:0 .8rem 2rem #0004}
+@supports (anchor-name:--a){
+ .account-menu{position-anchor:--account;top:calc(anchor(bottom) + .45rem);right:anchor(right)}
+}
+.account-menu form{margin:0}
+.account-who{padding:.7rem .9rem .75rem;display:flex;flex-direction:column;gap:.1rem;border-bottom:1px solid var(--line-2)}
+.account-who .lb{font-size:.72rem;color:var(--muted)}
+.account-who .em{font-family:${FONT_MONO};font-size:.82rem;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.account-out{display:flex;align-items:center;gap:.55rem;width:100%;min-height:2.75rem;padding:.65rem .9rem;
+ font:inherit;font-size:.86rem;text-align:left;color:var(--ink-2);background:none;border:0;cursor:pointer}
+.account-out:hover{background:var(--panel-2);color:var(--ink)}
+.account-out svg{flex:none}
 
 /* ---- 本文 ---- */
 main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;flex:1;
@@ -318,7 +338,7 @@ export interface PageOptions {
   title: string;
   /** ヘッダーのナビ。空なら見出しだけの簡素なページ（パスワード入力）になる。 */
   nav?: NavItem[];
-  /** ナビの右端に置く操作（ログアウトのフォームなど）。 */
+  /** ナビの右端に置く操作（アカウントメニューなど）。 */
   headerAction?: string;
   /** `<main>` の中身。組み立て済みのHTML。 */
   body: string;
