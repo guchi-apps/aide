@@ -41,6 +41,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | | 経路 | 条件1 | 条件2（資格情報） | 条件3 |
 |---|---|---|---|---|
 | `aide_create_issue`（aide#50） | ClaudeアプリからのGitHub Issue起票 | 満たす | `AIDE_GITHUB_ISSUE_TOKEN`（取得用とは別のPAT） | 作成のみ |
+| `POST /map/issue`（#355） | アプリ連携画面の「機能を同期」で見つけた差から、図を直すGitHub Issueを起票 | **例外**（下記） | `AIDE_GITHUB_ISSUE_TOKEN`（`aide_create_issue` と共用。取得用とは別のPAT） | 作成のみ |
 | `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
@@ -53,6 +54,21 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `asset_manager_create_subscription` / `asset_manager_add_subscription_price`（#346） | Asset Managerへのサブスク・初回料金の登録と、料金改定履歴の追加 | 満たす | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（取り込み・サブスクの読み取りと共用。下記） | 作成のみ（下記） |
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
+
+#### アプリ連携画面からのIssue起案は条件1の例外（#355）
+
+`POST /map/issue` は `aide_create_issue` と同じGitHub Issueの起票で、**条件1は文言どおりには満たさない**
+（Issueを作る手段は、ClaudeアプリからもGitHubの画面からも他にある）。それでも画面に置いたのは、
+**起票する内容が「図の宣言（`src/web/map.ts`）と、いま動いている機能の差」で、それを持っているのは
+AIDEだけ**だから。差を見つけた画面から、そのまま図を直すIssueへ進める。**この判断は他の起票の前例に
+しない**（別の内容を画面から起票したくなったら、Issueで改めて決める）。
+
+条件2は `aide_create_issue` と同じ書き込み専用のトークン（`AIDE_GITHUB_ISSUE_TOKEN`）を共用する
+（取得用のトークンには書き込み権限を足していない）。条件3（作成のみ）は満たし、既定の
+`70.confirm` が付くため実装フローへ自動では乗らない。**本文は同期し直した差からサーバーが組み立て、
+画面からの入力は一切使わない**ので、利用者が起票の内容を書き換える口は無い。
+
+詳細は[機能の同期](#機能の同期アプリ連携ページ)。
 
 #### Zaimへの登録は条件1の例外（aide#37）
 
@@ -535,10 +551,38 @@ Androidのアダプティブアイコンはそれより外を切り落として�
 HTTPエンドポイント・コネクタ・workerに散っていて、機械的に集めても「どのアプリか」までは
 分からない。代わりに、宣言したツール名が登録簿に実在すること・パスが機能一覧に載っていること・
 登録したツールがどれかの使う側に載っていることを `src/web/map.test.ts` が確かめる。
-**MCPツールやコネクタを足したら、ここへも足す**（ツールの登録は `src/mcp/catalog.ts`）。
+**MCPツールやコネクタを足したら、ここへも足す**（ツールの登録は `src/mcp/catalog.ts`）。足し忘れは「機能を同期」で見つけられる（[下](#機能の同期アプリ連携ページ)）。
 
 図はサーバー側でSVGとして組み立て、JavaScriptも描画ライブラリも使わない。図のアプリは
 下の一覧へのページ内リンクになっている。
+
+### 機能の同期（アプリ連携ページ）
+
+図は手書きの宣言なので、機能を足す・消すたびに実態とずれる。ヘッダーの「機能を同期」を押すと
+（`GET /map?sync=1`。読み取りだけなので素のフォームで送る）、**今動いているAIDEの機能を集めて図の宣言と
+突き合わせ**、差を画面に出す（#355。突き合わせは `src/web/map-sync.ts` の `collectSync`）。
+
+| | |
+|---|---|
+| 集める範囲 | MCPの登録簿にあるツールと、機能一覧の `ENDPOINTS` のうち `/api/` のもの（`/api/cache/:key` のようなworkerの受け口は除く）。`/health`・OAuth・アイコン・workerジョブ・コネクタは、図と紐づける情報が宣言に無いため対象外 |
+| 追加 | 図のどこにも載っていない機能。「未掲載の機能」のカードに名前・種別・説明を出す |
+| 削除 | 図に載っているが実在しない機能。該当する行に取り消し線つきの「実在しない」印を出す |
+| 変更なし | 図に載っていて実在する機能の数 |
+
+**表示するだけで、図の宣言（`map.ts`）は書き換えない。** 本番のサーバーはソースを書き換えられず、
+書き換えるにはコードの修正（PR）が要るため。代わりに、差があるときだけ「Issueを起案…」を出す。押すと
+起票内容（タイトルと本文）を確認でき、「起票する」（`POST /map/issue`）で `aide` に `70.confirm` 付きの
+Issueを作る。結果は303で `/map` へ戻して番号とリンクを出す（再読み込みしても二重には起票されない）。
+書き込みの位置づけは[書き込みをどこまで持つか](#書き込みをどこまで持つか)の表にある。
+
+- **起票の設定（`AIDE_GITHUB_ISSUE_TOKEN`）が無い環境では「Issueを起案…」を出さない。** 設定の有無を
+  文言では書かない（このページは設定値・シークレットの有無を載せない方針）。失敗の理由も画面には出さず、
+  ログ（`[map-sync]`）にだけ残す
+- 脚注はClaudeアプリ経由の起票（`aide_create_issue`）とは別に、この画面からの起票だと名乗る
+  （`buildBody` へ脚注を渡せる。`src/core/connectors/github/write.ts`）。重複の防止は既存の
+  「直前と同じタイトルは断る」ガード（プロセス内）だけ
+- MCPツールの実在と、登録したツールが使う側に載っていることは、`map.test.ts` がCIで止める。
+  したがって同期で差が出るのは、主に `/api/` のエンドポイントや、デプロイ後に宣言が古くなった場合
 
 以前あった**動作状況（`/status`）と共通知識（`/knowledge`）の画面は外した**（#328）。
 動作状況は ops-dashboard の「AIDE」タブ（[下](#動作状況ops-dashboard向け)）、共通知識は
@@ -1543,7 +1587,7 @@ compare・releases・commits・issues）。GraphQLなら**1リクエスト・実
 | 環境変数 | 未設定のとき |
 |---|---|
 | `AIDE_GITHUB_TOKEN` | 取得を試みず「未設定」を返す |
-| `AIDE_GITHUB_ISSUE_TOKEN` | `aide_create_issue` が「未設定」を返す。GitHubへは何も送らない |
+| `AIDE_GITHUB_ISSUE_TOKEN` | `aide_create_issue` が「未設定」を返す。GitHubへは何も送らない。アプリ連携の「Issueを起案…」は出ない |
 | `AIDE_GITHUB_ORG` | `guchi-apps` |
 | `AIDE_GITHUB_REPOS` | archived を除き、直近 `AIDE_GITHUB_ACTIVE_DAYS` 日にpushがあったものを自動で拾う |
 | `AIDE_GITHUB_ACTIVE_DAYS` | `90` |
@@ -1558,7 +1602,7 @@ JWT署名→インストールトークン交換の実装が重い）。**取得
 | トークン | 権限 | 使うところ |
 |---|---|---|
 | `AIDE_GITHUB_TOKEN` | Metadata / Contents / Issues / Pull requests / Actions の **read のみ**。**対象リポジトリに `guchi-apps/docs` を含める** | `aide_dev_status` |
-| `AIDE_GITHUB_ISSUE_TOKEN` | Metadata: read と **Issues: read and write** のみ | `aide_create_issue` |
+| `AIDE_GITHUB_ISSUE_TOKEN` | Metadata: read と **Issues: read and write** のみ | `aide_create_issue`、アプリ連携の「Issueを起案」（`POST /map/issue`） |
 
 1本にまとめて取得側にも書き込み権限を持たせると、26リポジトリを横断する取得の経路が
 そのまま書き込みのできる経路になる。分ければ、起票を止めたいときにこのトークンだけ失効させればよい。

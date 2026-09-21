@@ -33,7 +33,7 @@ import {
   handleStatusLogout,
   type LoginOptions,
 } from "./web/login.ts";
-import { handleMapPage } from "./web/map.ts";
+import { handleMapIssue, handleMapPage } from "./web/map.ts";
 
 /**
  * AIDE のエントリポイント。
@@ -99,6 +99,11 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   };
   if (path === "/map" && (req.method === "GET" || req.method === "HEAD")) {
     await handleMapPage(req, res, loginOptions);
+    return;
+  }
+  // 「機能を同期」の結果からIssueを起案する（#355）。ログインの関門は handleMapIssue が通す。
+  if (path === "/map/issue" && req.method === "POST") {
+    await handleMapIssue(req, res, loginOptions);
     return;
   }
   if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {

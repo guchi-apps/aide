@@ -67,7 +67,13 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/map",
     meta: "GET",
     description:
-      "アプリ連携の画面。AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを図で示す。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+      "アプリ連携の画面。AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを図で示す。「機能を同期」（?sync=1）で、図に載っていない機能・実在しない機能を突き合わせて出す。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
+  },
+  {
+    name: "/map/issue",
+    meta: "POST",
+    description:
+      "アプリ連携の「機能を同期」で見つけた差から、図を直すIssueを起票する。本文は同期し直して組み立て、画面からの入力は使わない。ログインが要る。結果は /map へ戻して出す。",
   },
   {
     name: "/status/auth/start",
