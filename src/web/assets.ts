@@ -54,9 +54,9 @@ async function readIcon(file: string): Promise<Buffer> {
 /**
  * PWAのマニフェスト。ホーム画面へ追加したときの名前とアイコンになる。
  *
- * `start_url` は機能一覧ページにしている。`/` は404を返すため。機能一覧はログインの内側にあり
- * （#332）、ホーム画面から開いたときに未ログインならログイン画面が出て、ログイン後に
- * `/features` へ戻る。戻り先が変わらないので、`/map` へ振り替える必要は無い。
+ * `start_url` はアプリ連携ページにしている。`/` は404を返すため。アプリ連携ページはログインの
+ * 内側にあり、ホーム画面から開いたときに未ログインならログイン画面が出て、ログイン後に `/map`
+ * へ戻る。
  */
 export function manifest(): unknown {
   const icons = ICONS.filter((icon) => icon.size >= 192).map((icon) => ({
@@ -68,7 +68,7 @@ export function manifest(): unknown {
     name: "AIDE",
     short_name: "AIDE",
     description: "生活情報まわりの共通バックエンド／ハブ。",
-    start_url: "/features",
+    start_url: "/map",
     scope: "/",
     display: "standalone",
     theme_color: THEME_COLOR,

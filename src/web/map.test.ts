@@ -88,6 +88,24 @@ describe("アプリ連携の画面", () => {
     assert.ok(html.includes(`MCPツール ${claude.uses.length}本`));
   });
 
+  it("MCPの本数表示を押すと、使える全ツールと説明を読める", () => {
+    const html = renderMapPage();
+    const claude = CALLERS.find((caller) => caller.id === "claude")!;
+    assert.match(html, new RegExp(`popovertarget="map-detail-\\d+"[^>]*>MCPツール ${claude.uses.length}本`));
+    for (const tool of claude.uses) assert.ok(html.includes(tool), `${tool} が詳細に無い`);
+    assert.ok(html.includes("Claudeアプリ・Claude Codeから利用できるMCPツールです。"));
+  });
+
+  it("MCPツールとHTTP APIのチップを押すと説明を開ける", () => {
+    const html = renderMapPage();
+    assert.match(html, /<button type="button" class="detail-trigger" popovertarget="map-detail-\d+" aria-haspopup="dialog">aide_money_summary<\/button>/);
+    assert.match(html, /<button type="button" class="detail-trigger" popovertarget="map-detail-\d+" aria-haspopup="dialog">\/api\/money\/summary<\/button>/);
+    assert.ok(html.includes("残高一覧・保有銘柄"));
+    assert.ok(html.includes("個人アプリ向けの読み取りAPI。"));
+    assert.ok(html.includes('popover="auto" role="dialog"'));
+    assert.ok(html.includes("popovertargetaction=\"hide\""));
+  });
+
   it("認証が無効なら警告する", () => {
     assert.ok(renderMapPage({ authDisabled: true }).includes("認証が無効です"));
     assert.ok(!renderMapPage().includes("認証が無効です"));

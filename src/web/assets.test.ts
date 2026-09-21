@@ -82,6 +82,10 @@ describe("アイコン配信", () => {
 });
 
 describe("PWAマニフェスト", () => {
+  it("ホーム画面からアプリ連携ページを開く", () => {
+    assert.equal((manifest() as { start_url: string }).start_url, "/map");
+  });
+
   it("配信され、JSONとして読める", async () => {
     const { handled, captured } = await get(MANIFEST_PATH);
     assert.ok(handled);

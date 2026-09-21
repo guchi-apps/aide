@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { buildToolRegistry } from "../mcp/catalog.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
+import { ENDPOINTS, type FeatureItem } from "./features.ts";
 import { accountAction, handleGatedPage, type LoginOptions } from "./login.ts";
 
 /**
@@ -404,34 +406,92 @@ function badges(dir: Direction): string {
   );
 }
 
-function chips(values: string[]): string {
+interface MapPopover {
+  id: string;
+  title: string;
+  meta?: string;
+  description: string;
+  items?: FeatureItem[];
+}
+
+/** MCPの登録簿とHTTPの静的カタログを、連携図のチップと同じ説明の出典にする。 */
+function featureCatalog(): Map<string, FeatureItem> {
+  const catalog = new Map<string, FeatureItem>();
+  for (const tool of buildToolRegistry().list()) catalog.set(tool.name, tool);
+  for (const endpoint of ENDPOINTS) catalog.set(endpoint.name, endpoint);
+  return catalog;
+}
+
+function renderPopover(popover: MapPopover): string {
+  const meta = popover.meta ? `<span class="popover-meta">${escapeHtml(popover.meta)}</span>` : "";
+  const items = popover.items?.length
+    ? `<ul class="popover-items">${popover.items
+        .map(
+          (item) =>
+            `<li><span class="mono">${escapeHtml(item.name)}</span>${item.meta ? ` <span class="popover-meta">${escapeHtml(item.meta)}</span>` : ""}` +
+            `<span>${escapeHtml(item.description)}</span></li>`,
+        )
+        .join("")}</ul>`
+    : "";
+  return `<section id="${popover.id}" class="detail-popover" popover="auto" role="dialog" aria-labelledby="${popover.id}-title">
+<div class="popover-head"><h2 id="${popover.id}-title">${escapeHtml(popover.title)}</h2>${meta}
+<button type="button" class="popover-close" popovertarget="${popover.id}" popovertargetaction="hide" aria-label="閉じる">×</button></div>
+<p>${escapeHtml(popover.description)}</p>${items}</section>`;
+}
+
+function detailTrigger(value: string, catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
+  const item = catalog.get(value);
+  if (!item) return `<span>${escapeHtml(value)}</span>`;
+  const id = `map-detail-${popovers.length}`;
+  popovers.push({
+    id,
+    title: item.name,
+    meta: item.meta,
+    description: item.description,
+  });
+  return `<button type="button" class="detail-trigger" popovertarget="${id}" aria-haspopup="dialog">${escapeHtml(value)}</button>`;
+}
+
+function chips(values: string[], catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
   return values.length
-    ? `<span class="chips">${values.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</span>`
+    ? `<span class="chips">${values.map((value) => detailTrigger(value, catalog, popovers)).join("")}</span>`
     : "";
 }
 
-/** 使う側の機能。MCPは本数だけにする（ツール名を並べると、また文字の壁になる）。 */
-function callerChips(caller: Caller): string {
-  return caller.via === "MCP" ? chips([`MCPツール ${caller.uses.length}本`]) : chips(caller.uses);
+/** 使う側の機能。MCPは通常は本数だけにし、押されたときだけ全件を開く。 */
+function callerChips(caller: Caller, catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
+  if (caller.via !== "MCP") return chips(caller.uses, catalog, popovers);
+  const id = `map-detail-${popovers.length}`;
+  const tools = caller.uses.flatMap((name) => {
+    const item = catalog.get(name);
+    return item ? [item] : [];
+  });
+  popovers.push({
+    id,
+    title: `MCPツール ${caller.uses.length}本`,
+    description: `${caller.name}から利用できるMCPツールです。`,
+    items: tools,
+  });
+  return `<span class="chips"><button type="button" class="detail-trigger" popovertarget="${id}" aria-haspopup="dialog">MCPツール ${caller.uses.length}本</button></span>`;
 }
 
-function callersCard(): string {
+function callersCard(catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
   const items = CALLERS.map(
     (caller) =>
       `<li id="from-${caller.id}"><span class="nm">${escapeHtml(caller.name)}</span>` +
       `<span class="dir"><span class="b r">${caller.via}</span></span>` +
-      `<span class="ds">${escapeHtml(caller.what)}</span>${callerChips(caller)}</li>`,
+      `<span class="ds">${escapeHtml(caller.what)}</span>${callerChips(caller, catalog, popovers)}</li>`,
   ).join("");
   return card({ title: "AIDEを使うアプリ", meta: String(CALLERS.length), body: `<ul class="apps">${items}</ul>` });
 }
 
-function groupCard(group: DestinationGroup): string {
+function groupCard(group: DestinationGroup, catalog: Map<string, FeatureItem>, popovers: MapPopover[]): string {
   const items = group.apps
     .map(
       (app) =>
         `<li id="to-${app.id}"><span class="nm">${escapeHtml(app.name)}</span>` +
         `<span class="dir">${badges(app.dir)}</span>` +
-        `<span class="ds">${escapeHtml(app.what)}</span>${chips(app.uses)}</li>`,
+        `<span class="ds">${escapeHtml(app.what)}</span>${chips(app.uses, catalog, popovers)}</li>`,
     )
     .join("");
   return card({ title: group.name, meta: String(group.apps.length), body: `<ul class="apps">${items}</ul>` });
@@ -472,6 +532,8 @@ export interface MapPageOptions {
 
 /** ページのHTMLを組み立てる純粋関数。テストはここに当てる。 */
 export function renderMapPage(options: MapPageOptions = {}): string {
+  const catalog = featureCatalog();
+  const popovers: MapPopover[] = [];
   const warning = options.authDisabled
     ? `<p class="notice">認証が無効です（AIDE_AUTH_DISABLED=1）。この画面もMCPも誰でも開けます。</p>`
     : "";
@@ -485,9 +547,10 @@ ${LEGEND}${warning}
 <div class="map-narrow">${renderNarrowMap()}</div>
 </section>
 <div class="grid">
-${callersCard()}
-${GROUPS.map(groupCard).join("\n")}
+${callersCard(catalog, popovers)}
+${GROUPS.map((group) => groupCard(group, catalog, popovers)).join("\n")}
 </div>
+${popovers.map(renderPopover).join("\n")}
 ${CENTER_TARGET_SCRIPT}`;
 
   return renderPage({
