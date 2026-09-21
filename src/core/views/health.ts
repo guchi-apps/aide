@@ -250,7 +250,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       side: "server",
       configured: readOpsDashboardConfig() !== null,
       probeable: true,
-      note: "VPS・サブPCの稼働状況の取得元（aide_ops_status）。",
+      note: "VPS・サブPCの稼働状況の取得元（aide_host_status / aide_uptime_monitors / aide_service_quotas）。",
     },
     {
       key: "github",
@@ -258,7 +258,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       side: "server",
       configured: readGitHubConfig() !== null,
       probeable: true,
-      note: "開発状況の取得元（aide_dev_status）。読み取り専用。",
+      note: "開発状況の取得元（aide_dev_status / aide_repo_status / aide_repo_labels）。読み取り専用。",
     },
     {
       key: "github-write",
@@ -276,7 +276,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       side: "server",
       configured: readMyRoomConfig() !== null,
       probeable: true,
-      note: "部屋の状態（室温・湿度・CO2・エアコン）の取得元（aide_room_status）。",
+      note: "部屋の状態（室温・湿度・CO2・エアコン）の取得元（aide_room_sensors / aide_aircon_status）。",
     },
     {
       key: "myroom-control",
@@ -293,7 +293,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       side: "server",
       configured: readDaySpanConfig() !== null,
       probeable: true,
-      note: "予定・タスク・日付リマインド・移動の取得元（aide_schedule と aide_daily_briefing の予定）。",
+      note: "予定・タスク・日付リマインド・移動の取得元（aide_schedule）。",
     },
     {
       key: "subscription-lists",
@@ -301,7 +301,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       side: "server",
       configured: readSubscriptionsConfig() !== null,
       probeable: true,
-      note: "月額固定費の取得元（aide_money_summary の固定費）。",
+      note: "月額固定費の取得元（aide_fixed_costs）。",
     },
     {
       key: "zaim",

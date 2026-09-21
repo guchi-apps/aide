@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
@@ -199,6 +199,49 @@ describe("aide_zaim_payment", () => {
     const base = paymentKey(input({ fromAccountId: 1 }));
     const at = "2026-08-19T10:00:00.000Z";
     assert.equal(nextRequestId(base, [{ requestId: base, moneyId: 555, at }]), `${base}#2`);
+  });
+
+  it("dryRun では登録せず、解決後の名前つきで内容だけを返す", async () => {
+    // Zaimへ送っていないことが要点。送っていれば資格情報が偽物なので失敗して返る。
+    const body = parse(await zaimPaymentTool.handler({ ...VALID, place: "スーパー", dryRun: true }, CTX));
+
+    assert.equal(body["ok"], true);
+    assert.equal(body["dryRun"], true);
+    assert.deepEqual(body["wouldRegister"], {
+      date: "2026-08-19",
+      amount: 1200,
+      categoryName: "食費",
+      genreName: "食料品",
+      accountName: "現金",
+      place: "スーパー",
+      name: null,
+      comment: null,
+    });
+    assert.equal(body["moneyId"], undefined);
+  });
+
+  it("dryRun は冪等キーの記録を進めない", async () => {
+    // 下見のつもりの呼び出しが連番を進めると、本番の呼び出しが別の鍵になり重複判定が緩む。
+    await zaimPaymentTool.handler({ ...VALID, dryRun: true }, CTX);
+    const log = await readFile(process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"]!, "utf8").catch(() => "");
+    assert.equal(log, "");
+  });
+
+  it("dryRun でも上限額・未来日・二重登録の判定は本番と同じものを通す", async () => {
+    const over = parse(await zaimPaymentTool.handler({ ...VALID, amount: MCP_MAX_AMOUNT + 1, dryRun: true }, CTX));
+    assert.equal(over["ok"], false);
+    assert.equal(over["kind"], "invalid");
+
+    const future = parse(await zaimPaymentTool.handler({ ...VALID, date: "2999-12-31", dryRun: true }, CTX));
+    assert.equal(future["kind"], "invalid");
+
+    await writeFile(
+      process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"]!,
+      JSON.stringify([{ requestId: paymentKey(input({ fromAccountId: 1 })), moneyId: 555, at: "2026-08-19T10:00:00.000Z" }]),
+    );
+    const duplicate = parse(await zaimPaymentTool.handler({ ...VALID, dryRun: true }, CTX));
+    assert.equal(duplicate["ok"], false);
+    assert.equal(duplicate["kind"], "duplicate");
   });
 
   // マスタに無いIDを渡す経路はここでは踏まない。ハンドラはキャッシュに無いIDを見ると

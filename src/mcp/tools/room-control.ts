@@ -49,7 +49,8 @@ export const roomButtonsTool: Tool = {
     "部屋の照明など、AIDEから操作できる機器のボタンの一覧を返す（myroom に登録済みの Nature Remo のボタン）。" +
     "「電気をつけて」「照明を消して」のように機器の操作を頼まれたら、まずこれを呼んで押すボタンを探す。" +
     "各ボタンの name（「グループ名 / ボタン名」）と id を aide_room_press に渡す。" +
-    "読み取りだけで、機器は操作しない。部屋の室温・照度などの状態は aide_room_status。",
+    "読み取りだけで、機器は操作しない。部屋の室温・照度などの測定値は aide_room_sensors、" +
+    "エアコンの運転状態は aide_aircon_status。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
     const config = readMyRoomControlConfig();
@@ -78,11 +79,13 @@ export const roomPressTool: Tool = {
     "**押す前に、押すボタンの name を利用者に伝えて確認を取ること。**" +
     "id と expectedName（一覧の name をそのまま）の両方を渡す。今の登録と食い違うと押さずに返す。" +
     "結果は「送信を依頼できたか」までで、赤外線は片方向のため機器が反応したかは分からない。" +
-    "反応を確かめたいときは利用者に尋ねるか、照明なら aide_room_status の照度の変化を見る" +
+    "反応を確かめたいときは利用者に尋ねるか、照明なら aide_room_sensors の照度の変化を見る" +
     "（照度の測定は数分おきなので、すぐには変わらない）。" +
     "kind が unknown のときは送れたか分からないので、**再送せず**利用者に機器の様子を確認してもらう。" +
     "同じボタンを30秒以内に続けて押すと断る。利用者が続けて押すことを望んだときだけ allowRepeat: true を付ける" +
-    "（「電源」のようなボタンは2回押すと元に戻るため）。",
+    "（「電源」のようなボタンは2回押すと元に戻るため）。" +
+    "**どのボタンか自信が無いときは dryRun: true で呼ぶ**と、押さずに" +
+    "「どのボタンを押すことになるか」だけを返す。",
   inputSchema: {
     type: "object",
     properties: {
@@ -95,6 +98,13 @@ export const roomPressTool: Tool = {
         type: "boolean",
         description:
           "同じボタンを30秒以内に続けて押すことを許す。**利用者が続けて押すことを望んだときだけ**付ける。",
+      },
+      dryRun: {
+        type: "boolean",
+        description:
+          "**押さずに、どのボタンを押すことになるかだけを返す。** 登録との突き合わせと" +
+          "連打の判定まで本番と同じものを通すので、押すボタンの名前を利用者に確かめてもらえる。" +
+          "**押したことにはならないので、連打の30秒も数え始めない。**",
       },
     },
     required: ["id", "expectedName"],
@@ -140,6 +150,17 @@ export const roomPressTool: Tool = {
         kind: "repeated",
         reason: `「${button.name}」は${Math.ceil((now - last) / 1000)}秒前に押したばかりです。何も送っていません。`,
         hint: "続けて押すのが利用者の意図だと確認できた場合だけ allowRepeat: true を付けて呼び直してください。",
+      });
+    }
+
+    // **押下の記録より前で止める。** 下見のつもりの呼び出しで30秒の連打ガードを
+    // 数え始めると、確認が取れた直後の本番の呼び出しが `repeated` で断られる。
+    if (args["dryRun"] === true) {
+      return json({
+        ok: true,
+        dryRun: true,
+        wouldPress: button.name,
+        note: "何も送っていません。このボタンでよければ dryRun を外して呼び直してください。",
       });
     }
 

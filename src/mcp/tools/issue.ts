@@ -16,8 +16,10 @@ import type { Tool } from "../types.ts";
  * README「Core と MCP層の境界」でいうと、ClaudeアプリにGitHubの公式コネクタが無いため
  * MCP層に出してよい対象にあたる（`aide_dev_status` と同じ理由）。
  *
- * **編集・close・コメントは持たない。** それらはissue-deckの画面とClaude Codeの仕事で、
- * ツールを増やすほどClaudeのツール選択が曖昧になる（README「MCP層は狭く」）。
+ * **編集・close・コメントは持たない。** それらはissue-deckの画面とClaude Codeの仕事。
+ *
+ * **`dryRun` を持つ**（#373）。会話の流れで勝手に起票されるとIssueが量産されるため、
+ * 起票前に「どのリポジトリへ何を出すか」だけを確かめられるようにしてある。
  */
 export const createIssueTool: Tool = {
   name: "aide_create_issue",
@@ -27,7 +29,9 @@ export const createIssueTool: Tool = {
     "会話の中で課題や改善案が出てきただけでは呼ばない（勝手に起票するとIssueが量産される）。" +
     "1回の呼び出しで作れるのは1件だけで、複数の話題があるなら1件ずつ、本当に必要なものに絞ること。" +
     `既定で ${DEFAULT_LABELS.join(" / ")} ラベルが付き、対象リポジトリに存在しないラベルは黙って落ちる。` +
-    "作成したIssueのURLと番号を返す。既存Issueの編集・close・コメントはできない（issue-deckの画面で行う）。",
+    "作成したIssueのURLと番号を返す。既存Issueの編集・close・コメントはできない（issue-deckの画面で行う）。" +
+    "**内容を利用者に確かめてもらいたいときは dryRun: true で呼ぶ**と、起票せずに" +
+    "「何が起票されるか」だけを返す。",
   inputSchema: {
     type: "object",
     properties: {
@@ -57,6 +61,13 @@ export const createIssueTool: Tool = {
           "**どのラベルがあるか分からない場合は、先に aide_dev_status を repo 付きで呼び、" +
           "detail.labels の名前から選ぶこと。** 落ちたラベルがあったときは、" +
           "droppedLabels と実在するラベル名（availableLabels）を返す。",
+      },
+      dryRun: {
+        type: "boolean",
+        description:
+          "**起票せずに、何が起票されるかだけを返す。** 利用者に内容を確かめてもらってから、" +
+          "dryRun を外して呼び直す。**実在しないラベルが落ちるかどうかはここでは分からない**" +
+          "（GitHubへ問い合わせないため）。ラベルの候補は aide_repo_labels で確かめる。",
       },
     },
     required: ["repo", "title"],
@@ -90,6 +101,29 @@ export const createIssueTool: Tool = {
     const labels = Array.isArray(args["labels"])
       ? args["labels"].filter((label): label is string => typeof label === "string")
       : undefined;
+
+    if (args["dryRun"] === true) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ok: true,
+                dryRun: true,
+                wouldCreate: { repo, title, body: body ?? null, labels: labels ?? DEFAULT_LABELS },
+                note:
+                  "起票していません。この内容でよければ dryRun を外して呼び直してください。" +
+                  "ラベルが対象リポジトリに実在するかは確かめていません。",
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+        isError: false,
+      };
+    }
 
     const outcome = await createIssue(config, { repo, title, body, labels });
     if (outcome.ok) {

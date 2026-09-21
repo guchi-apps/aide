@@ -126,6 +126,7 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .connect{background:var(--accent-soft);border:1px solid var(--accent);padding:.7rem .9rem;
  display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .9rem;font-size:.84rem;align-items:baseline}
 .connect dt{color:var(--accent)}
+.connect dd{margin:0;min-width:0;overflow-wrap:anywhere}
 
 /* ---- アプリ連携（図と一覧） ---- */
 /* 図は横長（PC・iPad）と縦長（スマホ）の2枚を出し分ける。1枚を縮めるとスマホで字が読めない。 */

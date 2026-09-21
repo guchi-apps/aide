@@ -7,7 +7,7 @@ import type { Tool } from "../types.ts";
  * **AIDEにしかできない領域**にあたる。台帳はサブPCのファイルシステムにしかなく、
  * Claudeアプリからそこを読む経路は他に無い。公式MCPとも重複しない。
  *
- * `aide_ops_status` とは問いが違う。あちらは「サーバーに異常はないか」で、tmuxセッションの
+ * `aide_host_status` とは問いが違う。あちらは「サーバーに異常はないか」で、tmuxセッションの
  * 詳細は意図して返していない。こちらは「どのセッションが動いていて、どこへ飛べばよいか」に
  * だけ答える。**リモートコントロールのURLをそのまま返すのが要点**で、チャットから
  * タップすればそのセッションの画面へ行ける。
@@ -33,7 +33,7 @@ export const claudeSessionsTool: Tool = {
     "載っているセッションが既に終了している可能性がある（動いていないという意味ではない）。" +
     "会話の中身・実行したツール・トークン使用量は返さない。" +
     "SDK経由の裏方プロセスは一覧に含めない（人が開いて操作する対象ではないため。件数だけ note に出る）。" +
-    "サーバーの稼働状況そのものは aide_ops_status を使う。",
+    "サーバーの稼働状況そのものは aide_host_status を使う。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
     const status = await buildClaudeSessionsStatus();

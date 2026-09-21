@@ -27,7 +27,7 @@ import type {
  * かつ「いまどうなっているか」という問いに対してキャッシュの古さは害にしかならない。
  */
 
-/** 深刻度。`aide_ops_status` の `OpsSeverity` と同じ考え方。 */
+/** 深刻度。ops ビューの `OpsSeverity` と同じ考え方。 */
 export type DevSeverity = "ok" | "warn" | "danger";
 
 /** CIの状態。GraphQL の `statusCheckRollup.state` を小文字化して丸めたもの。 */

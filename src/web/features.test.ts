@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, it } from "node:test";
 import { ToolRegistry } from "../mcp/registry.ts";
 import type { Tool } from "../mcp/types.ts";
-import { moneySummaryTool } from "../mcp/tools/money.ts";
+import { balancesTool } from "../mcp/tools/money.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { buildSections, ENDPOINTS, handleFeaturesPage, renderFeaturesPage } from "./features.ts";
@@ -21,8 +21,8 @@ function registryWith(...tools: Tool[]): ToolRegistry {
 
 describe("機能一覧ページ", () => {
   it("登録済みのMCPツールが名前と説明つきで載る", () => {
-    const html = render(registryWith(pingTool, moneySummaryTool));
-    for (const tool of [pingTool, moneySummaryTool]) {
+    const html = render(registryWith(pingTool, balancesTool));
+    for (const tool of [pingTool, balancesTool]) {
       assert.ok(html.includes(tool.name), `${tool.name} が出力に含まれていない`);
       // 説明は分割して連結しているため、先頭の一節だけ照合する。
       assert.ok(html.includes(tool.description.slice(0, 12)), `${tool.name} の説明が出力に含まれていない`);
@@ -78,6 +78,14 @@ describe("機能一覧ページ", () => {
 
   it("接続先URLに /mcp を付けて出す", () => {
     assert.ok(render(registryWith(pingTool), "https://aide.example.com").includes("https://aide.example.com/mcp"));
+  });
+
+  it("接続先URLが狭い画面で枠からはみ出さないよう、値の列を折り返せるようにする", () => {
+    // 切れ目のないURLは、値の列が min-width:0 と折り返しの許可を持たないと枠を突き抜ける（#356）。
+    const html = render(registryWith(pingTool));
+    const rule = html.match(/\.connect dd\{([^}]*)\}/)?.[1] ?? "";
+    assert.ok(rule.includes("min-width:0"), ".connect dd に min-width:0 が無い");
+    assert.ok(rule.includes("overflow-wrap:anywhere"), ".connect dd に overflow-wrap:anywhere が無い");
   });
 
   it("ツールの説明に含まれるHTMLをエスケープする", () => {
