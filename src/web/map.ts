@@ -505,8 +505,19 @@ const LEGEND = `<ul class="legend">
 /**
  * 図のリンクは、JavaScriptが無効なら通常のアンカーリンクとして働く。
  * 有効なときだけ既定の上端寄せを止めて、対象を画面中央付近へ表示する。
+ *
+ * **`history.pushState` はURLを書き換えるだけで、CSSの `:target` は更新されない。** そのため
+ * 強調は `:target` に頼らず、移動先へ `.arrived` を付けて出す。消えるまでの時間はCSS
+ * （`src/web/layout.ts` の `.apps li.arrived`）が持つので、ここでは外さない。
+ * 同じ行をもう一度選んだときは、付け直して強調を最初からやり直す。
  */
 const CENTER_TARGET_SCRIPT = `<script>
+const arriveAt = (target) => {
+  target.classList.remove("arrived");
+  void target.offsetWidth;
+  target.classList.add("arrived");
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+};
 document.querySelectorAll('.mapcard a[href^="#"]').forEach((link) => {
   link.addEventListener("click", (event) => {
     const href = link.getAttribute("href");
@@ -514,12 +525,12 @@ document.querySelectorAll('.mapcard a[href^="#"]').forEach((link) => {
     if (!target) return;
     event.preventDefault();
     history.pushState(null, "", href);
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    arriveAt(target);
   });
 });
 addEventListener("popstate", () => {
   const target = document.getElementById(location.hash.slice(1));
-  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (target) arriveAt(target);
 });
 </script>`;
 

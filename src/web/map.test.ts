@@ -82,6 +82,29 @@ describe("アプリ連携の画面", () => {
     assert.ok(html.includes('scrollIntoView({ behavior: "smooth", block: "center" })'));
   });
 
+  it("移動した行には、pushStateでも効く.arrivedを付け直して強調する", () => {
+    const html = renderMapPage();
+    // pushStateは:targetを更新しないため、クラスで強調する。同じ行の再選択でもやり直せるよう外してから付ける。
+    assert.ok(html.includes('target.classList.remove("arrived")'));
+    assert.ok(html.includes('target.classList.add("arrived")'));
+    // 戻る操作でも同じ動きにする。
+    assert.match(html, /addEventListener\("popstate", \(\) => \{[^}]*arriveAt\(target\)/);
+  });
+
+  it("強調は数秒残ってから消え、:targetと.arrivedで別名の同じ動きを使う", () => {
+    const html = renderMapPage();
+    assert.match(html, /\.apps li\.arrived\{animation:arrive-again 5s ease-out forwards\}/);
+    assert.match(html, /\.apps li:target\{animation:arrive 5s ease-out forwards\}/);
+    for (const name of ["arrive", "arrive-again"]) {
+      assert.ok(
+        html.includes(
+          `@keyframes ${name}{0%,70%{background:var(--focus);outline-color:var(--focus-line)}100%{background:transparent;outline-color:transparent}}`,
+        ),
+        `${name} のkeyframesが無い`,
+      );
+    }
+  });
+
   it("MCPで使う側はツール名を並べず本数だけにする", () => {
     const html = renderMapPage();
     const claude = CALLERS.find((caller) => caller.id === "claude")!;
