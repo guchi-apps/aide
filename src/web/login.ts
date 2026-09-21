@@ -13,6 +13,12 @@ import {
   type SupabaseAuthConfig,
 } from "../auth/supabase.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
+import {
+  appCallbackUrl,
+  consumeAppHandoff,
+  isAppChallenge,
+  issueAppHandoff,
+} from "./app-auth.ts";
 import { brandHtml, escapeHtml, isSiteNavPath, renderPage, siteNavLabel } from "./layout.ts";
 import {
   clearHandshakeCookie,
@@ -233,11 +239,12 @@ function notFound(res: ServerResponse): void {
  * ボタンのJavaScriptに依存させると、スクリプトが動かない環境で押しても何も起きない
  * （guchi-apps/docs の knowledge/supabase.md）。
  */
-export async function handleStatusAuthStart(
+async function beginStatusAuth(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
   options: LoginOptions,
+  appChallenge?: string,
 ): Promise<void> {
   const config = options.supabase;
   if (!config) {
@@ -257,10 +264,53 @@ export async function handleStatusAuthStart(
   res
     .writeHead(302, {
       Location: authorizeUrl(config, { redirectUri: redirect, challenge }),
-      "Set-Cookie": handshakeCookie(await loadSessionKey(), { state, verifier, next }, isSecure(req)),
+      "Set-Cookie": handshakeCookie(
+        await loadSessionKey(),
+        { state, verifier, next, ...(appChallenge ? { appChallenge } : {}) },
+        isSecure(req),
+      ),
       "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
     })
     .end();
+}
+
+export async function handleStatusAuthStart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  options: LoginOptions,
+): Promise<void> {
+  await beginStatusAuth(req, res, url, options);
+}
+
+/**
+ * iOSのASWebAuthenticationSessionから始めるGoogleログイン。
+ * challengeはiOSが保持するverifierのS256値で、カスタムURLスキーム上のコードを
+ * 別アプリに拾われても交換できないようにする。
+ */
+export async function handleStatusAppAuthStart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  options: LoginOptions,
+): Promise<void> {
+  if (!options.supabase) {
+    notFound(res);
+    return;
+  }
+  const appChallenge = url.searchParams.get("code_challenge");
+  if (!isAppChallenge(appChallenge)) {
+    res
+      .writeHead(400, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+      })
+      .end("invalid request\n");
+    return;
+  }
+  await beginStatusAuth(req, res, url, options, appChallenge);
 }
 
 /**
@@ -289,9 +339,20 @@ export async function handleStatusAuthCallback(
   // 戻り先はCookieが読めたときだけ分かる。読めなければ既定へ落ちる。
   const next = safeLanding(handshake?.next);
 
-  const deny = (reason: string, message: string): void => {
+  const deny = (reason: string, message: string, status = 401): void => {
     console.warn(`[login] Googleログイン失敗: ${reason}`);
-    html(res, 401, renderLoginPage({ google: true, error: message, next }), { "Set-Cookie": cookies });
+    if (handshake?.appChallenge) {
+      res
+        .writeHead(303, {
+          Location: appCallbackUrl({ error: "login_failed" }),
+          "Set-Cookie": cookies,
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        })
+        .end();
+      return;
+    }
+    html(res, status, renderLoginPage({ google: true, error: message, next }), { "Set-Cookie": cookies });
   };
 
   const failed = url.searchParams.get("error_description") ?? url.searchParams.get("error");
@@ -320,16 +381,77 @@ export async function handleStatusAuthCallback(
   await revokeSession(config, user.accessToken);
 
   if (!isAllowedEmail(user.email, config)) {
-    console.warn(`[login] 許可されていないアカウントのログイン試行: ${user.email}`);
-    html(res, 403, renderLoginPage({ google: true, error: "このアカウントでは開けません。", next }), {
-      "Set-Cookie": cookies,
-    });
+    deny(`許可されていないアカウント: ${user.email}`, "このアカウントでは開けません。", 403);
     return;
   }
 
   console.log(`[login] Googleログイン成功: ${user.email}`);
+  if (handshake.appChallenge) {
+    const code = issueAppHandoff({
+      email: user.email,
+      next,
+      challenge: handshake.appChallenge,
+    });
+    res
+      .writeHead(303, {
+        Location: appCallbackUrl({ code }),
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "Set-Cookie": cookies,
+      })
+      .end();
+    return;
+  }
+
   cookies.push(loginCookie(key, { secure, email: user.email }));
   res.writeHead(303, { Location: next, "Cache-Control": "no-store", "Set-Cookie": cookies }).end();
+}
+
+/**
+ * iOSが受け取った一回限りコードを、WKWebViewからのPOSTで画面用Cookieへ交換する。
+ * codeとverifierはURLへ載せない。Cookieはこの応答でWKWebViewへ直接付ける。
+ */
+export async function handleStatusAppAuthConsume(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: LoginOptions,
+): Promise<void> {
+  const config = options.supabase;
+  if (!config) {
+    notFound(res);
+    return;
+  }
+
+  let form: URLSearchParams;
+  try {
+    form = await readForm(req);
+  } catch {
+    html(res, 400, renderLoginPage({ google: true, error: "ログインをやり直してください。" }), {
+      "Referrer-Policy": "no-referrer",
+    });
+    return;
+  }
+
+  const handoff = consumeAppHandoff(form.get("code") ?? "", form.get("code_verifier") ?? "");
+  if (!handoff || !isAllowedEmail(handoff.email, config)) {
+    console.warn("[login] iOSアプリのログイン引き継ぎに失敗");
+    html(res, 401, renderLoginPage({ google: true, error: "ログインをやり直してください。" }), {
+      "Referrer-Policy": "no-referrer",
+    });
+    return;
+  }
+
+  res
+    .writeHead(303, {
+      Location: safeLanding(handoff.next),
+      "Set-Cookie": loginCookie(await loadSessionKey(), {
+        secure: isSecure(req),
+        email: handoff.email,
+      }),
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+    })
+    .end();
 }
 
 // ---- パスワードでのログイン（Google未設定の環境）----
