@@ -285,7 +285,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       // 読み取り用とは別のトークン（#317）。読み取りだけ設定されていても、ここは未設定になる。
       configured: readMyRoomControlConfig() !== null,
       probeable: false,
-      note: "照明などの操作用トークン（aide_room_buttons / aide_room_press）。部屋の機器を動かす経路のため、ここからは確認しない。",
+      note: "照明・エアコンの操作用トークン（aide_room_buttons / aide_room_press / aide_aircon_control）。部屋の機器を動かす経路のため、ここからは確認しない。",
     },
     {
       key: "dayspan",
