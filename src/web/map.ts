@@ -132,6 +132,7 @@ export const CALLERS: Caller[] = [
       "/api/zaim/payment",
       "/api/zaim/payment/web",
       "/api/zaim/payment/web/genre",
+      "/api/zaim/payment/web/memo",
     ],
   },
   {

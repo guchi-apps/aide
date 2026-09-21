@@ -4,6 +4,7 @@ import { loadZaimOAuthCredentials } from "../core/connectors/zaim/oauth.ts";
 import {
   ZAIM_WEB_FORWARDED_HEADER,
   forwardZaimWebGenreEdit,
+  forwardZaimWebMemoEdit,
   forwardZaimWebPayment,
   zaimWebUpstreamUrl,
 } from "../core/connectors/zaim/web-payment-forward.ts";
@@ -17,8 +18,11 @@ import {
   createZaimWebGenreEdit,
   normalizeWebGenreEditInput,
   type CreateWebGenreEditOutcome,
-  type ZaimWebGenreEditInput,
 } from "../core/connectors/zaim/web-genre-edit.ts";
+import {
+  createZaimWebMemoEdit,
+  normalizeWebMemoEditInput,
+} from "../core/connectors/zaim/web-memo-edit.ts";
 import {
   createZaimPayment,
   fetchZaimMaster,
@@ -278,30 +282,88 @@ export async function handleZaimWebPayment(req: IncomingMessage, res: ServerResp
 }
 
 /**
- * 中継するか、自分のところで画面を操作するかを決めて実行する（#273）。`runOrForwardWebPayment`
- * と同じ考え方で、同じ `AIDE_ZAIM_WEB_UPSTREAM_URL` を見る（受け口は新規登録と既存明細の変更の
- * どちらも同じマシン・同じサーバーで受ける）。
+ * 既存明細を編集画面から変更する経路（カテゴリ・内訳の #273、メモの #354）が共通で通る処理。
+ *
+ * 中継するか、自分のところで画面を操作するかを決めて実行する。`runOrForwardWebPayment` と同じ
+ * 考え方で、同じ `AIDE_ZAIM_WEB_UPSTREAM_URL` を見る（受け口は新規登録と既存明細の変更の
+ * どれも同じマシン・同じサーバーで受ける）。
  */
-async function runOrForwardWebGenreEdit(
+async function runOrForwardWebEdit<
+  Input extends { requestId: string },
+  Outcome extends CreateWebGenreEditOutcome,
+>(
   req: IncomingMessage,
-  input: ZaimWebGenreEditInput,
-): Promise<CreateWebGenreEditOutcome> {
+  input: Input,
+  run: (input: Input) => Promise<Outcome>,
+  forward: (input: Input, options: { baseUrl: string; secret: string }) => Promise<Outcome>,
+): Promise<Outcome | { ok: false; kind: "rejected"; reason: string }> {
   const upstream = zaimWebUpstreamUrl();
-  if (!upstream) return createZaimWebGenreEdit(input);
+  if (!upstream) return run(input);
 
   if (req.headers[ZAIM_WEB_FORWARDED_HEADER] === "1") {
     console.warn(
       "[zaim-api] 中継されたリクエストに AIDE_ZAIM_WEB_UPSTREAM_URL が設定されています。" +
         "受け口側では設定しないでください。ここでは中継せず画面の操作を試みます。",
     );
-    return createZaimWebGenreEdit(input);
+    return run(input);
   }
 
   const secret = zaimWriteSecret();
   if (!secret) return { ok: false, kind: "rejected", reason: "AIDE_ZAIM_WRITE_SECRET が未設定です" };
 
   console.log(`[zaim-api] Web版の変更を中継: requestId=${input.requestId}`);
-  return forwardZaimWebGenreEdit(input, { baseUrl: upstream, secret });
+  return forward(input, { baseUrl: upstream, secret });
+}
+
+/**
+ * 既存明細を編集画面から変更する経路のハンドラの骨格。405 → 認証 → 本文 → 検査 → 実行 → 応答の
+ * 順と、失敗の割り当て（`statusFor`）を、カテゴリ・内訳とメモで同じにするために1か所へ置く。
+ */
+async function handleWebEdit<
+  Input extends { requestId: string },
+  Outcome extends CreateWebGenreEditOutcome,
+>(
+  req: IncomingMessage,
+  res: ServerResponse,
+  label: string,
+  normalize: (raw: unknown) => { input: Input } | { error: string },
+  run: (input: Input) => Promise<Outcome>,
+  forward: (input: Input, options: { baseUrl: string; secret: string }) => Promise<Outcome>,
+): Promise<void> {
+  if (req.method !== "POST") {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+  if (!(await authorize(req, res, label))) return;
+
+  const body = await readBody(req, res);
+  if (body === null) return;
+
+  const normalized = normalize(body);
+  if ("error" in normalized) {
+    json(res, 400, { ok: false, kind: "invalid", error: normalized.error });
+    return;
+  }
+
+  const outcome = await runOrForwardWebEdit(req, normalized.input, run, forward);
+  if (!outcome.ok) {
+    json(res, statusFor(outcome.kind), {
+      ok: false,
+      kind: outcome.kind,
+      error: outcome.reason,
+      requestId: normalized.input.requestId,
+    });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    moneyId: outcome.moneyId,
+    duplicated: outcome.duplicated,
+    requestId: normalized.input.requestId,
+  });
 }
 
 /**
@@ -323,40 +385,41 @@ async function runOrForwardWebGenreEdit(
  * 中継・同時実行ロックの考え方は上と同じ。呼び出し元はタイムアウトを長く取ること。
  */
 export async function handleZaimWebGenreEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (req.method !== "POST") {
-    res
-      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" })
-      .end(JSON.stringify({ error: "method not allowed" }));
-    return;
-  }
-  if (!(await authorize(req, res, "POST /api/zaim/payment/web/genre"))) return;
+  await handleWebEdit(
+    req,
+    res,
+    "POST /api/zaim/payment/web/genre",
+    normalizeWebGenreEditInput,
+    createZaimWebGenreEdit,
+    forwardZaimWebGenreEdit,
+  );
+}
 
-  const body = await readBody(req, res);
-  if (body === null) return;
-
-  const normalized = normalizeWebGenreEditInput(body);
-  if ("error" in normalized) {
-    json(res, 400, { ok: false, kind: "invalid", error: normalized.error });
-    return;
-  }
-
-  const outcome = await runOrForwardWebGenreEdit(req, normalized.input);
-  if (!outcome.ok) {
-    json(res, statusFor(outcome.kind), {
-      ok: false,
-      kind: outcome.kind,
-      error: outcome.reason,
-      requestId: normalized.input.requestId,
-    });
-    return;
-  }
-
-  json(res, 200, {
-    ok: true,
-    moneyId: outcome.moneyId,
-    duplicated: outcome.duplicated,
-    requestId: normalized.input.requestId,
-  });
+/**
+ * `POST /api/zaim/payment/web/memo`
+ *
+ * **Web版の編集画面を操作して**既存明細（自動連携明細を含む）の**メモだけ**を書き換える（#354）。
+ * 銀行口座・デビットカードの連携明細はZaimの「置き換え」の対象外なので、asset-manager の家計簿連携
+ * （asset-manager#514）は買った物をメモへ直接書き込む。`/web/genre` と同じ画面・同じ約束で、
+ * 触る項目だけが違う。
+ *
+ * | | `/api/zaim/payment/web/genre` | `/api/zaim/payment/web/memo` |
+ * |---|---|---|
+ * | 触る項目 | カテゴリ・内訳だけ | **メモだけ**（空文字なら消す） |
+ * | 本文 | `categoryName` / `genreName` | `comment`（100文字まで。超過は400） |
+ * | 取り違えの検知・冪等・ロック・ステータス | 同じ | 同じ |
+ *
+ * **`requestId` はメモへ混ぜない**（利用者が読むメモが汚れる）。冪等は記録だけで担う。
+ */
+export async function handleZaimWebMemoEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  await handleWebEdit(
+    req,
+    res,
+    "POST /api/zaim/payment/web/memo",
+    normalizeWebMemoEditInput,
+    createZaimWebMemoEdit,
+    forwardZaimWebMemoEdit,
+  );
 }
 
 /**

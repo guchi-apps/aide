@@ -10,8 +10,13 @@ const dir = await mkdtemp(join(tmpdir(), "aide-zaim-api-test-"));
 process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
 process.env["AIDE_ZAIM_WEB_PAYMENT_LOG_PATH"] = join(dir, "zaim-web-payments.json");
 process.env["AIDE_ZAIM_WEB_GENRE_EDIT_LOG_PATH"] = join(dir, "zaim-web-genre-edits.json");
-const { handleZaimMaster, handleZaimPayment, handleZaimWebGenreEdit, handleZaimWebPayment } =
-  await import("./zaim.ts");
+const {
+  handleZaimMaster,
+  handleZaimPayment,
+  handleZaimWebGenreEdit,
+  handleZaimWebMemoEdit,
+  handleZaimWebPayment,
+} = await import("./zaim.ts");
 const { resetRateLimits } = await import("../auth/ratelimit.ts");
 
 /**
@@ -306,5 +311,76 @@ describe("POST /api/zaim/payment/web/genre", () => {
   it("JSONとして読めなければ400", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
     assert.equal((await postWebGenre("{壊れた")).status, 400);
+  });
+});
+
+/**
+ * `POST /api/zaim/payment/web/memo`（#354）。
+ *
+ * こちらもZaimへ届く前に決まるところだけを見る。`comment` は必須（空文字はメモを消す指定として通る）で、
+ * カテゴリの項目は受け取らない。
+ */
+async function postWebMemo(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Promise<Captured> {
+  const { res, captured } = fakeRes();
+  await handleZaimWebMemoEdit(
+    fakeReq("POST", typeof body === "string" ? body : JSON.stringify(body), authorization),
+    res,
+  );
+  return captured;
+}
+
+const VALID_WEB_MEMO_BODY = {
+  requestId: "test:memo:1",
+  moneyId: 5001,
+  amount: 1284,
+  date: "2026-09-17",
+  comment: "おにぎり 158円／牛乳 218円",
+};
+
+describe("POST /api/zaim/payment/web/memo", () => {
+  it("シークレット未設定なら503", async () => {
+    delete process.env["AIDE_ZAIM_WRITE_SECRET"];
+    assert.equal((await postWebMemo(VALID_WEB_MEMO_BODY)).status, 503);
+  });
+
+  it("シークレットが違えば401", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await postWebMemo(VALID_WEB_MEMO_BODY, "Bearer wrong")).status, 401);
+  });
+
+  it("POST以外は405（認証より先に見る）", async () => {
+    const { res, captured } = fakeRes();
+    await handleZaimWebMemoEdit(fakeReq("GET", "", null), res);
+    assert.equal(captured.status, 405);
+  });
+
+  it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    setOAuthEnv(false);
+    const result = await postWebMemo({ ...VALID_WEB_MEMO_BODY, comment: undefined });
+    assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
+    assert.match(result.body, /comment/);
+  });
+
+  it("入力が不正なら400で、何が足りないかを返す", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+
+    for (const key of ["requestId", "moneyId", "date", "amount", "comment"]) {
+      const result = await postWebMemo({ ...VALID_WEB_MEMO_BODY, [key]: undefined });
+      assert.equal(result.status, 400, `${key} が無くても通ってしまいます`);
+      assert.match(result.body, new RegExp(key));
+    }
+  });
+
+  it("上限を超えたメモは切らずに400で返す", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    const result = await postWebMemo({ ...VALID_WEB_MEMO_BODY, comment: "あ".repeat(101) });
+    assert.equal(result.status, 400);
+    assert.match(result.body, /100文字/);
+  });
+
+  it("JSONとして読めなければ400", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await postWebMemo("{壊れた")).status, 400);
   });
 });

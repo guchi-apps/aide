@@ -190,6 +190,10 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
   `scripts/edit-genre.mjs`）。**この経路は変更前の値を覚えておらず元に戻せない**ので、
   画面の当て方を確かめる必要があるときは、保存を行わない `ZAIM_WEB_GENRE_EDIT_DRY_RUN=1`
   を必ず付ける（#273）
+- **Zaim の既存明細のメモを実際に書き換えること**（`POST /api/zaim/payment/web/memo` ・
+  `scripts/edit-memo.mjs`）。**この経路は書き換え前のメモを覚えておらず元に戻せない**ので、
+  画面の当て方を確かめる必要があるときは、保存を行わない `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1`
+  を必ず付ける（#354）
 - **サブPCで動いている受け口（`aide-zaim-web.service` / `npm run zaim-web-server`）を止める・
   再起動すること**（#215）。VPSからのZaim登録がその間ずっと届かなくなる。手元で挙動を
   確かめるときは `AIDE_ZAIM_WEB_PORT` を空きポートにして別に起動する

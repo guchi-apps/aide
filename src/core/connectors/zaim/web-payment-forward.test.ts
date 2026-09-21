@@ -4,13 +4,16 @@ import {
   ZAIM_WEB_FORWARDED_HEADER,
   ZAIM_WEB_FORWARD_TIMEOUT_MS,
   ZAIM_WEB_GENRE_EDIT_FORWARD_TIMEOUT_MS,
+  ZAIM_WEB_MEMO_EDIT_FORWARD_TIMEOUT_MS,
   forwardZaimWebGenreEdit,
+  forwardZaimWebMemoEdit,
   forwardZaimWebPayment,
   probeZaimWebUpstream,
   zaimWebUpstreamUrl,
 } from "./web-payment-forward.ts";
 import { WEB_PAYMENT_TIMEOUT_MS, type ZaimWebPaymentInput } from "./web-payment.ts";
 import { WEB_GENRE_EDIT_TIMEOUT_MS, type ZaimWebGenreEditInput } from "./web-genre-edit.ts";
+import { WEB_MEMO_EDIT_TIMEOUT_MS, type ZaimWebMemoEditInput } from "./web-memo-edit.ts";
 
 const INPUT: ZaimWebPaymentInput = {
   requestId: "asset-manager:receipt-item:1",
@@ -30,6 +33,14 @@ const GENRE_EDIT_INPUT: ZaimWebGenreEditInput = {
   date: "2026-09-02",
   categoryName: "食費",
   genreName: "調理食品",
+};
+
+const MEMO_EDIT_INPUT: ZaimWebMemoEditInput = {
+  requestId: "asset-manager:zaim-memo:5001:abc123",
+  moneyId: 5001,
+  amount: 1284,
+  date: "2026-09-17",
+  comment: "おにぎり 158円／牛乳 218円",
 };
 
 /** JSONを返すだけの `fetch` を作る。 */
@@ -294,6 +305,90 @@ describe("forwardZaimWebGenreEdit", () => {
   it("読めない応答は failed に倒す（変更された可能性を消さない）", async () => {
     const broken = (async () => new Response("<html>502</html>", { status: 502 })) as unknown as typeof fetch;
     const outcome = await forwardZaimWebGenreEdit(GENRE_EDIT_INPUT, { ...OPTIONS, fetchImpl: broken });
+    assert.equal(outcome.ok === false && outcome.kind, "failed");
+  });
+});
+
+describe("forwardZaimWebMemoEdit", () => {
+  it("メモ用のパスへ、認証・ループ止めのヘッダと本文を付けて送る", async () => {
+    let seen: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      seen = { url, init };
+      return new Response(JSON.stringify({ ok: true, moneyId: MEMO_EDIT_INPUT.moneyId, duplicated: false }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+
+    await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, { ...OPTIONS, fetchImpl });
+
+    assert.ok(seen);
+    const sent = seen as unknown as { url: string; init: RequestInit };
+    assert.equal(sent.url, "http://subpc:4748/api/zaim/payment/web/memo");
+    const headers = sent.init.headers as Record<string, string>;
+    assert.equal(headers["authorization"], "Bearer s3cret");
+    assert.equal(headers[ZAIM_WEB_FORWARDED_HEADER], "1");
+    assert.deepEqual(JSON.parse(sent.init.body as string), MEMO_EDIT_INPUT);
+  });
+
+  it("打ち切りは画面の操作より必ず長く待つ", () => {
+    assert.ok(ZAIM_WEB_MEMO_EDIT_FORWARD_TIMEOUT_MS > WEB_MEMO_EDIT_TIMEOUT_MS);
+  });
+
+  it("成功をそのまま戻す。moneyId は相手の応答、無ければ渡した値", async () => {
+    const withMoneyId = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(200, { ok: true, moneyId: 999, duplicated: false }),
+    });
+    assert.deepEqual(withMoneyId, { ok: true, moneyId: 999, duplicated: false });
+
+    const withoutMoneyId = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(200, { ok: true, duplicated: true }),
+    });
+    assert.deepEqual(withoutMoneyId, { ok: true, moneyId: MEMO_EDIT_INPUT.moneyId, duplicated: true });
+  });
+
+  it("相手が返した kind を潰さない（rejected の取り違え検知も、conflict もそのまま）", async () => {
+    const rejected = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(422, { ok: false, kind: "rejected", error: "金額が一致しません" }),
+    });
+    assert.equal(rejected.ok === false && rejected.kind, "rejected");
+    assert.equal(rejected.ok === false && rejected.reason, "金額が一致しません");
+
+    const conflict = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(409, { ok: false, kind: "conflict", error: "結果が確定していません" }),
+    });
+    assert.equal(conflict.ok === false && conflict.kind, "conflict");
+  });
+
+  it("接続できなければ rejected、応答待ちでの切断は failed", async () => {
+    const refused = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: throwingFetch("ECONNREFUSED"),
+    });
+    assert.equal(refused.ok === false && refused.kind, "rejected");
+
+    const reset = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: throwingFetch("ECONNRESET"),
+    });
+    assert.equal(reset.ok === false && reset.kind, "failed");
+  });
+
+  it("受け口が無い（404）のは画面を開く前に断られている＝rejected", async () => {
+    // 受け口を持たない古いサブPCへ中継した場合。呼び出し側は404を notImplemented として扱う。
+    const outcome = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, {
+      ...OPTIONS,
+      fetchImpl: jsonFetch(404, { error: "not found" }),
+    });
+    assert.equal(outcome.ok === false && outcome.kind, "rejected");
+  });
+
+  it("読めない応答は failed に倒す（変更された可能性を消さない）", async () => {
+    const broken = (async () => new Response("<html>502</html>", { status: 502 })) as unknown as typeof fetch;
+    const outcome = await forwardZaimWebMemoEdit(MEMO_EDIT_INPUT, { ...OPTIONS, fetchImpl: broken });
     assert.equal(outcome.ok === false && outcome.kind, "failed");
   });
 });

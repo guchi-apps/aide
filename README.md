@@ -46,6 +46,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 | `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
+| `POST /api/zaim/payment/web/memo`（aide#354） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のメモの書き換え | **満たす**（下記） | ログイン状態（storage state。新規登録・カテゴリ変更と共用） | **例外**（下記。メモの書き換えのみ） |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
@@ -148,6 +149,14 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 （別の明細を取り違えて変更してしまう事故を防ぐ）。
 
 詳細は[既存明細のカテゴリ・内訳の変更](#既存明細のカテゴリ内訳の変更aide273)。
+
+**メモの書き換え（`POST /api/zaim/payment/web/memo`・aide#354）も、同じ理由の別の例外として個別に決めた**
+（上の「前例として使わない」の運用どおり、この節を根拠にせず #354 で判断した）。銀行口座・
+デビットカードの連携明細はZaimの「置き換え」の対象外で、asset-manager の家計簿連携
+（asset-manager#514）が買った物を書き込む先が、その連携明細のメモしか無いため。**許すのは
+メモ（`input[name="comment"]`）を書き換える（空文字なら消す）ことだけ**で、カテゴリ・金額・日付・
+口座・品目・お店・集計対象外は変えない（`normalizeWebMemoEditInput()` がメモ以外を受け取らない）。
+条件1・2はカテゴリ変更と同じ理由で満たす。詳細は[既存明細のメモの書き換え](#既存明細のメモの書き換えaide354)。
 
 #### 予定の作成は3条件を文言どおり満たす（aide#243）
 
@@ -1000,7 +1009,7 @@ asset-manager（VPS）
 | | VPS（中継する側） | サブPC（画面を操作する側） |
 |---|---|---|
 | 動かすもの | 本体サーバー（PM2） | `src/worker/zaim-web-server.ts`（`aide-zaim-web.service`） |
-| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web`・`POST /api/zaim/payment/web/genre`（#273）と `/health` だけ** |
+| 開く口 | 従来どおり全部 | **`POST /api/zaim/payment/web`・`/genre`（#273）・`/memo`（#354）と `/health` だけ** |
 | 要る設定 | `AIDE_ZAIM_WEB_UPSTREAM_URL` | `AIDE_ZAIM_WRITE_SECRET`・`AIDE_ZAIM_WEB_HOST` |
 | 冪等の記録 | 持たない | `data/zaim-web-payments.json` |
 
@@ -1145,6 +1154,46 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 される時点で動かない可能性がある**。当たらなかった場合は `scripts/edit-genre.mjs` のセレクタを
 実物に合わせて直す。
 
+
+### 既存明細のメモの書き換え（aide#354）
+
+銀行口座・デビットカードの連携明細は、Zaimの「置き換え」（カード・電子マネーの連携明細にしか
+効かない。公式「対象となる履歴」）で置き換えられない。asset-manager の家計簿連携
+（asset-manager#514）は代わりに、**その連携明細のメモへ買った物を直接書き込む**。自動連携明細は
+公式APIから編集できず、上の `/genre` はカテゴリ・内訳しか触らないため、同じ編集画面
+（`/money/<moneyId>/edit`）から**メモ（`input[name="comment"]`）だけ**を書き換える口を設けた。
+[条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることは `/genre` と同じ。
+
+```bash
+curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/memo \
+  -H "authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"requestId":"asset-manager:zaim-memo:5001:<本文の指紋>","moneyId":5001,
+       "date":"2026-09-17","amount":1284,"comment":"おにぎり 158円／牛乳 218円"}'
+# => {"ok":true,"moneyId":5001,"duplicated":false,"requestId":"asset-manager:zaim-memo:5001:<本文の指紋>"}
+```
+
+- `comment` は**必須**。**空文字ならメモを消す**。省略・`null`・文字列以外は400（項目名の取り違えで
+  メモが黙って消えるのを防ぐ）
+- 上限は `write.ts` の `MAX_TEXT_LENGTH`（100文字）。**超えたら切らずに400**で返す（呼び出し側も
+  同じ値で切っている）。メモ欄は1行の入力なので、改行・タブ・制御文字も400
+- **`requestId` はメモ本文へ混ぜない。** 新規登録の `composeComment` は二重登録を探す手掛かりとして
+  混ぜているが、ここでは利用者が読むメモが汚れるだけで、冪等は記録で足りる
+- 取り違えの検知（開いた明細の `date`・`amount` が本文と違えば何も触らず422）・冪等（同じ
+  `requestId` は `duplicated: true`）・同時実行のロック・失敗の分類・中継・ステータス
+  （400 / 401 / 409 / 422 / 503）は `/genre` と**同じ実装を通る**。冪等の記録も
+  `data/zaim-web-genre-edits.json` を共用する（`requestId` の接頭辞が違うので衝突しない）
+- 応答まで数十秒かかる。`"dryRun": true`（手元では `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1`）を足すと
+  **保存だけ行わず**、取り違えの検知とメモの入力までを試す
+
+**サブPCの受け口は、デプロイ後に再起動しないと新しい経路が開かない。** 受け口は起動時に
+経路の表を読み込むため、VPSだけ更新しても中継先が404を返す（呼び出し側 asset-manager は404を
+`notImplemented` として扱い、「コピーしてZaimアプリへ貼り付ける」導線に落ちる）。
+
+**編集画面のメモ欄の位置は、この実装の時点でZaimの実物では確認していない。** 新規登録画面と同じく
+品目行の中の `input[name="comment"]` に在る想定で、見つからない・複数ある・書いた値が読み直せない
+場合は保存の手前で止まる。**初めて実アクセスする前に `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1` で当たりを確認する**。
+外れたときは `scripts/edit-memo.mjs` のセレクタを実物に合わせて直す。
 
 ## コネクタ: ops-dashboard
 
