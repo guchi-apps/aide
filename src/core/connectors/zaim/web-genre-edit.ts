@@ -27,14 +27,14 @@ import {
  * - `write.ts`（新規登録）・`web-payment.ts`（Web版での新規登録）はどちらも**新規作成だけ**で、
  *   既存明細を編集する口を持たない
  *
- * そこでWeb版の編集画面（`/money/<moneyId>/edit`）をPlaywrightで操作し、**カテゴリ・内訳だけ**を
+ * そこでWeb版の編集モーダル（一覧の鉛筆アイコンから開く。`/money/<moneyId>/edit` を直接開いても編集UIは出ない。#409）をPlaywrightで操作し、**カテゴリ・内訳だけ**を
  * 選び直す。金額・日付・口座・品目・お店・集計対象外はこの経路では変えない。
  *
  * ## 新規登録（`web-payment.ts`）との違い
  *
  * | | 新規登録（`web-payment.ts`） | 既存明細の変更（ここ） |
  * |---|---|---|
- * | 開く画面 | `/money/new` | `/money/<moneyId>/edit` |
+ * | 開く画面 | `/money/new` | 一覧（`/money?month=YYYYMM`）の編集モーダル |
  * | 触る項目 | 全項目を埋める | **カテゴリ・内訳だけ** |
  * | 返せるID | `null`（画面にIDが出ない） | **呼び出し元が渡した `moneyId` をそのまま返せる** |
  * | 取り違えの検知 | 無い（新規なので取り違えようがない） | **開いた明細の日付・金額が本文と一致しなければ、何も触らず止める** |
@@ -52,7 +52,7 @@ const WEB_GENRE_EDIT_SCRIPT = zaimScriptPath("edit-genre.mjs");
 export interface ZaimWebGenreEditInput {
   /** 呼び出し元がレコードごとに一意に決める冪等キー（例: `asset-manager:genre-suggestion:1234`）。 */
   requestId: string;
-  /** 変更対象の明細のZaimレコードID（一覧の `id`・編集画面のURLに載る値）。 */
+  /** 変更対象の明細のZaimレコードID（一覧の `id`・行の `data-url`（`/money/<moneyId>/edit`）に載る値）。 */
   moneyId: number;
   /** `YYYY-MM-DD`。開いた明細と一致しなければ取り違えとみなして止める。 */
   date: string;
@@ -62,7 +62,7 @@ export interface ZaimWebGenreEditInput {
   categoryName: string;
   /** ジャンル名（内訳。Zaimのカテゴリ設定にある表記そのまま）。 */
   genreName: string;
-  /** 立てると**保存だけ行わない**。画面の当て方を確かめるためのモード。 */
+  /** 立てると**「更新する」だけ押さない**。画面の当て方を確かめるためのモード。 */
   dryRun?: boolean | undefined;
 }
 

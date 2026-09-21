@@ -21,7 +21,14 @@ export interface ZaimMenuItem {
 
 export declare function resolveReceiptUrl(): string;
 
-export declare function resolveReceiptEditUrl(moneyId: number): string;
+/** 編集UIを開くために読む一覧（`/money?month=YYYYMM`）のURL。`date` は `YYYY-MM-DD`。 */
+export declare function resolveReceiptListUrl(date: string): string;
+
+/** 一覧の中で、`moneyId` の明細の編集を開く要素を指すセレクタ。 */
+export declare function receiptEditTriggerSelector(moneyId: number): string;
+
+/** 編集モーダルの明細行のうち書き換える行の添字。決められなければ -1。 */
+export declare function pickFilledRowIndex(amounts: readonly (number | null)[]): number;
 
 export declare function parseMonthHeader(text: string | null | undefined): ZaimYearMonth | null;
 
