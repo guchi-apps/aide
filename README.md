@@ -1138,8 +1138,8 @@ asset-manager の「内訳の提案」（asset-manager#420）は、AIDEが巡回
 （`write.ts` 冒頭）、上の新規登録（`web-payment.ts`）も含め、既存明細を編集する経路がAIDEに
 無かったため。
 
-`POST /api/zaim/payment/web/genre` は、Web版の**編集画面**（`/money/<moneyId>/edit`）を
-Playwrightで操作し、**カテゴリ・内訳だけ**を選び直す。[条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることに注意——金額・日付・口座・品目・お店・集計対象外はこの経路では変えない。
+`POST /api/zaim/payment/web/genre` は、Web版の**編集モーダル**（一覧の鉛筆アイコンから開く
+「家計簿の編集」。[開き方](#編集画面はモーダルにあるaide409)）をPlaywrightで操作し、**カテゴリ・内訳だけ**を選び直す。[条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることに注意——金額・日付・口座・品目・お店・集計対象外はこの経路では変えない。
 
 #### 呼び出し方
 
@@ -1152,7 +1152,7 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 # => {"ok":true,"moneyId":10228209053,"duplicated":false,"requestId":"asset-manager:genre-suggestion:1"}
 ```
 
-- `moneyId` は一覧の `id`（`GET /api/money/transactions`・#244）と同じ値。編集画面のURLに載る
+- `moneyId` は一覧の `id`（`GET /api/money/transactions`・#244）と同じ値。一覧の行の `data-url`（`/money/<moneyId>/edit`）に載る
 - カテゴリは新規登録と同じく**名前**で渡す（画面がIDを受け取らないため）
 - 冪等キーは asset-manager 側が `asset-manager:genre-suggestion:<ZaimGenreSuggestion.id>` の形で送る想定
 - **応答まで数十秒かかる**（ヘッドレスChromiumの起動を含む）。呼び出し元はタイムアウトを長く取ること
@@ -1171,7 +1171,7 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 
 | | 新規登録（`web-payment.ts`） | 既存明細の変更（`web-genre-edit.ts`） |
 |---|---|---|
-| 開く画面 | `/money/new` | `/money/<moneyId>/edit` |
+| 開く画面 | `/money/new` | 一覧（`/money?month=YYYYMM`）の鉛筆アイコンで開く編集モーダル |
 | 触る項目 | 全項目 | **カテゴリ・内訳だけ** |
 | 返せる `moneyId` | `null`（画面にIDが出ない） | **呼び出し元が渡した値をそのまま返す** |
 | 同時実行のロック | `web-screen-lock.ts` を共有 | 同左（storage stateのファイルが1つのため） |
@@ -1181,11 +1181,39 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 失敗の分類（`rejected`/`conflict`/`failed`の使い分け）・中継の考え方は新規登録と同じなので、
 上の「[中継が失敗したときにどちらへ倒すか](#中継が失敗したときにどちらへ倒すか)」を参照。
 
-**編集画面のDOM構造は、この実装の時点でZaimの実物では確認していない。** 新規登録画面
-（`/money/new`）の実物確認結果（上表）から類推して書いており、要素が見つからなければ必ず
-例外にして保存の手前で止まる作りにしてあるため誤った変更が入ることは無いが、**初めて実アクセス
-される時点で動かない可能性がある**。当たらなかった場合は `scripts/edit-genre.mjs` のセレクタを
-実物に合わせて直す。
+**編集モーダルの中の入力欄は、実物では未確認。** 一覧からモーダルを開くところまでは実物の
+観察（下の節）に基づくが、モーダル内の `name`（`item_name`・`amount`・`comment`・`date`）は
+新規登録画面（`/money/new`）と同じだと仮定している。要素が見つからなければ必ず例外にして
+「更新する」の手前で止まり、**画面の構造の要約（要素名・ボタン名。値は含めない）をエラーへ添える**
+ので、外れたときはその内容で `scripts/edit-modal.mjs` の当て方を直す。
+
+
+### 編集画面はモーダルにある（aide#409）
+
+**`/money/<moneyId>/edit` を直接開いても、編集UIは出ない。** 実物で確かめた（2026-09-21・#410。
+銀行口座・デビットカードの連携明細）。
+
+- 通常のブラウザでも画面は真っ白。コンソールに `ReferenceError: $ is not defined`（インライン
+  スクリプト）と `Cannot read properties of undefined (reading 'genres')`（`receipt_edit.tsx`）が出る
+- ページに在る入力欄は `#edit-receipt-form`（`action="/receipts/<moneyId>"`・`_method=put`）の
+  hidden 値だけ。`window.Receipt` も未定義
+- **編集UIは、`/money` 一覧の行の鉛筆アイコンを押すと開く「家計簿の編集」モーダルにだけ在る。**
+  鉛筆アイコンは `a[href]` ではなく、行が持つ `data-url="/money/<moneyId>/edit"` で当てる（巡回が
+  `id` を読んでいるのと同じ属性）。モーダルには品目の行（品目名・カテゴリ・金額・メモ・行削除×）が
+  複数行、合計金額・出金元・全体のカテゴリ・日付・お店・集計、「削除する」「更新する」がある
+- **モーダルのボタンは `<form>` に属さない。** 更新は画面のJSが送っている
+
+そのため `edit-genre.mjs`・`edit-memo.mjs`（共通部品は `edit-modal.mjs`）は、
+
+1. 明細の日付の月の一覧（`/money?month=YYYYMM`）を開き、`moneyId` の鉛筆アイコンを押してモーダルを出す
+2. 金額が入っている品目の行が**ちょうど1つ**のときだけ、その行を書き換える（空の行は無視。複数品目は止める）
+3. 日付・金額が本文と一致するのを確かめてから、カテゴリ／メモだけを触る
+4. `dryRun` でなければ、**文言が完全一致する**「更新する」を押す（隣の「削除する」を押さない）
+5. モーダルが閉じるのを待ち、一覧を開き直して、行に表示されたカテゴリ・内訳／メモが書いた値と一致するのを確かめる
+
+**`#edit-receipt-form` を直接送信する経路は採用しない。** `Receipt` はレシート単位で `items` を
+持つため、画面の送信内容と一致する保証が無いまま送ると、レシート内の全明細を置き換えてしまう
+恐れがある。
 
 
 ### 既存明細のメモの書き換え（aide#354）
@@ -1193,8 +1221,8 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/genre \
 銀行口座・デビットカードの連携明細は、Zaimの「置き換え」（カード・電子マネーの連携明細にしか
 効かない。公式「対象となる履歴」）で置き換えられない。asset-manager の家計簿連携
 （asset-manager#514）は代わりに、**その連携明細のメモへ買った物を直接書き込む**。自動連携明細は
-公式APIから編集できず、上の `/genre` はカテゴリ・内訳しか触らないため、同じ編集画面
-（`/money/<moneyId>/edit`）から**メモ（`input[name="comment"]`）だけ**を書き換える口を設けた。
+公式APIから編集できず、上の `/genre` はカテゴリ・内訳しか触らないため、同じ編集モーダル
+（[開き方](#編集画面はモーダルにあるaide409)）から**メモ（`input[name="comment"]`）だけ**を書き換える口を設けた。
 [条件3の例外](#既存明細のカテゴリ変更は条件3の例外aide273)であることは `/genre` と同じ。
 
 ```bash
@@ -1217,16 +1245,17 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/memo \
   （400 / 401 / 409 / 422 / 503）は `/genre` と**同じ実装を通る**。冪等の記録も
   `data/zaim-web-genre-edits.json` を共用する（`requestId` の接頭辞が違うので衝突しない）
 - 応答まで数十秒かかる。`"dryRun": true`（手元では `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1`）を足すと
-  **保存だけ行わず**、取り違えの検知とメモの入力までを試す
+  **「更新する」だけ押さず**、取り違えの検知とメモの入力までを試す
 
 **サブPCの受け口は、デプロイ後に再起動しないと新しい経路が開かない。** 受け口は起動時に
 経路の表を読み込むため、VPSだけ更新しても中継先が404を返す（呼び出し側 asset-manager は404を
 `notImplemented` として扱い、「コピーしてZaimアプリへ貼り付ける」導線に落ちる）。
 
-**編集画面のメモ欄の位置は、この実装の時点でZaimの実物では確認していない。** 新規登録画面と同じく
-品目行の中の `input[name="comment"]` に在る想定で、見つからない・複数ある・書いた値が読み直せない
-場合は保存の手前で止まる。**初めて実アクセスする前に `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1` で当たりを確認する**。
-外れたときは `scripts/edit-memo.mjs` のセレクタを実物に合わせて直す。
+**モーダル内のメモ欄の位置は、実物では未確認。** 品目行の中の `input[name="comment"]` に在る想定で、
+見つからない・複数ある・書いた値が読み直せない場合は「更新する」の手前で止まり、画面の構造の
+要約をエラーへ添える。**初めて実アクセスする前に `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1` で当たりを確認する**
+（`"submitted":false` が返れば当たっている）。外れたときは `scripts/edit-modal.mjs` の当て方を
+実物に合わせて直す。
 
 ## コネクタ: ops-dashboard
 

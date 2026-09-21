@@ -24,7 +24,7 @@ import {
  * 連携明細は置き換えられない。asset-manager の家計簿連携（asset-manager#514）は、代わりに
  * **その連携明細のメモへ買った物を直接書き込む**。自動連携明細は公式APIから編集できず
  * （`write.ts` 冒頭）、既存の `web-genre-edit.ts`（#273）はカテゴリ・内訳しか触らないため、
- * 同じ編集画面（`/money/<moneyId>/edit`）を操作してメモ（`input[name="comment"]`）だけを書き換える。
+ * 同じ編集モーダル（一覧の鉛筆アイコンから開く。#409）を操作してメモ（`input[name="comment"]`）だけを書き換える。
  *
  * ## カテゴリの変更（`web-genre-edit.ts`）との違い
  *
@@ -47,7 +47,7 @@ const WEB_MEMO_EDIT_SCRIPT = zaimScriptPath("edit-memo.mjs");
 export interface ZaimWebMemoEditInput extends ZaimWebEditTarget {
   /** 書き込むメモの本文。空文字ならメモを消す。 */
   comment: string;
-  /** 立てると**保存だけ行わない**。画面の当て方を確かめるためのモード。 */
+  /** 立てると**「更新する」だけ押さない**。画面の当て方を確かめるためのモード。 */
   dryRun?: boolean | undefined;
 }
 

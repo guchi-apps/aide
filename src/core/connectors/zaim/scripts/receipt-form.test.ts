@@ -8,9 +8,11 @@ import {
   monthsBetween,
   parseAmountValue,
   parseMonthHeader,
+  pickFilledRowIndex,
   pickGenreIndex,
   readMenuItems,
-  resolveReceiptEditUrl,
+  receiptEditTriggerSelector,
+  resolveReceiptListUrl,
 } from "./receipt-form.mjs";
 
 /**
@@ -164,17 +166,61 @@ describe("amountDigits / parseAmountValue", () => {
   });
 });
 
-describe("resolveReceiptEditUrl", () => {
+describe("resolveReceiptListUrl", () => {
   afterEach(() => {
-    delete process.env.ZAIM_RECEIPT_EDIT_URL_BASE;
+    delete process.env.ZAIM_MONEY_URL;
   });
 
-  it("moneyIdから編集画面のURLを組み立てる", () => {
-    assert.equal(resolveReceiptEditUrl(10228209053), "https://zaim.net/money/10228209053/edit");
+  it("明細の日付の月で一覧のURLを組み立てる（編集画面は直接開かない）", () => {
+    assert.equal(resolveReceiptListUrl("2026-09-03"), "https://zaim.net/money?month=202609");
   });
 
-  it("環境変数で基点URLを上書きできる", () => {
-    process.env.ZAIM_RECEIPT_EDIT_URL_BASE = "https://example.test/money";
-    assert.equal(resolveReceiptEditUrl(1), "https://example.test/money/1/edit");
+  it("環境変数で基点URLを上書きできる（巡回と同じ ZAIM_MONEY_URL）", () => {
+    process.env.ZAIM_MONEY_URL = "https://example.test/money";
+    assert.equal(resolveReceiptListUrl("2026-12-31"), "https://example.test/money?month=202612");
+  });
+
+  it("YYYY-MM-DD でなければ例外にする（別の月の一覧を開かない）", () => {
+    assert.throws(() => resolveReceiptListUrl("2026/09/03"));
+    assert.throws(() => resolveReceiptListUrl(""));
+  });
+});
+
+describe("receiptEditTriggerSelector", () => {
+  it("一覧の行が持つ data-url で対象の明細を当てる", () => {
+    assert.equal(
+      receiptEditTriggerSelector(10228209053),
+      '[data-url*="/money/10228209053/edit"]',
+    );
+  });
+
+  it("桁が違う別の明細には部分一致しない（直前の / まで含めて照合する）", () => {
+    // `/money/1/edit` は、`/money/11/edit` の部分文字列ではない。
+    assert.equal("/money/11/edit".includes("/money/1/edit"), false);
+    assert.equal(receiptEditTriggerSelector(1), '[data-url*="/money/1/edit"]');
+  });
+
+  it("正の整数でなければ例外にする（セレクタへ任意の文字列を混ぜない）", () => {
+    assert.throws(() => receiptEditTriggerSelector(0));
+    assert.throws(() => receiptEditTriggerSelector(-1));
+    assert.throws(() => receiptEditTriggerSelector(1.5));
+    assert.throws(() => receiptEditTriggerSelector("1] , [x" as unknown as number));
+  });
+});
+
+describe("pickFilledRowIndex", () => {
+  it("金額が入っている行がちょうど1つなら、その行を選ぶ（空の行は無視する）", () => {
+    assert.equal(pickFilledRowIndex([null, 1880, null]), 1);
+    assert.equal(pickFilledRowIndex([1880, null, null]), 0);
+  });
+
+  it("金額が入っている行が無ければ決められない", () => {
+    assert.equal(pickFilledRowIndex([null, null, null]), -1);
+    assert.equal(pickFilledRowIndex([0, null]), -1);
+    assert.equal(pickFilledRowIndex([]), -1);
+  });
+
+  it("複数品目の明細はどの行か決められない", () => {
+    assert.equal(pickFilledRowIndex([500, 1380, null]), -1);
   });
 });
