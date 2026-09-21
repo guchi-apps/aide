@@ -32,6 +32,17 @@ const FONT_SANS =
 const FONT_MONO = 'ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace';
 
 /**
+ * 図から移動した一覧の行を目立たせる動き。3.5秒（70%）は淡い色を保ち、残りの1.5秒で消える。
+ * **時間を変えるのは `.apps li` の `animation` の秒数だけ**で、JSは時間を持たない。
+ *
+ * 同じ動きを名前だけ変えて2つ出す。`:target`（直接URL・戻る操作・JS無効）と `.arrived`（JSでの移動）で
+ * 名前が違えば、`:target` が残っていても `.arrived` を付け直したときに最初からやり直せる。
+ * 名前が同じだと、規則が当たり続けるためアニメーションが再開しない。
+ */
+const ARRIVE_KEYFRAMES = (name: string) =>
+  `@keyframes ${name}{0%,70%{background:var(--focus);outline-color:var(--focus-line)}100%{background:transparent;outline-color:transparent}}`;
+
+/**
  * 配色は明暗の2組。切り替えスイッチは置かず、端末の設定にそのまま従う。
  * 差し色（青）は「読む・AIDEへ流れる」、茶（`--wr`）は「書く・AIDEから流れる」に使う
  * （アプリ連携の図）。赤（`--bad`）はエラー表示にしか使わない。
@@ -150,7 +161,11 @@ svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
 .apps li{padding:.55rem 0;border-bottom:1px solid var(--line-2);display:grid;
  grid-template-columns:minmax(0,1fr) auto;gap:.1rem .6rem;align-items:baseline;scroll-margin-top:1rem}
 .apps li:last-child{border-bottom:0}
-.apps li:target{background:var(--focus);outline:1px solid var(--focus-line);outline-offset:0}
+.apps li:target,.apps li.arrived{outline:1px solid transparent;outline-offset:0}
+.apps li:target{animation:arrive 5s ease-out forwards}
+.apps li.arrived{animation:arrive-again 5s ease-out forwards}
+${ARRIVE_KEYFRAMES("arrive")}
+${ARRIVE_KEYFRAMES("arrive-again")}
 .apps .nm{font-family:${FONT_MONO};font-size:.86rem;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
 .apps .dir{display:flex;gap:.25rem}
 .b{font-size:.7rem;font-weight:700;padding:0 .4rem;border:1px solid;white-space:nowrap}
