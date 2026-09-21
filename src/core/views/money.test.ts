@@ -1,38 +1,53 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 
-import { summarizeAccountFreshness, summarizeFixedCosts } from "./money.ts";
-import { tokyoDate } from "../connectors/subscriptions/index.ts";
-import type { Subscription, SubscriptionsSnapshot } from "../connectors/subscriptions/types.ts";
+import { loadFixedCosts, summarizeAccountFreshness, summarizeFixedCosts } from "./money.ts";
+import type {
+  AssetManagerSubscription,
+  AssetManagerSubscriptionsSnapshot,
+} from "../connectors/asset-manager/types.ts";
 
 /**
  * `summarizeFixedCosts` は純粋関数なので、テストはここに集中させる。
- * 月額換算・次回支払日そのものは subscription-lists 側の計算結果で、こちらの責務ではない。
+ * 月額換算・次回請求日・円換算そのものは Asset Manager 側の計算結果で、こちらの責務ではない。
  */
 
 const REFERENCE_DATE = "2026-08-16";
 
-function subscription(overrides: Partial<Subscription> = {}): Subscription {
+function subscription(overrides: Partial<AssetManagerSubscription> = {}): AssetManagerSubscription {
   return {
-    id: "sub-1",
+    id: 1,
     name: "Netflix",
+    category: "SUBSCRIPTION",
+    categoryLabel: "サブスクリプション",
+    status: "AUTO_RENEWING",
     paymentMethod: "楽天カード",
-    contractStatus: "AUTO_RENEWING",
-    currentPrice: { amount: 1490, currency: "JPY", billingCycle: "MONTHLY", billingInterval: 1 },
+    amount: 1490,
+    currency: "JPY",
     monthlyAmount: 1490,
     monthlyAmountJpy: 1490,
-    nextPayment: { date: "2026-09-05", amount: 1490, currency: "JPY" },
+    nextBillingDay: "2026-09-05",
     ...overrides,
   };
 }
 
-function snapshot(overrides: Partial<SubscriptionsSnapshot> = {}): SubscriptionsSnapshot {
+function snapshot(
+  overrides: Partial<Omit<AssetManagerSubscriptionsSnapshot, "summary">> & {
+    summary?: Partial<AssetManagerSubscriptionsSnapshot["summary"]>;
+  } = {},
+): AssetManagerSubscriptionsSnapshot {
+  const { summary, ...rest } = overrides;
   return {
-    referenceDate: REFERENCE_DATE,
-    usdJpyRate: 152.3,
-    totals: { monthlyByCurrency: { JPY: 1490 }, monthlyJpy: 1490 },
+    status: "ok",
+    asOf: REFERENCE_DATE,
+    summary: {
+      fixedCostMonthlyTotalJpy: 1490,
+      usdJpyRate: 152.3,
+      excludedFromTotal: [],
+      ...summary,
+    },
     subscriptions: [subscription()],
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -44,9 +59,13 @@ describe("summarizeFixedCosts", () => {
     assert.equal(view.unavailable, null);
     assert.equal(view.count, 1);
     assert.deepEqual(view.monthlyByCurrency, [{ currency: "JPY", amount: 1490 }]);
+    assert.equal(view.monthlyJpy, 1490);
+    assert.equal(view.usdJpyRate, 152.3);
     assert.deepEqual(view.items, [
       {
         name: "Netflix",
+        category: "SUBSCRIPTION",
+        categoryLabel: "サブスクリプション",
         monthlyAmount: 1490,
         currency: "JPY",
         contractStatus: "AUTO_RENEWING",
@@ -62,24 +81,91 @@ describe("summarizeFixedCosts", () => {
     ]);
   });
 
-  it("通貨をまたいで合算せず、混在していることを note に断る", () => {
+  it("保険・税金・分割払いも固定費として含め、区分を明細に残す", () => {
     const view = summarizeFixedCosts(
       snapshot({
-        totals: { monthlyByCurrency: { JPY: 1490, USD: 25.98 }, monthlyJpy: 5447 },
+        summary: { fixedCostMonthlyTotalJpy: 2390 },
         subscriptions: [
           subscription(),
           subscription({
-            id: "sub-2",
+            id: 2,
+            name: "火災保険",
+            category: "INSURANCE",
+            categoryLabel: "保険・共済",
+            amount: 900,
+            monthlyAmount: 900,
+            monthlyAmountJpy: 900,
+          }),
+        ],
+      }),
+    );
+
+    assert.equal(view.count, 2);
+    assert.deepEqual(view.monthlyByCurrency, [{ currency: "JPY", amount: 2390 }]);
+    assert.equal(view.monthlyJpy, 2390);
+    assert.deepEqual(
+      view.items.map((item) => [item.name, item.category, item.categoryLabel]),
+      [
+        ["Netflix", "SUBSCRIPTION", "サブスクリプション"],
+        ["火災保険", "INSURANCE", "保険・共済"],
+      ],
+    );
+    assert.match(view.note, /保険・税金・分割払い/);
+  });
+
+  it("次回の支払額は1回あたりの請求額を使い、月額換算とは別に持つ", () => {
+    const view = summarizeFixedCosts(
+      snapshot({
+        summary: { fixedCostMonthlyTotalJpy: 186 },
+        subscriptions: [
+          subscription({
+            name: "ドメイン（年払い）",
+            amount: 2232,
+            monthlyAmount: 186,
+            monthlyAmountJpy: 186,
+            nextBillingDay: "2026-11-23",
+          }),
+          subscription({
+            id: 2,
+            name: "iCloud",
+            amount: 180,
+            monthlyAmount: 180,
+            monthlyAmountJpy: 180,
+            nextBillingDay: "2026-08-23",
+          }),
+        ],
+      }),
+    );
+
+    // 年払いは31日より先なので予定に出ず、月額換算のほうだけが明細に載る。
+    assert.deepEqual(view.upcoming, [
+      { name: "iCloud", date: "2026-08-23", amount: 180, currency: "JPY" },
+    ]);
+    assert.equal(view.items[0]?.monthlyAmount, 186);
+  });
+
+  it("通貨をまたいで合算せず、混在していることを note に断る", () => {
+    const view = summarizeFixedCosts(
+      snapshot({
+        summary: { fixedCostMonthlyTotalJpy: 5447 },
+        subscriptions: [
+          subscription(),
+          subscription({
+            id: 2,
             name: "GitHub Copilot",
-            currentPrice: {
-              amount: 100,
-              currency: "USD",
-              billingCycle: "YEARLY",
-              billingInterval: 1,
-            },
+            amount: 100,
+            currency: "USD",
             monthlyAmount: 8.33,
             monthlyAmountJpy: 1269,
-            nextPayment: { date: "2026-12-01", amount: 100, currency: "USD" },
+            nextBillingDay: "2026-12-01",
+          }),
+          subscription({
+            id: 3,
+            name: "ChatGPT Plus",
+            amount: 17.65,
+            currency: "USD",
+            monthlyAmount: 17.65,
+            monthlyAmountJpy: 2688,
           }),
         ],
       }),
@@ -94,19 +180,17 @@ describe("summarizeFixedCosts", () => {
     assert.match(view.note, /参考値/);
   });
 
-  it("為替レートが取れていなければ円換算を出さず、その旨を note に残す", () => {
+  it("円換算できない契約があれば円換算の合計を出さず、その旨と契約名を note に残す", () => {
     const view = summarizeFixedCosts(
       snapshot({
-        usdJpyRate: null,
-        totals: { monthlyByCurrency: { USD: 25.98 }, monthlyJpy: null },
+        summary: { usdJpyRate: null, fixedCostMonthlyTotalJpy: 1490, excludedFromTotal: ["ChatGPT Plus"] },
         subscriptions: [
+          subscription(),
           subscription({
-            currentPrice: {
-              amount: 25.98,
-              currency: "USD",
-              billingCycle: "MONTHLY",
-              billingInterval: 1,
-            },
+            id: 2,
+            name: "ChatGPT Plus",
+            amount: 25.98,
+            currency: "USD",
             monthlyAmount: 25.98,
             monthlyAmountJpy: null,
           }),
@@ -114,19 +198,21 @@ describe("summarizeFixedCosts", () => {
       }),
     );
 
+    // 部分的な合計（1490円）を返すと、実際より少ない額が固定費として読まれる。
     assert.equal(view.monthlyJpy, null);
     assert.equal(view.usdJpyRate, null);
     assert.match(view.note, /為替レートを取得できなかった/);
+    assert.match(view.note, /ChatGPT Plus/);
   });
 
   it("支払予定は31日以内だけを日付の昇順で返す", () => {
     const view = summarizeFixedCosts(
       snapshot({
         subscriptions: [
-          subscription({ id: "a", name: "31日後（含む）", nextPayment: { date: "2026-09-16", amount: 100, currency: "JPY" } }),
-          subscription({ id: "b", name: "32日後（含まない）", nextPayment: { date: "2026-09-17", amount: 200, currency: "JPY" } }),
-          subscription({ id: "c", name: "当日（含む）", nextPayment: { date: REFERENCE_DATE, amount: 300, currency: "JPY" } }),
-          subscription({ id: "d", name: "支払予定なし", nextPayment: null }),
+          subscription({ id: 1, name: "31日後（含む）", amount: 100, nextBillingDay: "2026-09-16" }),
+          subscription({ id: 2, name: "32日後（含まない）", amount: 200, nextBillingDay: "2026-09-17" }),
+          subscription({ id: 3, name: "当日（含む）", amount: 300, nextBillingDay: REFERENCE_DATE }),
+          subscription({ id: 4, name: "支払予定なし", nextBillingDay: null }),
         ],
       }),
     );
@@ -142,7 +228,7 @@ describe("summarizeFixedCosts", () => {
 
   it("契約が1件も無くても configured のまま空で返す", () => {
     const view = summarizeFixedCosts(
-      snapshot({ totals: { monthlyByCurrency: {}, monthlyJpy: 0 }, subscriptions: [] }),
+      snapshot({ summary: { fixedCostMonthlyTotalJpy: 0 }, subscriptions: [] }),
     );
 
     assert.equal(view.configured, true);
@@ -152,23 +238,36 @@ describe("summarizeFixedCosts", () => {
     assert.deepEqual(view.upcoming, []);
   });
 
+  it("解約済みが混ざっていても、いま払っているものには数えない", () => {
+    const view = summarizeFixedCosts(
+      snapshot({
+        subscriptions: [
+          subscription(),
+          subscription({ id: 2, name: "解約済み", status: "ENDED", nextBillingDay: null, monthlyAmount: 980 }),
+        ],
+      }),
+    );
+
+    assert.equal(view.count, 1);
+    assert.deepEqual(view.monthlyByCurrency, [{ currency: "JPY", amount: 1490 }]);
+    assert.deepEqual(
+      view.items.map((item) => item.name),
+      ["Netflix"],
+    );
+  });
+
   it("契約状況と支払方法を明細へそのまま通す", () => {
     const view = summarizeFixedCosts(
       snapshot({
-        totals: { monthlyByCurrency: { JPY: 2470 }, monthlyJpy: 2470 },
+        summary: { fixedCostMonthlyTotalJpy: 2470 },
         subscriptions: [
           subscription(),
           subscription({
-            id: "sub-2",
+            id: 2,
             name: "解約予定のサービス",
             paymentMethod: "三菱UFJ銀行",
-            contractStatus: "SCHEDULED_TO_END",
-            currentPrice: {
-              amount: 980,
-              currency: "JPY",
-              billingCycle: "MONTHLY",
-              billingInterval: 1,
-            },
+            status: "SCHEDULED_TO_END",
+            amount: 980,
             monthlyAmount: 980,
             monthlyAmountJpy: 980,
           }),
@@ -191,32 +290,15 @@ describe("summarizeFixedCosts", () => {
   it("支払方法別の月額を通貨ごとに金額の大きい順でまとめる", () => {
     const view = summarizeFixedCosts(
       snapshot({
-        totals: { monthlyByCurrency: { JPY: 3450 }, monthlyJpy: 3450 },
+        summary: { fixedCostMonthlyTotalJpy: 3450 },
         subscriptions: [
           subscription(),
+          subscription({ id: 2, name: "Spotify", amount: 980, monthlyAmount: 980, monthlyAmountJpy: 980 }),
           subscription({
-            id: "sub-2",
-            name: "Spotify",
-            paymentMethod: "楽天カード",
-            currentPrice: {
-              amount: 980,
-              currency: "JPY",
-              billingCycle: "MONTHLY",
-              billingInterval: 1,
-            },
-            monthlyAmount: 980,
-            monthlyAmountJpy: 980,
-          }),
-          subscription({
-            id: "sub-3",
+            id: 3,
             name: "電気",
             paymentMethod: "三菱UFJ銀行",
-            currentPrice: {
-              amount: 980,
-              currency: "JPY",
-              billingCycle: "MONTHLY",
-              billingInterval: 1,
-            },
+            amount: 980,
             monthlyAmount: 980,
             monthlyAmountJpy: 980,
           }),
@@ -233,30 +315,22 @@ describe("summarizeFixedCosts", () => {
   it("同じ支払方法でも通貨をまたいで加算しない", () => {
     const view = summarizeFixedCosts(
       snapshot({
-        totals: { monthlyByCurrency: { JPY: 1490, USD: 25.98 }, monthlyJpy: 5447 },
+        summary: { fixedCostMonthlyTotalJpy: 5447 },
         subscriptions: [
           subscription(),
           subscription({
-            id: "sub-2",
+            id: 2,
             name: "GitHub Copilot",
-            currentPrice: {
-              amount: 12.99,
-              currency: "USD",
-              billingCycle: "MONTHLY",
-              billingInterval: 1,
-            },
+            amount: 12.99,
+            currency: "USD",
             monthlyAmount: 12.99,
             monthlyAmountJpy: 1978,
           }),
           subscription({
-            id: "sub-3",
+            id: 3,
             name: "ChatGPT Plus",
-            currentPrice: {
-              amount: 12.99,
-              currency: "USD",
-              billingCycle: "MONTHLY",
-              billingInterval: 1,
-            },
+            amount: 12.99,
+            currency: "USD",
             monthlyAmount: 12.99,
             monthlyAmountJpy: 1978,
           }),
@@ -269,6 +343,77 @@ describe("summarizeFixedCosts", () => {
       { paymentMethod: "楽天カード", currency: "JPY", amount: 1490 },
       { paymentMethod: "楽天カード", currency: "USD", amount: 25.98 },
     ]);
+  });
+});
+
+describe("loadFixedCosts", () => {
+  const KEYS = ["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET", "AIDE_ASSET_MANAGER_URL"] as const;
+  const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
+
+  afterEach(() => {
+    mock.restoreAll();
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it("シークレットが未設定なら取得を試みず、固定費が無いという意味ではないと断る", async () => {
+    delete process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+    const fetchMock = mock.method(globalThis, "fetch");
+
+    const view = await loadFixedCosts();
+
+    assert.equal(view.configured, false);
+    assert.deepEqual(view.unavailable, { source: "asset-manager", reason: "接続が設定されていない" });
+    assert.match(view.note, /固定費が無いという意味ではない/);
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("Asset Manager の一覧を畳んで返す（解約済みは要求しない）", async () => {
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = "secret-value";
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    const fetchMock = mock.method(globalThis, "fetch", async (input: unknown, init?: RequestInit) => {
+      assert.equal(input, "https://asset.example.test/api/subscriptions");
+      assert.equal((init?.headers as Record<string, string>)["authorization"], "Bearer secret-value");
+      return new Response(JSON.stringify(snapshot()), { status: 200 });
+    });
+
+    const view = await loadFixedCosts();
+
+    assert.equal(fetchMock.mock.callCount(), 1);
+    assert.equal(view.configured, true);
+    assert.equal(view.unavailable, null);
+    assert.equal(view.count, 1);
+  });
+
+  it("取得に失敗しても投げず、理由をステータスまで丸めて返す（URLとシークレットは載せない）", async () => {
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = "secret-value";
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+
+    for (const [response, reason] of [
+      [new Response("{}", { status: 401 }), "HTTP 401（シークレットが一致しない）"],
+      [new Response("{}", { status: 404 }), "HTTP 404（Asset Manager側で対象ユーザーが見つからない）"],
+      [new Response("<html>Bad Gateway</html>", { status: 502 }), "HTTP 502"],
+      [new Response("<html>not json</html>", { status: 200 }), "JSONとして読めない応答が返った"],
+      [new Response(JSON.stringify({ status: "ok" }), { status: 200 }), "想定と異なる形の応答が返った"],
+    ] as const) {
+      mock.method(globalThis, "fetch", async () => response);
+      const view = await loadFixedCosts();
+      mock.restoreAll();
+
+      assert.equal(view.configured, true);
+      assert.deepEqual(view.unavailable, { source: "asset-manager", reason });
+      assert.equal(view.count, 0);
+      assert.equal(JSON.stringify(view).includes("secret-value"), false);
+      assert.equal(JSON.stringify(view).includes("asset.example.test"), false);
+    }
+
+    mock.method(globalThis, "fetch", async () => {
+      throw new TypeError("fetch failed: https://asset.example.test");
+    });
+    const view = await loadFixedCosts();
+    assert.equal(view.unavailable?.reason, "接続できなかった");
   });
 });
 
@@ -325,14 +470,5 @@ describe("summarizeAccountFreshness", () => {
 
     assert.deepEqual(view.staleAccounts, []);
     assert.match(view.note ?? "", /取得できていない/);
-  });
-});
-
-describe("tokyoDate", () => {
-  it("UTCで前日になる時刻でも日本時間の日付を返す", () => {
-    // UTC 2026-08-15 23:00 は JST 2026-08-16 08:00。
-    assert.equal(tokyoDate(new Date("2026-08-15T23:00:00.000Z")), "2026-08-16");
-    assert.equal(tokyoDate(new Date("2026-08-16T14:59:00.000Z")), "2026-08-16");
-    assert.equal(tokyoDate(new Date("2026-08-16T15:00:00.000Z")), "2026-08-17");
   });
 });

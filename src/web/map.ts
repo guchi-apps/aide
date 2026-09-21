@@ -175,18 +175,12 @@ export const GROUPS: DestinationGroup[] = [
         ],
       },
       {
-        id: "subscription-lists",
-        name: "subscription-lists",
-        dir: "read",
-        what: "月額固定費を読む",
-        uses: ["aide_fixed_costs"],
-      },
-      {
         id: "asset-manager",
         name: "Asset Manager",
         dir: "both",
-        what: "サブスクを読む／登録・料金追加／請求メールを取り込む",
+        what: "月額固定費・サブスクを読む／登録・料金追加／請求メールを取り込む",
         uses: [
+          "aide_fixed_costs",
           "asset_manager_subscriptions",
           "asset_manager_create_subscription",
           "asset_manager_add_subscription_price",

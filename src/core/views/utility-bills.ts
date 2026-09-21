@@ -1,4 +1,4 @@
-import { tokyoDate } from "../connectors/subscriptions/index.ts";
+import { tokyoDate } from "../tokyo-date.ts";
 import { loadZaimOAuthCredentials, type ZaimOAuthCredentials } from "../connectors/zaim/oauth.ts";
 import { fetchZaimPayments, type ZaimApiPayment } from "../connectors/zaim/read.ts";
 import type { ZaimMaster } from "../connectors/zaim/write.ts";

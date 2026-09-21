@@ -75,7 +75,7 @@ describe("アプリ連携の図", () => {
 
   it("読むと書くで矢じりの向きを分ける", () => {
     const svg = renderWideMap();
-    // subscription-lists は読むだけ、aide-bot は書くだけ。
+    // ops-dashboard は読むだけ、aide-bot は書くだけ。
     assert.match(svg, /marker-start="url\(#mw-r\)"/);
     assert.match(svg, /marker-end="url\(#mw-w\)"/);
   });

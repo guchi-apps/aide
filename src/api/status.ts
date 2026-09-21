@@ -213,7 +213,7 @@ export async function runProbes(options: ProbeOptions = {}): Promise<ProbeResult
         detail: summary.unavailable[0]?.reason ?? (summary.configured ? "" : "未設定"),
       };
     }),
-    measure("subscription-lists", async () => {
+    measure("asset-manager", async () => {
       const summary = await buildMoneySummary();
       return {
         ok: summary.fixedCosts.configured && summary.fixedCosts.unavailable === null,

@@ -1,6 +1,6 @@
+import { readAssetManagerConfig } from "../../core/connectors/asset-manager/index.ts";
 import type { Tool, ToolResult } from "../types.ts";
 
-const DEFAULT_ASSET_MANAGER_URL = "https://asset.gucchii.com";
 const REQUEST_TIMEOUT_MS = 8_000;
 
 const PAYMENT_FIELDS = [
@@ -278,12 +278,11 @@ async function responseBody(response: Response): Promise<unknown> {
  * 2xx以外だけ `httpFailure` で `isError: true` にする。
  */
 async function callAssetManager(path: string, request: { method: "GET" | "POST"; body?: unknown }): Promise<ToolResult> {
-  const secret = process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
-  if (!secret) return invalid("未設定（Asset Manager連携用の認証情報がありません）");
+  const config = readAssetManagerConfig();
+  if (!config) return invalid("未設定（Asset Manager連携用の認証情報がありません）");
 
-  const baseUrl = process.env["AIDE_ASSET_MANAGER_URL"] || DEFAULT_ASSET_MANAGER_URL;
-  const endpoint = `${baseUrl.replace(/\/$/, "")}${path}`;
-  const headers: Record<string, string> = { Authorization: `Bearer ${secret}`, Accept: "application/json" };
+  const endpoint = `${config.baseUrl}${path}`;
+  const headers: Record<string, string> = { Authorization: `Bearer ${config.secret}`, Accept: "application/json" };
   if (request.body !== undefined) headers["Content-Type"] = "application/json";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -394,6 +393,7 @@ export const assetManagerImportPaymentTool: Tool = {
  *
  * 応答は加工せずそのまま返す。月額換算・次回請求日・契約状況・円換算は向こうが計算済みで、
  * こちらで再計算すればズレる（`aide_fixed_costs` と同じ「計算はしない」方針）。
+ * `aide_fixed_costs` も同じAPIを読み、月額・支払方法別・31日以内の支払予定へ畳んで返す（#347）。
  */
 export const assetManagerSubscriptionsTool: Tool = {
   name: "asset_manager_subscriptions",
@@ -407,8 +407,9 @@ export const assetManagerSubscriptionsTool: Tool = {
     "status が SCHEDULED_TO_END（解約予定）のものはまだ払っているので summary の合計に含まれる。「解約したもの」として扱うのは ENDED だけ。" +
     "usdJpyRate が null（為替レートを取れなかった）のとき、ドル建ては monthlyAmountJpy が null になり合計から外れる。" +
     "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
-    "aide_fixed_costs は旧ソース（subscription-lists）由来で、こちらは移管先の契約データ。" +
-    "契約が0件のときは Asset Manager へのデータ移行前の可能性があるので、aide_fixed_costs も確認する。",
+    "summary.monthlyTotalJpy などはサブスク区分だけの集計で、保険・税金・分割払いを含む固定費全体は summary.fixedCost* と byCategory にある。" +
+    "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別の合計・31日以内の支払予定へ畳んだ要約で、" +
+    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。",
   inputSchema: {
     type: "object",
     properties: {

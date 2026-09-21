@@ -9,7 +9,7 @@ import type { Tool, ToolResult } from "../types.ts";
  * サブスク契約の全明細まで返っていた。ストック（残高・保有銘柄）とフロー（月額固定費）は
  * 合計に混ぜられない別物で、問いも別々に立つ（`MoneySummary` のコメントも参照）。
  *
- * 分けたことで、残高だけを聞かれたときに subscription-lists を叩かなくなり、
+ * 分けたことで、残高だけを聞かれたときに Asset Manager を叩かなくなり、
  * 固定費だけを聞かれたときにZaimのキャッシュを読まなくなる。
  */
 
@@ -40,15 +40,16 @@ export const balancesTool: Tool = {
 export const fixedCostsTool: Tool = {
   name: "aide_fixed_costs",
   description:
-    "毎月出ていく固定費（サブスクリプション）を返す。通貨別の月額合計・支払方法別の合計・" +
-    "契約ごとの明細（契約状況と支払方法つき）・31日以内の支払予定を含む。" +
+    "毎月出ていく固定費（サブスクリプションに加え、保険・税金・分割払いなど）を返す。通貨別の月額合計・支払方法別の合計・" +
+    "契約ごとの明細（区分・契約状況・支払方法つき）・31日以内の支払予定を含む。" +
     "「毎月の固定費はいくらか」「次の支払は何がいつあるか」「解約予定のサブスクはどれか」" +
     "「どのカードから毎月いくら落ちているか」を尋ねられたときに呼ぶ。" +
     "**残高・保有銘柄は返さない**（それは aide_balances）。" +
     "月額合計は**通貨別で、通貨をまたいで加算していない**。monthlyJpy は円換算の参考値で、" +
     "換算できないものがあれば null になる。呼び出しのたびに取得するため常に最新。" +
     "configured が false なら接続が未設定で、**固定費が無いという意味ではない**。" +
-    "取得元は移管前の subscription-lists で、移管後の一覧は asset_manager_subscriptions が返す。",
+    "取得元は Asset Manager で、asset_manager_subscriptions と同じデータを月額・支払方法別・31日以内の支払予定へ畳んだ要約。" +
+    "契約ごとのプラン・料金改定の履歴・ラベル・契約期間・解約予定の終了日などの詳細が要るときは asset_manager_subscriptions を呼ぶ。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => json(await loadFixedCosts()),
 };
