@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import { describe, it } from "node:test";
-import { handleAsset, headTags, ICONS, manifest, mcpIcons, MANIFEST_PATH } from "./assets.ts";
+import { ASSET_VERSION, handleAsset, headTags, ICONS, manifest, mcpIcons, MANIFEST_PATH, versioned } from "./assets.ts";
 
 interface Captured {
   status: number;
@@ -74,6 +74,14 @@ describe("アイコン配信", () => {
     assert.ok(Number(captured.headers["Content-Length"]) > 0);
   });
 
+  it("版数のクエリは配信に影響しない（パスだけで配る）", async () => {
+    // サーバーは pathname だけを渡してくる。?v= は取り直させるための目印でしかない。
+    const { handled, captured } = await get("/icons/icon-192.png");
+    assert.ok(handled);
+    assert.equal(captured.status, 200);
+    assert.equal(versioned("/icons/icon-192.png"), `/icons/icon-192.png?v=${ASSET_VERSION}`);
+  });
+
   it("担当外のパス・メソッドは処理せず、他のルートに渡す", async () => {
     assert.equal((await get("/mcp")).handled, false);
     assert.equal((await get("/icons/../server.ts")).handled, false);
@@ -84,6 +92,13 @@ describe("アイコン配信", () => {
 describe("PWAマニフェスト", () => {
   it("ホーム画面からアプリ連携ページを開く", () => {
     assert.equal((manifest() as { start_url: string }).start_url, "/map");
+  });
+
+  it("ホーム画面の名前は AIde で、起動画面の地はアイコンの地の色", () => {
+    const parsed = manifest() as { name: string; short_name: string; background_color: string };
+    assert.equal(parsed.name, "AIde");
+    assert.equal(parsed.short_name, "AIde");
+    assert.equal(parsed.background_color, "#a9e0f7");
   });
 
   it("配信され、JSONとして読める", async () => {
@@ -98,7 +113,8 @@ describe("PWAマニフェスト", () => {
     const parsed = manifest() as { icons: { src: string; sizes: string; purpose?: string }[] };
     const paths = new Set(ICONS.map((icon) => icon.path));
     for (const icon of parsed.icons) {
-      assert.ok(paths.has(icon.src), `${icon.src} は配信されていない`);
+      assert.ok(paths.has(icon.src.replace(/\?v=.*$/, "")), `${icon.src} は配信されていない`);
+      assert.ok(icon.src.endsWith(`?v=${ASSET_VERSION}`), `${icon.src} に版数が付いていない`);
     }
     for (const size of ["192x192", "512x512"]) {
       assert.ok(parsed.icons.some((icon) => icon.sizes === size), `${size} が載っていない`);
@@ -112,6 +128,10 @@ describe("head のタグ", () => {
     const html = headTags();
     assert.match(html, /rel="icon"[^>]*favicon-32\.png/);
     assert.match(html, /rel="apple-touch-icon"[^>]*apple-touch-icon\.png/);
+    // 旧アイコンをHTTPキャッシュから使い続けないよう、参照先のURLに版数を付ける。
+    for (const href of html.match(/href="\/icons\/[^"]+"/g) ?? []) {
+      assert.ok(href.includes(`?v=${ASSET_VERSION}"`), `${href} に版数が付いていない`);
+    }
     assert.ok(html.includes(`rel="manifest" href="${MANIFEST_PATH}"`));
   });
 
@@ -127,7 +147,7 @@ describe("MCPで名乗るアイコン", () => {
     const icons = mcpIcons("https://aide.example");
     assert.deepEqual(
       icons.map((icon) => icon.src),
-      ICONS.map((icon) => `https://aide.example${icon.path}`),
+      ICONS.map((icon) => `https://aide.example${versioned(icon.path)}`),
     );
     for (const icon of icons) assert.equal(icon.mimeType, "image/png");
   });

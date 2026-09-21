@@ -1,4 +1,5 @@
 import { headTags } from "./assets.ts";
+import { BRAND_STYLE, logoSize, logoSvg } from "./brand.ts";
 
 /**
  * 人間向けHTMLページの共通レイアウト。
@@ -12,6 +13,15 @@ import { headTags } from "./assets.ts";
  * アイコンとPWAマニフェスト（`src/web/assets.ts`）だけは自分で配信しているため `<head>` に入れる。
  * 実行時依存を増やさない方針（README）と同じ理由で、ここでもテンプレートエンジンは使わない。
  */
+
+/**
+ * 画面左上・ログイン画面のブランド表示。構成図の中央（`map.ts`）と同じワードマーク
+ * （`brand.ts`）で、大きさだけをCSS（`.brand svg`）で変える。
+ * **`AIDE` という文字を並べず、`AIde` のロゴを置く。** 読み上げ用の名前はロゴ自身が持つ。
+ */
+export function brandHtml(): string {
+  return `<span class="brand">${logoSvg(logoSize(26))}</span>`;
+}
 
 export function escapeHtml(value: string): string {
   return value
@@ -48,7 +58,7 @@ const ARRIVE_KEYFRAMES = (name: string) =>
  * （アプリ連携の図）。赤（`--bad`）はエラー表示と「実在しない」印、緑（`--ok`）は「追加」の
  * 印にしか使わない（機能の同期。#355）。色だけに頼らず、＋・－の記号と語も併せて出す。
  */
-const STYLE = `
+const STYLE = `${BRAND_STYLE}
 :root{
  --bg:#eceff2;--panel:#fff;--panel-2:#f5f7f9;
  --ink:#131b22;--ink-2:#3c4a55;--muted:#67757f;
@@ -81,7 +91,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,svg a:focus-visible{out
 /* ---- ヘッダー ---- */
 .topbar{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;
  padding:.7rem 1rem;background:var(--panel);border-bottom:1px solid var(--line)}
-.brand{font-family:${FONT_MONO};font-weight:600;letter-spacing:.14em;color:var(--accent);font-size:.85rem}
+.brand{display:inline-flex;line-height:0}
+.brand svg{height:1.65rem;width:auto}
+.box .brand svg{height:2.1rem}
 nav{display:flex;gap:.15rem;margin-right:auto;flex-wrap:wrap}
 nav a{font-size:.85rem;text-decoration:none;color:var(--muted);padding:.25rem .6rem;border:1px solid transparent}
 nav a.on{color:var(--ink);border-color:var(--line);background:var(--panel-2)}
@@ -146,9 +158,8 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .n-name{fill:var(--ink);font-size:14px;font-weight:600}
 .n-sub{fill:var(--muted);font-size:11.5px}
 .n-via{fill:var(--accent);font-size:11px;font-family:${FONT_MONO};font-weight:600}
-.hub-box{fill:var(--accent)}
-.hub-name{fill:var(--on-accent);font-size:26px;font-weight:700;letter-spacing:.14em;font-family:${FONT_MONO}}
-.hub-sub{fill:var(--on-accent);font-size:11.5px;opacity:.85}
+.hub-box{fill:var(--panel);stroke:var(--accent);stroke-width:1.5}
+.hub-sub{fill:var(--ink-2);font-size:11.5px}
 .g-name{fill:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.1em}
 .row-box{fill:var(--panel);stroke:var(--line)}
 svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
@@ -334,7 +345,7 @@ export function renderPage(options: PageOptions): string {
   const header =
     options.centered && !nav
       ? ""
-      : `<div class="topbar"><span class="brand">AIDE</span>${nav}${options.headerAction ?? ""}</div>`;
+      : `<div class="topbar">${brandHtml()}${nav}${options.headerAction ?? ""}</div>`;
   const footer = options.footer ? `<footer>${options.footer}</footer>` : "";
   const main = options.centered ? options.body : `<main>${options.body}</main>`;
 
