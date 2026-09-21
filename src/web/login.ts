@@ -114,14 +114,26 @@ export async function currentSession(
   return session;
 }
 
+const ACCOUNT_MENU_ID = "account-menu";
+
+const ICON_USER = `<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.2" r="3.9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4.4 20.2c.6-3.6 3.7-5.6 7.6-5.6s7 2 7.6 5.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+const ICON_LOGOUT = `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 4.5H6.2a1.7 1.7 0 0 0-1.7 1.7v11.6a1.7 1.7 0 0 0 1.7 1.7h3.3M15 8l4 4-4 4M19 12H9.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 /**
- * ヘッダー右端のログイン中の表示とログアウト。認証が無効な環境では何も出さない
- * （ログアウトしても素通しのままで、押す意味が無い）。
+ * ヘッダー右上のアカウントボタンと、押すと開くメニュー（ログイン中のメールアドレスとログアウト）。
+ * 認証が無効な環境では何も出さない（ログアウトしても素通しのままで、押す意味が無い）。
+ *
+ * 開閉はブラウザ標準のポップオーバー（`popover`）に任せ、JavaScriptは足さない。
+ * 外側を押す・Escキー・もう一度ボタンを押すで閉じる処理と、開閉状態の読み上げはブラウザが持つ。
+ * 位置決めのCSSは `src/web/layout.ts` の `.account-menu`。
  */
 export function accountAction(session: StatusSession | null, authEnabled: boolean): string {
   if (!authEnabled) return "";
-  const who = session?.email ? `<span class="who">${escapeHtml(session.email)}</span>` : "";
-  return `${who}<form method="post" action="/status/logout"><button class="linkish" type="submit">ログアウト</button></form>`;
+  const who = session?.email
+    ? `<div class="account-who"><span class="lb">ログイン中</span><span class="em">${escapeHtml(session.email)}</span></div>`
+    : "";
+  return `<div class="account"><button class="account-btn" type="button" popovertarget="${ACCOUNT_MENU_ID}" aria-label="アカウント" aria-haspopup="true">${ICON_USER}</button>
+<div id="${ACCOUNT_MENU_ID}" class="account-menu" popover="auto" role="group" aria-label="アカウント">${who}<form method="post" action="/status/logout"><button class="account-out" type="submit">${ICON_LOGOUT}ログアウト</button></form></div></div>`;
 }
 
 /**
