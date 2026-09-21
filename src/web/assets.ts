@@ -34,9 +34,29 @@ export const ICONS: IconAsset[] = [
 /** マニフェストの配信パス。 */
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
-/** アイコンの淡い青と濃い青に合わせた色。ブラウザのUIとPWAの起動画面に出る。 */
+/** ブラウザのUIの色。 */
 export const THEME_COLOR = "#2f91bd";
-const BACKGROUND_COLOR = "#d8f2fa";
+/** アイコンの地の色（`icon.svg` の背景）と揃える。PWAの起動画面の地になる。 */
+const BACKGROUND_COLOR = "#a9e0f7";
+
+/**
+ * アイコンの版。**絵を差し替えたら上げる。**
+ *
+ * アイコンは `max-age=86400`、マニフェストは `max-age=3600` で配信していて、URLが同じだと
+ * ブラウザは期限まで古い絵を使い続ける。HTMLとマニフェストが指すURLへ `?v=` を付けておけば、
+ * 版を上げるだけで参照先が変わり、期限を待たずに新しい絵を取りにいく。Service Worker は
+ * 使っていないので、旧アイコンを抱えるキャッシュはHTTPキャッシュだけ。
+ *
+ * サーバーはクエリを見ない（パスだけで配る）ので、`?v=` は取り直させるための目印でしかない。
+ * ホーム画面へ追加済みのiPhoneのアイコンは追加時点のコピーで、この仕組みでは変わらない
+ * （削除して追加し直す）。
+ */
+export const ASSET_VERSION = "2";
+
+/** 版数付きのアイコンURL。HTML・マニフェスト・MCPが名乗るURLは、すべてこれを通す。 */
+export function versioned(path: string): string {
+  return `${path}?v=${ASSET_VERSION}`;
+}
 
 const ICON_DIR = new URL("./icons/", import.meta.url);
 
@@ -60,13 +80,13 @@ async function readIcon(file: string): Promise<Buffer> {
  */
 export function manifest(): unknown {
   const icons = ICONS.filter((icon) => icon.size >= 192).map((icon) => ({
-    src: icon.path,
+    src: versioned(icon.path),
     sizes: `${icon.size}x${icon.size}`,
     type: "image/png",
   }));
   return {
-    name: "AIDE",
-    short_name: "AIDE",
+    name: "AIde",
+    short_name: "AIde",
     description: "生活情報まわりの共通バックエンド／ハブ。",
     start_url: "/map",
     scope: "/",
@@ -75,9 +95,9 @@ export function manifest(): unknown {
     background_color: BACKGROUND_COLOR,
     icons: [
       ...icons,
-      // 端末側で好きな形に切り抜いてよい版。絵が中心から半径193pxに収まっており
+      // 端末側で好きな形に切り抜いてよい版。絵が中心から半径199pxに収まっており
       // （maskableの安全領域は204.8px）、円形に切り抜かれても欠けない。
-      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: versioned("/icons/icon-512.png"), sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }
@@ -94,7 +114,7 @@ export function manifest(): unknown {
  */
 export function mcpIcons(baseUrl: string): McpIcon[] {
   return ICONS.map((icon) => ({
-    src: `${baseUrl}${icon.path}`,
+    src: `${baseUrl}${versioned(icon.path)}`,
     mimeType: "image/png",
     sizes: [`${icon.size}x${icon.size}`],
   }));
@@ -106,9 +126,9 @@ export function mcpIcons(baseUrl: string): McpIcon[] {
  */
 export function headTags(options: { manifest: boolean } = { manifest: true }): string {
   return [
-    `<link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">`,
-    `<link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">`,
-    `<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">`,
+    `<link rel="icon" href="${versioned("/icons/favicon-32.png")}" sizes="32x32" type="image/png">`,
+    `<link rel="icon" href="${versioned("/icons/icon-192.png")}" sizes="192x192" type="image/png">`,
+    `<link rel="apple-touch-icon" href="${versioned("/icons/apple-touch-icon.png")}">`,
     options.manifest ? `<link rel="manifest" href="${MANIFEST_PATH}">` : "",
     `<meta name="theme-color" content="${THEME_COLOR}">`,
   ]

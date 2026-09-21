@@ -13,7 +13,7 @@ import {
   type SupabaseAuthConfig,
 } from "../auth/supabase.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
-import { escapeHtml, isSiteNavPath, renderPage, siteNavLabel } from "./layout.ts";
+import { brandHtml, escapeHtml, isSiteNavPath, renderPage, siteNavLabel } from "./layout.ts";
 import {
   clearHandshakeCookie,
   handshakeCookie,
@@ -146,14 +146,14 @@ export function renderLoginPage(options: {
 
   const body = options.google
     ? `<div class="box">
-<span class="brand">AIDE</span>
+${brandHtml()}
 <h1>${escapeHtml(heading)}</h1>
 <p>許可されたGoogleアカウントだけが開けます。</p>
 ${error}
 <a class="signin" href="/status/auth/start?next=${encodeURIComponent(next)}">Googleでログイン</a>
 </div>`
     : `<form class="box" method="post" action="/status/login">
-<span class="brand">AIDE</span>
+${brandHtml()}
 <h1>${escapeHtml(heading)}</h1>
 <p>Claudeアプリの接続に使うパスワードと同じです。</p>
 <input type="hidden" name="next" value="${escapeHtml(next)}">

@@ -1,23 +1,19 @@
 import { describeFailure, fetchPrinterState, readMyRoomConfig } from "../connectors/myroom/index.ts";
-import type {
-  MyRoomFailure,
-  MyRoomPrinter,
-  MyRoomPrinterAmsSlot,
-  MyRoomPrinterError,
-  MyRoomPrinterSnapshot,
-} from "../connectors/myroom/types.ts";
+import type { MyRoomFailure, MyRoomPrinter, MyRoomPrinterSnapshot } from "../connectors/myroom/types.ts";
 
 /**
  * 3Dプリンター（Bambu Lab A1 mini）の状態のビュー（#378）。
  *
  * 収集はサブPCの常駐プロセスがローカルMQTTから行い、myroom が正規化して内部API
- * （`GET /api/internal/printer-state`）で返す。**AIDEは集め直さず、その値を「いまプリンターは
+ * （`GET /api/internal/bambu/printer`。myroom#428）で返す。**AIDEは集め直さず、その値を「いまプリンターは
  * どうなっているか」に答えられる形へ畳む。**
  *
  * **鮮度を必ず返す。そして、鮮度が切れた値を現在の状態として返さない。** プリンターは電源を切れば
  * 黙って消える。myroom が最後に受け取った「印刷中 75%」をそのまま返すと、電源が切れた後も
  * 「まだ印刷中で、あと12分」と答え続けることになる。鮮度が `fresh` でないときは現在の値
  * （`printer`）を空にし、最後に確認できた値は `lastKnown` へ**時刻付きで分けて**返す。
+ * myroom も同じ考えで、`online` でないときは `printer` を null にして最後の値を `lastKnown` へ
+ * 分けて返す。**myroom の `lastKnown` を現在の値として読むことは、どの経路でもしない。**
  * 残り時間・終了予測・温度は時間が経てば意味を失うので、`lastKnown` にも入れない。
  *
  * **キャッシュを挟まず、呼ばれるたびに取得する。** 進捗も完了も鮮度そのものが価値で、
@@ -33,18 +29,22 @@ export type PrinterState = "idle" | "preparing" | "printing" | "paused" | "finis
 /**
  * 値がどこまで新しいか。**`fresh` 以外の値は現在の状態として扱わない。**
  *
- * - `fresh`: 最終更新がしきい値以内で、接続もできている
- * - `stale`: 最終更新がしきい値を超えている（電源断・収集プロセスの停止・ネットワーク断）
- * - `disconnected`: 収集プロセスがプリンターと接続できていないと myroom が報告している
- * - `unknown`: 最終更新時刻が読めず、新しいかを判断できない
- * - `never`: 収集が一度も届いていない（myroom 側の未設定・未起動）
+ * - `fresh`: myroom が `online` と報告し、収集からの最終受信がしきい値以内
+ * - `stale`: 収集からの受信が止まっている（`collector_stale`。サブPCの常駐が落ちている・ネットワーク断）
+ * - `disconnected`: 収集は生きているがプリンターに繋がっていない（`printer_offline`。電源断など）
+ * - `unknown`: 最終受信時刻や接続状態が読めず、新しいかを判断できない
+ * - `never`: 収集が一度も届いていない（`no_data`。myroom 側の未設定・未起動）
  */
 export type PrinterFreshness = "fresh" | "stale" | "disconnected" | "unknown" | "never";
 
-/** myroom が鮮度のしきい値を返さなかったときの既定。5分ごとの `pushall` の間隔に余裕を足した値。 */
-export const DEFAULT_STALE_THRESHOLD_MINUTES = 10;
+/**
+ * myroom が鮮度のしきい値を返さなかったときの既定。myroom の `BAMBU_STALE_SECONDS` の既定と同じ
+ * （収集は変化が無くても60秒ごとに送ってくる）。
+ */
+export const DEFAULT_STALE_THRESHOLD_SECONDS = 180;
 
 const NAME_MAX = 120;
+const ERROR_SEVERITY_MAX = 20;
 const ERROR_MESSAGE_MAX = 200;
 const ERROR_CODE_MAX = 40;
 const AMS_TEXT_MAX = 30;
@@ -65,7 +65,7 @@ export interface PrinterError {
 
 /** 鮮度が `fresh` のときだけ返す、いまの状態。 */
 export interface PrinterReading {
-  name: string | null;
+  /** プリンターから最後にメッセージを受けた時刻。値はこの時点のもの。 */
   updatedAt: string;
   state: PrinterState;
   jobName: string | null;
@@ -80,6 +80,7 @@ export interface PrinterReading {
   nozzleTargetTemperature: number | null;
   bedTemperature: number | null;
   bedTargetTemperature: number | null;
+  /** `silent` / `standard` / `sport` / `ludicrous`。 */
   speedMode: string | null;
   ams: PrinterAmsSlot[];
   errors: PrinterError[];
@@ -118,12 +119,12 @@ export interface PrinterStatus {
   fresh: boolean;
   /** 鮮度と、その値をどう読むべきかの1行。 */
   message: string;
-  /** プリンターから最後に受信した時刻。 */
+  /** プリンターから最後にメッセージを受けた時刻（myroom の `lastMessageAt`）。 */
   measuredAt: string | null;
   /** 最終更新からの経過分数（AIDEが `measuredAt` から数えたもの）。 */
   ageMinutes: number | null;
-  /** 鮮度切れとみなす分数。 */
-  staleThresholdMinutes: number;
+  /** 収集が止まったとみなす秒数（myroom の `staleThresholdSeconds`）。 */
+  staleThresholdSeconds: number;
   problems: PrinterProblem[];
   /** 現在の状態。`fresh` のときだけ。 */
   printer: PrinterReading | null;
@@ -197,31 +198,46 @@ export function normalizePrinterState(raw: unknown): PrinterState {
   }
 }
 
-function summarizeAms(slots: MyRoomPrinterAmsSlot[] | null | undefined): PrinterAmsSlot[] {
-  if (!Array.isArray(slots)) return [];
-  return slots.slice(0, AMS_SLOTS_MAX).map((slot) => ({
-    slot: num(slot?.slot),
-    material: text(slot?.material, AMS_TEXT_MAX),
-    color: text(slot?.color, AMS_TEXT_MAX),
-    remainPercent: num(slot?.remainPercent),
-  }));
+/** AMS Lite のスロットを1列に並べる。AMS Lite は1台なので、スロット番号だけで区別できる。 */
+function summarizeAms(ams: MyRoomPrinter["ams"]): PrinterAmsSlot[] {
+  const units = ams?.units;
+  if (!Array.isArray(units)) return [];
+  const slots: PrinterAmsSlot[] = [];
+  for (const unit of units) {
+    if (!Array.isArray(unit?.slots)) continue;
+    for (const slot of unit.slots) {
+      slots.push({
+        slot: num(slot?.slot),
+        material: text(slot?.material, AMS_TEXT_MAX),
+        color: text(slot?.color, AMS_TEXT_MAX),
+        remainPercent: num(slot?.remainPercent),
+      });
+    }
+  }
+  return slots.slice(0, AMS_SLOTS_MAX);
 }
 
-function summarizeErrors(errors: MyRoomPrinterError[] | null | undefined): PrinterError[] {
-  if (!Array.isArray(errors)) return [];
+/**
+ * HMS の重大度のうち、エラーとして扱うもの。myroom の通知（`bambu._error_codes`）と同じ線引きで、
+ * `common`・`info` は数えない（情報レベルで「エラーが発生」と鳴らさない）。
+ */
+const HMS_ERROR_SEVERITIES: Record<string, string> = { fatal: "致命的", serious: "重大" };
+
+function summarizeErrors(errors: MyRoomPrinter["errors"]): PrinterError[] {
   const summarized: PrinterError[] = [];
-  for (const error of errors.slice(0, ERRORS_MAX)) {
-    const rawCode = error?.code;
-    const code =
-      typeof rawCode === "number" && Number.isFinite(rawCode)
-        ? String(rawCode)
-        : text(rawCode, ERROR_CODE_MAX);
-    const message = text(error?.message, ERROR_MESSAGE_MAX);
-    // コードも本文も無いものは何も伝えないので捨てる。
-    if (code === null && message === null) continue;
-    summarized.push({ code, message });
+  const printErrorCode = text(errors?.printError?.code, ERROR_CODE_MAX);
+  if (printErrorCode !== null) {
+    summarized.push({ code: printErrorCode, message: "印刷エラー" });
   }
-  return summarized;
+  const hms = Array.isArray(errors?.hms) ? errors.hms : [];
+  for (const entry of hms) {
+    const severity = text(entry?.severity, ERROR_SEVERITY_MAX);
+    const label = severity === null ? undefined : HMS_ERROR_SEVERITIES[severity];
+    const code = text(entry?.code, ERROR_CODE_MAX);
+    if (label === undefined || code === null) continue;
+    summarized.push({ code, message: `HMS（${label}）` });
+  }
+  return summarized.slice(0, ERRORS_MAX);
 }
 
 /** エラー集合の同一性を表す署名。通知が「同じエラーが続いている」ことを見分けるのに使う。 */
@@ -238,22 +254,23 @@ function minutesBetween(from: Date, to: Date): number {
   return Math.max(0, (to.getTime() - from.getTime()) / 60_000);
 }
 
-function judgeFreshness(
-  printer: MyRoomPrinter,
-  thresholdMinutes: number,
-  now: Date,
-): { freshness: PrinterFreshness; ageMinutes: number | null } {
-  const updatedAt = isoTime(printer.updatedAt);
-  const ageMinutes = updatedAt === null ? null : Math.round(minutesBetween(new Date(updatedAt), now));
+/**
+ * myroom の `connection` を鮮度へ読み替える。
+ *
+ * **`online` と言われても、AIDEが `lastUpdateAt` から数え直した経過秒がしきい値を超えていれば
+ * 切れているとみなす。** 片方だけを信じると、どちらかの時計・判定のずれがそのまま「古い値を
+ * 現在値」にする。知らない `connection` は `unknown`（新しいと推測しない）。
+ */
+function judgeFreshness(snapshot: MyRoomPrinterSnapshot, thresholdSeconds: number, now: Date): PrinterFreshness {
+  if (snapshot.configured === false || snapshot.connection === "no_data") return "never";
+  if (snapshot.connection === "collector_stale" || snapshot.stale === true) return "stale";
+  if (snapshot.connection === "printer_offline") return "disconnected";
+  if (snapshot.connection !== "online" || snapshot.online !== true || !snapshot.printer) return "unknown";
 
-  if (printer.online === false) return { freshness: "disconnected", ageMinutes };
-  if (updatedAt === null) return { freshness: "unknown", ageMinutes };
-  // **myroom の判定（`stale`）とAIDEが数え直した経過分のどちらかが切れていれば切れている。**
-  // 片方だけを信じると、どちらかの時計・判定のずれがそのまま「古い値を現在値」にする。
-  if (printer.stale === true || minutesBetween(new Date(updatedAt), now) > thresholdMinutes) {
-    return { freshness: "stale", ageMinutes };
-  }
-  return { freshness: "fresh", ageMinutes };
+  const lastUpdateAt = isoTime(snapshot.lastUpdateAt);
+  if (lastUpdateAt === null) return "unknown";
+  if (minutesBetween(new Date(lastUpdateAt), now) * 60 > thresholdSeconds) return "stale";
+  return "fresh";
 }
 
 function ageText(ageMinutes: number | null): string {
@@ -266,50 +283,50 @@ function freshnessMessage(freshness: PrinterFreshness, ageMinutes: number | null
       return `プリンターの現在の状態${ageText(ageMinutes)}。`;
     case "stale":
       return (
-        `プリンターからの更新が止まっている${ageText(ageMinutes)}。` +
-        "電源が切れているか、収集が止まっている可能性がある。**現在の状態は分からない**" +
+        `プリンターの状態の収集が止まっている${ageText(ageMinutes)}。` +
+        "サブPCの収集プロセスかネットワークが止まっている可能性がある。**現在の状態は分からない**" +
         "（lastKnown は最後に確認できた時点の値で、現在の値ではない）。"
       );
     case "disconnected":
       return (
         `プリンターに接続できていない${ageText(ageMinutes)}。` +
-        "**現在の状態は分からない**（lastKnown は最後に確認できた時点の値で、現在の値ではない）。"
+        "電源が切れている可能性がある。**現在の状態は分からない**（lastKnown は最後に確認できた時点の値で、現在の値ではない）。"
       );
     case "unknown":
-      return "最終更新の時刻が分からないため、値が新しいか判断できない。**現在の状態としては扱わない。**";
+      return "最終更新の時刻か接続状態が読めないため、値が新しいか判断できない。**現在の状態としては扱わない。**";
     case "never":
       return "プリンターの状態がまだ一度も届いていない（myroom 側で収集が動いていない）。現在の状態は分からない。";
   }
 }
 
 function readingOf(printer: MyRoomPrinter, updatedAt: string): PrinterReading {
-  const state = normalizePrinterState(printer.state);
+  const state = normalizePrinterState(printer.state ?? printer.rawState);
   const ongoing = ONGOING_STATES.includes(state);
-  const remainingMinutes = ongoing ? num(printer.remainingMinutes) : null;
+  const job = printer.job ?? {};
+  const remainingMinutes = ongoing ? num(job.remainingMinutes) : null;
 
   let estimatedEndAt: string | null = null;
   if (ongoing) {
-    estimatedEndAt = isoTime(printer.estimatedEndAt);
+    estimatedEndAt = isoTime(job.estimatedFinishAt);
     if (estimatedEndAt === null && remainingMinutes !== null) {
       estimatedEndAt = new Date(new Date(updatedAt).getTime() + remainingMinutes * 60_000).toISOString();
     }
   }
 
   return {
-    name: text(printer.name, NAME_MAX),
     updatedAt,
     state,
-    jobName: text(printer.jobName, NAME_MAX),
-    progressPercent: num(printer.progressPercent),
-    layer: num(printer.layer),
-    totalLayers: num(printer.totalLayers),
+    jobName: text(job.name, NAME_MAX),
+    progressPercent: num(job.progressPercent),
+    layer: num(job.layer),
+    totalLayers: num(job.totalLayers),
     remainingMinutes,
     estimatedEndAt,
-    nozzleTemperature: num(printer.nozzleTemperature),
-    nozzleTargetTemperature: num(printer.nozzleTargetTemperature),
-    bedTemperature: num(printer.bedTemperature),
-    bedTargetTemperature: num(printer.bedTargetTemperature),
-    speedMode: text(printer.speedMode, AMS_TEXT_MAX),
+    nozzleTemperature: num(printer.nozzle?.temperature),
+    nozzleTargetTemperature: num(printer.nozzle?.target),
+    bedTemperature: num(printer.bed?.temperature),
+    bedTargetTemperature: num(printer.bed?.target),
+    speedMode: text(printer.speed?.mode, AMS_TEXT_MAX),
     ams: summarizeAms(printer.ams),
     errors: summarizeErrors(printer.errors),
   };
@@ -336,18 +353,21 @@ function readingProblems(reading: PrinterReading): PrinterProblem[] {
  * 取得結果を「いまプリンターがどうなっているか」の粒度へ畳む。**純粋関数。テストはここに集中する。**
  */
 export function summarizePrinter(snapshot: MyRoomPrinterSnapshot, now: Date): PrinterStatus {
-  const threshold = num(snapshot.staleThresholdMinutes) ?? DEFAULT_STALE_THRESHOLD_MINUTES;
-  const printer = snapshot.printer ?? null;
+  const threshold = num(snapshot.staleThresholdSeconds) ?? DEFAULT_STALE_THRESHOLD_SECONDS;
+  const freshness = judgeFreshness(snapshot, threshold, now);
+  if (freshness === "never") return blankStatus(now, threshold, "never", []);
 
-  if (printer === null) {
-    return blankStatus(now, threshold, "never", []);
-  }
-
-  const { freshness, ageMinutes } = judgeFreshness(printer, threshold, now);
-  const updatedAt = isoTime(printer.updatedAt);
   const fresh = freshness === "fresh";
-  // 時刻が読めないものは値の出どころが分からないので、鮮度に関わらず値を渡さない。
-  const reading = updatedAt === null ? null : readingOf(printer, updatedAt);
+  // 値の時刻はプリンターから最後に受けたメッセージの時刻。無ければ収集からの最終受信で代える
+  // （収集はプリンターに繋がっている間しか値を更新しないので、それより新しくはならない）。
+  const measuredAt = isoTime(snapshot.lastMessageAt) ?? isoTime(snapshot.lastUpdateAt);
+  const ageMinutes = measuredAt === null ? null : Math.round(minutesBetween(new Date(measuredAt), now));
+
+  // **現在値は myroom の `printer` からしか作らない。** 最後の値は `lastKnown` を優先し、AIDEの
+  // 数え直しで切れた場合（myroom はまだ `online` と言っている）だけ `printer` を最後の値として使う。
+  // 時刻が読めないものは値の出どころが分からないので、どちらにも渡さない。
+  const source = fresh ? snapshot.printer : freshness === "unknown" ? null : (snapshot.lastKnown ?? snapshot.printer);
+  const reading = source && measuredAt !== null ? readingOf(source, measuredAt) : null;
 
   const problems: PrinterProblem[] = [];
   if (!fresh) {
@@ -367,9 +387,9 @@ export function summarizePrinter(snapshot: MyRoomPrinterSnapshot, now: Date): Pr
     freshness,
     fresh,
     message: freshnessMessage(freshness, ageMinutes),
-    measuredAt: updatedAt,
+    measuredAt,
     ageMinutes,
-    staleThresholdMinutes: threshold,
+    staleThresholdSeconds: threshold,
     problems,
     printer: fresh ? reading : null,
     lastKnown:
@@ -408,7 +428,7 @@ function blankStatus(
     message,
     measuredAt: null,
     ageMinutes: null,
-    staleThresholdMinutes: threshold,
+    staleThresholdSeconds: threshold,
     problems: [{ severity: "warn", message }],
     printer: null,
     lastKnown: null,
@@ -424,7 +444,7 @@ export async function buildPrinterStatus(): Promise<PrinterStatus> {
   if (!config) {
     return blankStatus(
       now,
-      DEFAULT_STALE_THRESHOLD_MINUTES,
+      DEFAULT_STALE_THRESHOLD_SECONDS,
       "unknown",
       [{ source: "myroom", reason: "接続が設定されていない" }],
       {
@@ -444,7 +464,7 @@ export async function buildPrinterStatus(): Promise<PrinterStatus> {
     // 取得できなかったこと自体が状態。例外にせず、理由を添えて返す。
     return blankStatus(
       now,
-      DEFAULT_STALE_THRESHOLD_MINUTES,
+      DEFAULT_STALE_THRESHOLD_SECONDS,
       "unknown",
       [{ source: "myroom", reason: describeFailure(cause) }],
       {

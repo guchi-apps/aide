@@ -3,6 +3,7 @@ import { createIssue, DEFAULT_LABELS } from "../core/connectors/github/write.ts"
 import { readGitHubWriteConfig } from "../core/connectors/github/index.ts";
 import { buildToolRegistry } from "../mcp/catalog.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
+import { logoSize, logoSvg, logoWidth } from "./brand.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { ENDPOINTS, type FeatureItem } from "./features.ts";
 import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
@@ -312,6 +313,15 @@ function layoutRows(start: number, rowH: number, headH: number, gap: number) {
   return { rows, heads, end: y };
 }
 
+/**
+ * 図の中央に置くワードマーク。**左上のブランド表示と同じデータ**（`brand.ts`）を、中心の
+ * x・上端のy・高さで指定して置く。`取得・整形・中継` はこの下に文字（`<text>`）で置き、
+ * 画像には焼かない。
+ */
+function hubLogo(centerX: number, top: number, height: number): string {
+  return logoSvg(`x="${centerX - logoWidth(height) / 2}" y="${top}" ${logoSize(height)}`);
+}
+
 /** PC・iPad向け。左に使う側、中央にAIDE、右に繋ぐ先。 */
 export function renderWideMap(): string {
   const p = "mw-";
@@ -350,9 +360,9 @@ export function renderWideMap(): string {
   for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
   parts.push(
     `<rect x="408" y="${hy - hubH / 2}" width="184" height="${hubH}" class="hub-box"/>` +
-      `<text x="500" y="${hy - 8}" text-anchor="middle" class="hub-name">AIDE</text>` +
-      `<text x="500" y="${hy + 18}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>` +
-      `<text x="500" y="${hy + 36}" text-anchor="middle" class="hub-sub">VPS ＋ サブPC</text>`,
+      hubLogo(500, hy - 56, 64) +
+      `<text x="500" y="${hy + 30}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>` +
+      `<text x="500" y="${hy + 48}" text-anchor="middle" class="hub-sub">VPS ＋ サブPC</text>`,
   );
 
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="AIDEとアプリのつながり">${markers(p)}${parts.join("")}</svg>`;
@@ -417,8 +427,8 @@ export function renderNarrowMap(): string {
   for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
   parts.push(
     `<rect x="90" y="${hubY}" width="180" height="${hubH}" class="hub-box"/>` +
-      `<text x="180" y="${hubY + 36}" text-anchor="middle" class="hub-name" style="font-size:22px">AIDE</text>` +
-      `<text x="180" y="${hubY + 58}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>`,
+      hubLogo(180, hubY + 9, 40) +
+      `<text x="180" y="${hubY + 66}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>`,
   );
 
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="AIDEとアプリのつながり">${markers(p)}${parts.join("")}</svg>`;
