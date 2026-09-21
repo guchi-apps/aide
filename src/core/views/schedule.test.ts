@@ -4,11 +4,13 @@ import { describe, it } from "node:test";
 import type { DaySpanDay, DaySpanSchedule } from "../connectors/dayspan/types.ts";
 import {
   DEFAULT_FREE_WINDOW,
+  MAX_DESCRIPTION_LENGTH,
   computeFreeSlots,
   mergeBusy,
   parseClock,
   summarizeDay,
   summarizeSchedule,
+  truncateDescription,
   weekdayOf,
 } from "./schedule.ts";
 
@@ -131,6 +133,30 @@ describe("computeFreeSlots", () => {
   });
 });
 
+describe("truncateDescription", () => {
+  it("上限以内ならそのまま返し、前後の空白は落とす", () => {
+    assert.equal(truncateDescription("  メモ\n"), "メモ");
+    const exact = "あ".repeat(MAX_DESCRIPTION_LENGTH);
+    assert.equal(truncateDescription(exact), exact);
+  });
+
+  it("上限を超えたら切って末尾に … を付ける", () => {
+    const cut = truncateDescription("あ".repeat(MAX_DESCRIPTION_LENGTH + 50));
+    assert.equal(cut, `${"あ".repeat(MAX_DESCRIPTION_LENGTH)}…`);
+  });
+
+  it("絵文字（サロゲートペア）を途中で割らない", () => {
+    const cut = truncateDescription("😀".repeat(5), 3);
+    assert.equal(cut, "😀😀😀…");
+  });
+
+  it("空・空白だけ・欠けは null", () => {
+    for (const value of ["", "   \n", null, undefined]) {
+      assert.equal(truncateDescription(value), null, `${JSON.stringify(value)} が通った`);
+    }
+  });
+});
+
 describe("summarizeDay", () => {
   it("終日の予定は空き時間を塞がない", () => {
     const summarized = summarizeDay(
@@ -166,6 +192,73 @@ describe("summarizeDay", () => {
       { from: "14:00", to: "22:00", minutes: 480 },
     ]);
     assert.equal(summarized.travels[0]?.estimated, true);
+  });
+
+  it("中止・不参加の予定は残したまま outcome を載せ、空き時間は塞がない", () => {
+    const summarized = summarizeDay(
+      day({
+        events: [
+          { id: "a", title: "定例会", startTime: "10:00", endTime: "11:00", outcome: "CANCELED" },
+          { id: "b", title: "歯医者", startTime: "13:00", endTime: "14:00", outcome: "ABSENT" },
+          { id: "c", title: "面談", startTime: "15:00", endTime: "16:00", outcome: null },
+        ],
+      }),
+    );
+
+    // 一覧から消さない。消すと呼び出し側では「その予定は無かった」ことになる。
+    assert.deepEqual(
+      summarized.events.map((event) => event.outcome),
+      ["CANCELED", "ABSENT", null],
+    );
+    // 塞ぐのは通常どおり行われる面談だけ。
+    assert.equal(summarized.busyMinutes, 60);
+    assert.deepEqual(summarized.freeSlots, [
+      { from: "08:00", to: "15:00", minutes: 420 },
+      { from: "16:00", to: "22:00", minutes: 360 },
+    ]);
+  });
+
+  it("将来増えた outcome の種類も、起こらない予定として空きを塞がない", () => {
+    const summarized = summarizeDay(
+      day({ events: [{ id: "a", startTime: "10:00", endTime: "11:00", outcome: "POSTPONED" }] }),
+    );
+
+    assert.equal(summarized.events[0]?.outcome, "POSTPONED");
+    assert.equal(summarized.busyMinutes, 0);
+  });
+
+  it("outcome が無い・空の予定は null になり、空きを塞ぐ", () => {
+    const summarized = summarizeDay(
+      day({
+        events: [
+          { id: "a", startTime: "10:00", endTime: "11:00" },
+          { id: "b", startTime: "12:00", endTime: "13:00", outcome: "" },
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      summarized.events.map((event) => event.outcome),
+      [null, null],
+    );
+    assert.equal(summarized.busyMinutes, 120);
+  });
+
+  it("予定の本文を載せる。無ければ null", () => {
+    const summarized = summarizeDay(
+      day({
+        events: [
+          { id: "a", title: "定例会", description: "議題: 来期の予算" },
+          { id: "b", title: "面談", description: null },
+          { id: "c", title: "会食" },
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      summarized.events.map((event) => event.description),
+      ["議題: 来期の予算", null, null],
+    );
   });
 
   it("欠けたフィールドがあっても落ちず、既定の見出しを当てる", () => {
@@ -204,6 +297,20 @@ describe("summarizeSchedule", () => {
     assert.deepEqual(summary.freeWindow, { ...DEFAULT_FREE_WINDOW });
     assert.equal(summary.days.length, 1);
     assert.deepEqual(summary.unavailable, []);
+  });
+
+  it("中止・不参加の予定があるときだけ、note にその読み方を添える", () => {
+    const withOutcome = summarizeSchedule(
+      {
+        ...base,
+        days: [day({ events: [{ id: "a", startTime: "10:00", endTime: "11:00", outcome: "CANCELED" }] })],
+      },
+      NOW,
+    );
+    assert.match(withOutcome.note, /CANCELED/);
+    assert.match(withOutcome.note, /数えていない/);
+
+    assert.doesNotMatch(summarizeSchedule(base, NOW).note, /CANCELED/);
   });
 
   it("部分的な失敗（errors）は握りつぶさず持ち上げる", () => {

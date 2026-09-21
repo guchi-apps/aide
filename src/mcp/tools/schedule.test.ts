@@ -90,6 +90,14 @@ describe("aide_schedule の宣言", () => {
     assert.match(scheduleTool.description, /終日の予定は時間帯を持たない/);
   });
 
+  it("中止・不参加の読み方と、理由は返らないことを説明文に書いている", () => {
+    // outcome を知らないまま「予定が一覧に残っている＝行われる」と読まれるのを防ぐ（#388）。
+    assert.match(scheduleTool.description, /outcome/);
+    assert.match(scheduleTool.description, /CANCELED/);
+    assert.match(scheduleTool.description, /ABSENT/);
+    assert.match(scheduleTool.description, /理由は返らない/);
+  });
+
   it("相対的な日は offsetDays で指定するよう説明文に書いている", () => {
     // 呼び出し側のAIに日付を計算させると、今日の取り違えがそのまま答えのずれになる。
     assert.match(scheduleTool.description, /offsetDays/);
