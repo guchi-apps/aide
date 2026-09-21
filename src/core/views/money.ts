@@ -2,14 +2,14 @@ import { readCache } from "../cache/store.ts";
 import {
   describeFailure,
   fetchSubscriptions,
-  readSubscriptionsConfig,
-  tokyoDate,
-} from "../connectors/subscriptions/index.ts";
+  readAssetManagerConfig,
+} from "../connectors/asset-manager/index.ts";
 import type {
+  AssetManagerSubscription,
+  AssetManagerSubscriptionsSnapshot,
   SubscriptionContractStatus,
   SubscriptionCurrency,
-  SubscriptionsSnapshot,
-} from "../connectors/subscriptions/types.ts";
+} from "../connectors/asset-manager/types.ts";
 import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
 import type { ZaimOnlineAccount, ZaimSnapshot } from "../connectors/zaim/types.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
@@ -40,6 +40,13 @@ export interface FixedCostPaymentMethodTotal {
 
 export interface FixedCostItem {
   name: string;
+  /**
+   * 区分（`SUBSCRIPTION` / `INSURANCE` / `TAX` / `INSTALLMENT` / `OTHER_FIXED_COST`）。
+   * 固定費はサブスクだけでなく保険・税金・分割払いも含む。
+   */
+  category: string;
+  /** 区分の表示名（例 `"保険・共済"`）。 */
+  categoryLabel: string;
   /** 月額換算。年払い等も月あたりへ均してある。 */
   monthlyAmount: number;
   currency: SubscriptionCurrency;
@@ -62,14 +69,14 @@ export interface UpcomingPayment {
 }
 
 /**
- * 月額固定費（サブスクリプション）。
+ * 月額固定費（サブスク・保険・税金・分割払いなど、毎月決まって出ていく額）。
  *
  * **残高・保有銘柄とは性質が違う。** あちらは「いま持っている額」（ストック）で、
  * こちらは「毎月出ていく額」（フロー）。同じ合計に混ぜると意味が壊れるため、
  * `MoneySummary.totals` には入れず、この器に分けている。
  */
 export interface FixedCostsView {
-  /** subscription-lists への接続が設定されているか。false なら以下はすべて空。 */
+  /** Asset Manager への接続が設定されているか。false なら以下はすべて空。 */
   configured: boolean;
   /** 月額合計。**通貨別。通貨をまたいで加算しない。** */
   monthlyByCurrency: FixedCostTotal[];
@@ -136,14 +143,17 @@ const emptyFixedCosts = (): Omit<FixedCostsView, "configured" | "unavailable" | 
   upcoming: [],
 });
 
-/** subscription-lists への接続が設定されていないときの答え。 */
+/** 固定費の取得元。動作状況（`/api/status`）や `unavailable.source` に出る名前。 */
+const FIXED_COSTS_SOURCE = "asset-manager";
+
+/** Asset Manager への接続が設定されていないときの答え。 */
 function fixedCostsNotConfigured(): FixedCostsView {
   return {
     ...emptyFixedCosts(),
     configured: false,
-    unavailable: { source: "subscription-lists", reason: "接続が設定されていない" },
+    unavailable: { source: FIXED_COSTS_SOURCE, reason: "接続が設定されていない" },
     note:
-      "AIDE_SUBSCRIPTIONS_TOKEN が設定されていないため、月額固定費を取得できない。" +
+      "AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET が設定されていないため、月額固定費を取得できない。" +
       "固定費が無いという意味ではない。",
   };
 }
@@ -153,7 +163,7 @@ function fixedCostsUnavailable(reason: string): FixedCostsView {
   return {
     ...emptyFixedCosts(),
     configured: true,
-    unavailable: { source: "subscription-lists", reason },
+    unavailable: { source: FIXED_COSTS_SOURCE, reason },
     note:
       "月額固定費を取得できなかったため、以下の残高・保有銘柄だけで判断すること。" +
       "固定費が無いという意味ではない。",
@@ -203,18 +213,40 @@ export function summarizeAccountFreshness(
 const roundAmount = (amount: number): number => Math.round(amount * 100) / 100;
 
 /**
+ * 通貨別の月額合計。**通貨をまたいで加算しない。**
+ *
+ * 相手（Asset Manager）の合計は円換算した1本（`fixedCostMonthlyTotalJpy`）しか無く、通貨別の内訳が
+ * 無いので、ここで明細（相手が計算済みの `monthlyAmount`）から積み上げる。
+ * 並びは通貨コードの昇順。
+ */
+function summarizeByCurrency(
+  subscriptions: readonly AssetManagerSubscription[],
+): FixedCostTotal[] {
+  const totals = new Map<SubscriptionCurrency, number>();
+  for (const subscription of subscriptions) {
+    totals.set(
+      subscription.currency,
+      (totals.get(subscription.currency) ?? 0) + subscription.monthlyAmount,
+    );
+  }
+  return [...totals.entries()]
+    .map(([currency, amount]) => ({ currency, amount: roundAmount(amount) }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+/**
  * 支払方法別の月額合計。**通貨をまたいで加算しない**ため、支払方法と通貨の組で束ねる。
  *
- * 相手（subscription-lists）の `totals` にはこの内訳が無いので、ここで明細から積み上げる。
+ * 相手の集計にはこの内訳が無いので、ここで明細から積み上げる。
  * 並びは通貨ごとにまとめたうえで金額の大きい順。**通貨をまたいで大小を比べない**ため、
  * 額の小さいUSDが下へ流れて「少ない」ように見えることを避けている。
  */
 function summarizeByPaymentMethod(
-  subscriptions: SubscriptionsSnapshot["subscriptions"],
+  subscriptions: readonly AssetManagerSubscription[],
 ): FixedCostPaymentMethodTotal[] {
   const totals = new Map<string, FixedCostPaymentMethodTotal>();
   for (const subscription of subscriptions) {
-    const currency = subscription.currentPrice.currency;
+    const currency = subscription.currency;
     const key = `${subscription.paymentMethod}\u0000${currency}`;
     const found = totals.get(key);
     if (found) {
@@ -248,37 +280,51 @@ function addDays(date: string, days: number): string {
 /**
  * 取得結果を横断ビューの粒度へ畳む。**純粋関数。テストはここに集中する。**
  *
- * 月額換算・次回支払日は subscription-lists が計算済みで返すため、ここでは計算し直さない
- * （向こうの `billing.ts` にある月末クランプ・料金改定の切り替えを再実装すると必ずズレる）。
+ * 月額換算・次回請求日・円換算は Asset Manager が計算済みで返すため、ここでは計算し直さない
+ * （向こうの `lib/subscription-billing.ts` にある月末クランプ・料金改定の切り替えを再実装すると
+ * 必ずズレる）。ここで足し合わせるのは、相手が集計を持たない通貨別・支払方法別の合計だけ。
  */
-export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCostsView {
-  const items: FixedCostItem[] = snapshot.subscriptions.map((subscription) => ({
+export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot): FixedCostsView {
+  // 既定では解約済みが返らないが、返ってきても「いま払っているもの」には含めない。
+  const living = snapshot.subscriptions.filter((subscription) => subscription.status !== "ENDED");
+
+  const items: FixedCostItem[] = living.map((subscription) => ({
     name: subscription.name,
+    category: subscription.category,
+    categoryLabel: subscription.categoryLabel,
     monthlyAmount: subscription.monthlyAmount,
-    currency: subscription.currentPrice.currency,
-    contractStatus: subscription.contractStatus,
+    currency: subscription.currency,
+    contractStatus: subscription.status,
     paymentMethod: subscription.paymentMethod,
-    nextPaymentDate: subscription.nextPayment?.date ?? null,
+    nextPaymentDate: subscription.nextBillingDay,
   }));
 
-  const until = addDays(snapshot.referenceDate, UPCOMING_DAYS);
-  const upcoming: UpcomingPayment[] = snapshot.subscriptions
+  const referenceDate = snapshot.asOf;
+  const until = addDays(referenceDate, UPCOMING_DAYS);
+  const upcoming: UpcomingPayment[] = living
     .flatMap((subscription) => {
-      const payment = subscription.nextPayment;
-      // 基準日より前の支払日は返らない想定だが、返ってきても「予定」には含めない。
-      if (!payment || payment.date < snapshot.referenceDate || payment.date > until) return [];
-      return [{ name: subscription.name, ...payment }];
+      const date = subscription.nextBillingDay;
+      // 基準日より前の請求日は返らない想定だが、返ってきても「予定」には含めない。
+      if (!date || date < referenceDate || date > until) return [];
+      return [
+        { name: subscription.name, date, amount: subscription.amount, currency: subscription.currency },
+      ];
     })
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const monthlyByCurrency: FixedCostTotal[] = Object.entries(snapshot.totals.monthlyByCurrency)
-    .filter((entry): entry is [SubscriptionCurrency, number] => typeof entry[1] === "number")
-    .map(([currency, amount]) => ({ currency, amount }));
+  const monthlyByCurrency = summarizeByCurrency(living);
+  const monthlyByPaymentMethod = summarizeByPaymentMethod(living);
 
-  const monthlyByPaymentMethod = summarizeByPaymentMethod(snapshot.subscriptions);
+  // 円換算できない契約が1件でもあれば、合計は「全件ぶん」ではなくなる。部分的な合計を返すと
+  // 実際より少ない額が「固定費」として読まれるため、null にして理由を note に残す。
+  const monthlyJpy =
+    snapshot.summary.excludedFromTotal.length === 0
+      ? snapshot.summary.fixedCostMonthlyTotalJpy
+      : null;
 
   const notes = [
-    `${snapshot.referenceDate} 時点の月額固定費。年払い等も月あたりへ均してある。`,
+    `${referenceDate} 時点の月額固定費。年払い等も月あたりへ均してある。`,
+    "サブスクだけでなく保険・税金・分割払いなども含む（items の category で区別できる）。",
     "残高・保有銘柄（ストック）とは性質が違うため、totals には足していない。",
   ];
   if (monthlyByCurrency.length > 1) {
@@ -289,21 +335,24 @@ export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCosts
       "items の contractStatus が SCHEDULED_TO_END のものは解約予定。解約済み（ENDED）は取得対象から外れているため、ここには現れない。",
     );
     notes.push(
-      "monthlyByPaymentMethod は明細から積み上げた支払方法別の月額で、通貨別に分けてある。",
+      "monthlyByCurrency・monthlyByPaymentMethod は明細から積み上げた月額で、通貨別に分けてある。",
     );
   }
-  if (snapshot.totals.monthlyJpy !== null) {
-    notes.push("monthlyJpy は日次更新のレートによる概算で、参考値にすぎない。");
-  } else if (monthlyByCurrency.some((total) => total.currency !== "JPY")) {
-    notes.push("為替レートを取得できなかったため、円換算値は出せていない。");
+  if (monthlyJpy !== null) {
+    notes.push("monthlyJpy は為替レートによる概算で、参考値にすぎない。");
+  } else {
+    notes.push(
+      "為替レートを取得できなかったため、円換算値は出せていない" +
+        `（円換算できなかった契約: ${snapshot.summary.excludedFromTotal.join("・")}）。`,
+    );
   }
 
   return {
     configured: true,
     monthlyByCurrency,
     monthlyByPaymentMethod,
-    monthlyJpy: snapshot.totals.monthlyJpy,
-    usdJpyRate: snapshot.usdJpyRate,
+    monthlyJpy,
+    usdJpyRate: snapshot.summary.usdJpyRate,
     count: items.length,
     items,
     upcoming,
@@ -315,19 +364,19 @@ export function summarizeFixedCosts(snapshot: SubscriptionsSnapshot): FixedCosts
 /**
  * 固定費を取得して畳む。**失敗しても例外を投げない。**
  *
- * subscription-lists が落ちていても残高・保有銘柄は返せるため、
+ * Asset Manager が落ちていても残高・保有銘柄は返せるため、
  * ここで throw すると答えられたはずの問いまで答えられなくなる。
  *
  * **`aide_fixed_costs` からも直接呼ぶ。** 「毎月の固定費は」にだけ答えるとき、
  * `buildMoneySummary()` を通すとZaimのキャッシュまで読むことになり、問いと関係ない。
  */
-export async function loadFixedCosts(now: Date = new Date()): Promise<FixedCostsView> {
-  const config = readSubscriptionsConfig();
+export async function loadFixedCosts(): Promise<FixedCostsView> {
+  const config = readAssetManagerConfig();
   if (!config) return fixedCostsNotConfigured();
 
   try {
-    // 基準日は日本時間で渡す。VPSのTZはUTCで、渡さないと 00:00〜09:00 が前日基準になる。
-    return summarizeFixedCosts(await fetchSubscriptions(config, tokyoDate(now)));
+    // 基準日は相手が決めて `asOf` で返す（日本時間）。こちらからは渡さない。
+    return summarizeFixedCosts(await fetchSubscriptions(config));
   } catch (cause) {
     return fixedCostsUnavailable(describeFailure(cause));
   }
@@ -395,17 +444,17 @@ export async function buildBalances(now: Date = new Date()): Promise<BalancesVie
 /**
  * お金まわりの横断ビュー。
  *
- * 情報源は Zaim（残高・保有銘柄）と subscription-lists（月額固定費）。
+ * 情報源は Zaim（残高・保有銘柄）と Asset Manager（月額固定費）。
  * 将来 meisai-lab（給与）を足す場所もここになる。
  *
  * **読み取りAPI（`GET /api/money`・`/status`）はこの形のまま。** MCP層だけが
  * `aide_balances` / `aide_fixed_costs` の2本へ分かれている。
  *
- * 固定費は同じVPS上へのHTTP GETで数ミリ秒のため都度取得する。README「どこまでを『重い取得』
- * とみなすか」の判断に従っている。
+ * 固定費は Asset Manager へのHTTP GET（数十ミリ秒。5秒で打ち切る）のため都度取得する。
+ * README「どこまでを『重い取得』とみなすか」の判断に従っている。
  */
 export async function buildMoneySummary(now: Date = new Date()): Promise<MoneySummary> {
-  // 固定費の取得（数ミリ秒・失敗しても投げない）とキャッシュの読み出しは互いに独立。
-  const [balances, fixedCosts] = await Promise.all([buildBalances(now), loadFixedCosts(now)]);
+  // 固定費の取得（失敗しても投げない）とキャッシュの読み出しは互いに独立。
+  const [balances, fixedCosts] = await Promise.all([buildBalances(now), loadFixedCosts()]);
   return { ...balances, fixedCosts };
 }

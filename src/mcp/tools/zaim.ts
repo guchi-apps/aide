@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { tokyoDate } from "../../core/connectors/subscriptions/index.ts";
+import { tokyoDate } from "../../core/tokyo-date.ts";
 import { findPaymentSeries, nextRequestId } from "../../core/connectors/zaim/idempotency.ts";
 import { loadZaimOAuthCredentials } from "../../core/connectors/zaim/oauth.ts";
 import {
