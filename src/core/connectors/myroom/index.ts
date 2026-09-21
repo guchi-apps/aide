@@ -1,4 +1,4 @@
-import type { MyRoomSnapshot } from "./types.ts";
+import type { MyRoomPrinterSnapshot, MyRoomSnapshot } from "./types.ts";
 
 /**
  * myroom コネクタ。
@@ -69,15 +69,27 @@ export function describeFailure(cause: unknown): string {
   return "取得に失敗した";
 }
 
-/**
- * 部屋の状態を1回で取得する。整形は行わない（`src/core/views/room.ts` の仕事）。
- */
-export async function fetchRoomState(config: MyRoomConfig): Promise<MyRoomSnapshot> {
-  const res = await fetch(`${config.baseUrl}/api/internal/room-state`, {
+async function getInternal<T>(config: MyRoomConfig, path: string): Promise<T> {
+  const res = await fetch(`${config.baseUrl}${path}`, {
     headers: { authorization: `Bearer ${config.token}`, accept: "application/json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   // ここで Response 自体を throw する。describeFailure がステータスだけを取り出す。
   if (!res.ok) throw res;
-  return (await res.json()) as MyRoomSnapshot;
+  return (await res.json()) as T;
+}
+
+/**
+ * 部屋の状態を1回で取得する。整形は行わない（`src/core/views/room.ts` の仕事）。
+ */
+export async function fetchRoomState(config: MyRoomConfig): Promise<MyRoomSnapshot> {
+  return getInternal<MyRoomSnapshot>(config, "/api/internal/room-state");
+}
+
+/**
+ * 3Dプリンターの状態を1回で取得する。整形は行わない（`src/core/views/printer.ts` の仕事）。
+ * 同じ `AIDE_MYROOM_TOKEN`（読み取り専用の内部API）で通る（guchi-apps/aide#378）。
+ */
+export async function fetchPrinterState(config: MyRoomConfig): Promise<MyRoomPrinterSnapshot> {
+  return getInternal<MyRoomPrinterSnapshot>(config, "/api/internal/printer-state");
 }

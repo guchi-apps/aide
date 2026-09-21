@@ -1,5 +1,6 @@
 import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runClaudeSessionsSync } from "./jobs/claude-sessions-sync.ts";
+import { runPrinterWatch } from "./jobs/printer-watch.ts";
 import { runWeatherSync } from "./jobs/weather-sync.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
 import { runZaimMoneySync } from "./jobs/zaim-money-sync.ts";
@@ -31,6 +32,7 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   "zaim-keep-alive": runZaimKeepAlive,
   "weather-sync": runWeatherSync,
   "claude-sessions-sync": runClaudeSessionsSync,
+  "printer-watch": runPrinterWatch,
 };
 
 /**

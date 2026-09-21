@@ -55,9 +55,9 @@ const SESSION_EXPIRED_SIGNATURE = "ZAIM_SESSION_EXPIRED";
 export type SessionExpiryKind = "auto-pending" | "auto-failed" | "manual-only";
 
 // Signalyの色指定は10進整数（Discord形式）。docs/webhook.md 参照。
-const COLOR_FAILURE = 15548997; // #ed4245
-const COLOR_RECOVERY = 5763719; // #57f287
-const COLOR_WARNING = 16705372; // #fee75c
+export const COLOR_FAILURE = 15548997; // #ed4245
+export const COLOR_RECOVERY = 5763719; // #57f287
+export const COLOR_WARNING = 16705372; // #fee75c
 
 /**
  * ジョブ自体は成功したが一部だけ失敗した状態の記録キー（`state` はジョブ名で引くため接尾辞で分ける）。
@@ -88,7 +88,7 @@ interface SignalyField {
   inline?: boolean;
 }
 
-interface SignalyPayload {
+export interface SignalyPayload {
   embeds: [{ title: string; description: string; color: number; fields: SignalyField[] }];
 }
 
@@ -329,9 +329,13 @@ export function buildRecoveryPayload(input: {
  * 失敗理由の署名・時刻・回数だけ。取得したデータや認証情報は入れない。
  * 置き場をテストから差し替えられるようにしてあるのはキャッシュ（`AIDE_CACHE_DIR`）と同じ理由。
  */
-function stateFilePath(): string {
+export function workerStatePath(file: string): string {
   const dir = process.env["AIDE_WORKER_STATE_DIR"];
-  return resolve(dir ? resolve(dir) : resolve(DATA_DIR, "worker"), "notify-state.json");
+  return resolve(dir ? resolve(dir) : resolve(DATA_DIR, "worker"), file);
+}
+
+function stateFilePath(): string {
+  return workerStatePath("notify-state.json");
 }
 
 export async function readState(): Promise<NotifyState> {
@@ -351,13 +355,13 @@ async function writeState(state: NotifyState): Promise<void> {
   await rename(tmp, path);
 }
 
-function webhookUrl(): string | undefined {
+export function webhookUrl(): string | undefined {
   const url = process.env["AIDE_SIGNALY_WEBHOOK_URL"]?.trim();
   return url ? url : undefined;
 }
 
 /** 送信できたかを返す。URLは `channel_id` を含む認証情報なのでログに出さない。 */
-async function send(url: string, payload: SignalyPayload): Promise<boolean> {
+export async function send(url: string, payload: SignalyPayload): Promise<boolean> {
   try {
     const response = await fetch(url, {
       method: "POST",

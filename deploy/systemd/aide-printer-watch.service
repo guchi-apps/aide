@@ -1,0 +1,18 @@
+[Unit]
+# 3Dプリンターの印刷の完了・停止・エラーを見張り、遷移があったときだけSignalyへ通知する。
+# myroom の内部API（公開URL経由）を読むだけで、プリンターへは何も送らない。
+Description=AIDE: 3Dプリンターの状態遷移の通知
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# HTTP GETが1本と、遷移があったときのWebhookが1本だけ。2分ごとに走るので、
+# 次の実行に食い込む前に必ず諦めさせる（本体側の制限は取得3秒・通知10秒）。
+TimeoutStartSec=1min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+# 素の ExecStart=node ... で書くと手元では動くのに再起動後に動かない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts printer-watch'
