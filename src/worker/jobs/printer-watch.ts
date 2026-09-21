@@ -12,7 +12,7 @@ import {
 /**
  * 3Dプリンターの状態遷移（完了・停止・エラー）を見張って Signaly へ通知する（#378）。
  *
- * myroom の内部API（`GET /api/internal/printer-state`）を2分ごとに読み、前回の記録と比べる。
+ * myroom の内部API（`GET /api/internal/bambu/printer`）を2分ごとに読み、前回の記録と比べる。
  * **「いまの状態」を答えるツール（`aide_printer_status`）と同じ正規化・鮮度判定を通す**ので、
  * ツールが「現在の状態は分からない」と答える状況では、ここも遷移を作らない。
  *

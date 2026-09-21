@@ -72,78 +72,107 @@ export interface MyRoomSnapshot {
   aircons?: MyRoomAircon[];
 }
 
-/** AMS Lite のスロット1つぶん。 */
+/** AMS Lite のスロット1つぶん（myroom `bambu._normalize_tray`）。 */
 export interface MyRoomPrinterAmsSlot {
   slot?: number | null;
+  /** 空きスロットか（材料が読めない）。 */
+  empty?: boolean | null;
   /** 材料の種類（PLA・PETG など）。 */
   material?: string | null;
-  /** 色。myroom が返した文字列（`#RRGGBB` など）をそのまま受け取る。 */
+  /** 色（`#RRGGBB`）。 */
   color?: string | null;
-  /** 残量（%）。 */
+  /** 残量（%）。読めないスロットは null（0 を「残量0%」として返さない）。 */
   remainPercent?: number | null;
 }
 
-/** プリンターが報告している印刷エラー・HMS の1件。 */
-export interface MyRoomPrinterError {
-  code?: string | number | null;
-  message?: string | null;
+/** AMS Lite の1台ぶん。 */
+export interface MyRoomPrinterAmsUnit {
+  id?: number | null;
+  slots?: MyRoomPrinterAmsSlot[] | null;
+}
+
+/** HMS（プリンターのヘルス通知）の1件。 */
+export interface MyRoomPrinterHms {
+  /** `HMS_0300_0100_0001_0007` の形。 */
+  code?: string | null;
+  /** `fatal` / `serious` / `common` / `info`。 */
+  severity?: string | null;
 }
 
 /**
- * 3Dプリンター（Bambu Lab A1 mini）1台の正規化済みの状態。
- *
- * **AIDEが期待する形で、myroom#428 が返す形として先に決めたもの**（guchi-apps/aide#378）。
- * myroom 側が別の形で実装した場合は、直すのは `src/core/views/printer.ts` の正規化だけにする。
- * 値はどれも欠けうる（機種・ファームウェア・印刷の段階で持つ項目が違う）。
+ * 3Dプリンター（Bambu Lab A1 mini）1台の正規化済みの状態。myroom `backend/bambu.py` の
+ * `build_snapshot()` が組み立てる形（myroom#428）。値はどれも欠けうる。
  *
  * **接続情報（ホスト・シリアル番号・アクセスコード）はここに宣言しない。** 宣言していない項目は
  * 正規化の段階で捨てるため、myroom が誤って返しても AIDE の応答・ログ・通知には出ない。
  */
 export interface MyRoomPrinter {
-  name?: string | null;
-  /** 収集プロセスがプリンターと接続できているか。 */
-  online?: boolean | null;
-  /** プリンターから最後に受信した時刻（ISO8601）。 */
-  updatedAt?: string | null;
-  /** 最終更新からの経過分数。myroom 側の計算。AIDEは `updatedAt` から数え直して突き合わせる。 */
-  ageMinutes?: number | null;
-  /** 鮮度切れか。しきい値は `staleThresholdMinutes`。 */
-  stale?: boolean | null;
   /**
-   * 印刷状態。`idle`（待機）・`preparing`（準備）・`printing`（印刷中）・`paused`（一時停止）・
-   * `finished`（完了）・`failed`（失敗）。Bambu の `gcode_state`（`RUNNING` など）や日本語の
-   * 表記もAIDE側で読み替える。
+   * 印刷状態。myroom が `gcode_state` から `idle`・`preparing`・`printing`・`paused`・
+   * `finished`・`failed`・`unknown` へ読み替え済み。
    */
   state?: string | null;
-  jobName?: string | null;
-  progressPercent?: number | null;
-  layer?: number | null;
-  totalLayers?: number | null;
-  /** 終了までの残り分数。 */
-  remainingMinutes?: number | null;
-  /** 終了予測時刻（ISO8601）。 */
-  estimatedEndAt?: string | null;
-  nozzleTemperature?: number | null;
-  nozzleTargetTemperature?: number | null;
-  bedTemperature?: number | null;
-  bedTargetTemperature?: number | null;
-  /** 印刷速度モード（静音・標準・スポーツ・ルドロス など）。 */
-  speedMode?: string | null;
-  ams?: MyRoomPrinterAmsSlot[] | null;
-  errors?: MyRoomPrinterError[] | null;
+  /** Bambu の `gcode_state` そのもの（`RUNNING` など）。 */
+  rawState?: string | null;
+  job?: {
+    name?: string | null;
+    progressPercent?: number | null;
+    layer?: number | null;
+    totalLayers?: number | null;
+    /** 準備・印刷中・一時停止のときだけ入る。 */
+    remainingMinutes?: number | null;
+    /** 終了予測時刻（ISO8601）。プリンターからの最後の受信時刻＋残り時間。 */
+    estimatedFinishAt?: string | null;
+  } | null;
+  nozzle?: { temperature?: number | null; target?: number | null } | null;
+  bed?: { temperature?: number | null; target?: number | null } | null;
+  /** 印刷速度モード。`mode` は `silent` / `standard` / `sport` / `ludicrous`。 */
+  speed?: { level?: number | null; mode?: string | null } | null;
+  ams?: {
+    connected?: boolean | null;
+    units?: MyRoomPrinterAmsUnit[] | null;
+  } | null;
+  errors?: {
+    /** `print_error` が 0 でないとき。`code` は `0300_4001` の形。 */
+    printError?: { code?: string | null } | null;
+    hms?: MyRoomPrinterHms[] | null;
+  } | null;
 }
 
 /**
- * `GET /api/internal/printer-state` のレスポンス。`room-state` と同じ流儀
- * （camelCase・`fetchedAt`・`staleThresholdMinutes`）に揃えている。
+ * `GET /api/internal/bambu/printer` のレスポンス（myroom `bambu.build_response()`）。
+ *
+ * **現在値（`printer`）は `connection` が `online` のときだけ入り、それ以外は null。**
+ * 最後に受け取った値は `lastKnown` へ分かれる。`lastKnown` は現在の値ではない。
  */
 export interface MyRoomPrinterSnapshot {
   /** myroom が応答を組み立てた時刻（ISO8601）。 */
   fetchedAt?: string;
-  /** 鮮度切れとみなす分数。myroom 側の設定値。 */
-  staleThresholdMinutes?: number;
-  /** 収集が一度も届いていなければ null。 */
+  /** 収集が止まったとみなす秒数（myroom の `BAMBU_STALE_SECONDS`）。 */
+  staleThresholdSeconds?: number;
+  /** 収集から一度でも届いているか。false なら以下はすべて空。 */
+  configured?: boolean;
+  /**
+   * - `no_data`: 収集が一度も届いていない
+   * - `collector_stale`: 収集からの受信が `staleThresholdSeconds` を超えて途絶えている
+   * - `printer_offline`: 収集は生きているが、プリンターに繋がっていない（電源断など）
+   * - `online`: プリンターに繋がっている
+   */
+  connection?: string;
+  /** `connection === "online"`。 */
+  online?: boolean;
+  /** 収集からの受信が途絶えているか。 */
+  stale?: boolean;
+  /** 収集から最後に受信した時刻（ISO8601）。収集は変化が無くても毎分送ってくる。 */
+  lastUpdateAt?: string | null;
+  ageSeconds?: number | null;
+  /** プリンターから最後にメッセージを受けた時刻（ISO8601）。値はこの時点のもの。 */
+  lastMessageAt?: string | null;
+  messageAgeSeconds?: number | null;
+  /** 現在値。`online` のときだけ入る。 */
   printer?: MyRoomPrinter | null;
+  /** 最後に受け取った値。`online` でないときだけ入る。**現在の値ではない。** */
+  lastKnown?: MyRoomPrinter | null;
 }
 
 /** 取得できなかった理由。落ちたこと自体が状態なので、握りつぶさず返す。 */

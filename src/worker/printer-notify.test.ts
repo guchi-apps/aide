@@ -6,7 +6,6 @@ import { buildPrinterPayload, decidePrinterEvents, type PrinterEvent, type Print
 
 function reading(overrides: Partial<PrinterReading> = {}): PrinterReading {
   return {
-    name: "A1 mini",
     updatedAt: "2026-09-21T03:00:00.000Z",
     state: "printing",
     jobName: "benchy.3mf",

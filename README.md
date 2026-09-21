@@ -1521,7 +1521,7 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 
 3Dプリンター（Bambu Lab A1 mini）の進捗・残り時間・完了・エラー。**AIDEはプリンターへ直接繋がない。**
 サブPCの常駐プロセスがLAN内のローカルMQTTから状態を集め、[myroom](https://github.com/guchi-apps/myroom)
-が正規化して内部API（`GET /api/internal/printer-state`）で返す（myroom#428）。AIDEはそれを
+が正規化して内部API（`GET /api/internal/bambu/printer`）で返す（myroom#428）。AIDEはそれを
 `aide_printer_status` へ畳み、状態遷移を Signaly へ通知する。Bambu のシリアル番号・アクセスコード・
 ホストは**myroomのサブPC側にしか無く、AIDEは持たない**。
 
@@ -1534,35 +1534,51 @@ src/worker/printer-notify.ts          遷移の判定（decidePrinterEvents）�
 deploy/systemd/aide-printer-watch.*   サブPCの systemd timer
 ```
 
-### 契約はAIDE側で先に決めた（myroom#428 の実装より前）
+### 読んでいる応答（myroom `bambu.build_response()`）
 
-着手時点で myroom#428 は計画段階で、APIの形が決まっていなかった。`room-state` の流儀（camelCase・
-`fetchedAt`・`staleThresholdMinutes`）に揃えて、**AIDEが期待する形を `src/core/connectors/myroom/types.ts`
-の `MyRoomPrinterSnapshot` として先に決めた。** myroom が別の形で実装した場合、直すのは
-`src/core/views/printer.ts` の正規化だけで、ツール・通知・テストの形は変わらない。
+#378 の着手時点では myroom#428 が計画段階で、AIDE は `room-state` の流儀で `/api/internal/printer-state` を
+期待する形として先に決めていた。**myroom はパスも形も別に実装した（myroom#428 → #430）ため、AIDE 側を
+myroom の実装に合わせ直した（#401）。** 型は `src/core/connectors/myroom/types.ts` の `MyRoomPrinterSnapshot`。
+正本は myroom の `backend/bambu.py`（`build_response()` と `build_snapshot()`）。
 
 ```jsonc
-// GET /api/internal/printer-state  （Authorization: Bearer <AIDE_MYROOM_TOKEN>）
+// GET /api/internal/bambu/printer  （Authorization: Bearer <AIDE_MYROOM_TOKEN>）
 {
   "fetchedAt": "2026-09-21T12:00:00+09:00",
-  "staleThresholdMinutes": 10,        // 鮮度切れとみなす分数（無ければAIDEは10分）
-  "printer": null | {                 // 収集が一度も届いていなければ null
-    "name": "A1 mini",
-    "online": true,                   // 収集プロセスがプリンターと接続できているか
-    "updatedAt": "2026-09-21T11:59:10+09:00",   // プリンターから最後に受信した時刻
-    "ageMinutes": 1, "stale": false,
-    "state": "printing",              // idle / preparing / printing / paused / finished / failed
-                                      // （Bambu の gcode_state や日本語表記もAIDEが読み替える）
-    "jobName": "benchy.3mf", "progressPercent": 42, "layer": 84, "totalLayers": 200,
-    "remainingMinutes": 35, "estimatedEndAt": "2026-09-21T12:35:00+09:00",
-    "nozzleTemperature": 219.6, "nozzleTargetTemperature": 220,
-    "bedTemperature": 59.8, "bedTargetTemperature": 60,
-    "speedMode": "標準",
-    "ams": [{ "slot": 1, "material": "PLA", "color": "#FF0000", "remainPercent": 80 }],
-    "errors": [{ "code": "0300_0100", "message": "フィラメントが切れた" }]
-  }
+  "staleThresholdSeconds": 180,       // 収集が止まったとみなす秒数（無ければAIDEは180秒）
+  "configured": true,                 // 収集から一度でも届いているか
+  "connection": "online",             // no_data / collector_stale / printer_offline / online
+  "online": true, "stale": false,
+  "lastUpdateAt": "2026-09-21T11:59:40+09:00",  // 収集から最後に受信した時刻（収集は毎分送る）
+  "ageSeconds": 20,
+  "lastMessageAt": "2026-09-21T11:59:10+09:00", // プリンターから最後にメッセージを受けた時刻
+  "messageAgeSeconds": 50,
+  "printer": null | {                 // online のときだけ入る
+    "state": "printing",              // idle / preparing / printing / paused / finished / failed / unknown
+    "rawState": "RUNNING",            // Bambu の gcode_state
+    "job": { "name": "benchy.3mf", "progressPercent": 42, "layer": 84, "totalLayers": 200,
+             "remainingMinutes": 35, "estimatedFinishAt": "2026-09-21T12:34:10+09:00" },
+    "nozzle": { "temperature": 219.6, "target": 220 },
+    "bed": { "temperature": 59.8, "target": 60 },
+    "speed": { "level": 2, "mode": "standard" },  // silent / standard / sport / ludicrous
+    "ams": { "connected": true, "units": [{ "id": 0, "humidity": 4,
+             "slots": [{ "slot": 0, "empty": false, "material": "PLA", "color": "#FF0000", "remainPercent": 80 }] }] },
+    "errors": { "printError": null | { "code": "0300_4001" },
+                "hms": [{ "code": "HMS_0300_0100_0001_0007", "severity": "serious" }] }
+  },
+  "lastKnown": null | { /* printer と同じ形。online でないときだけ入る最後の値 */ }
 }
 ```
+
+AIDE が畳むときの読み方:
+
+- **現在値は `printer` からしか作らない。`lastKnown` を現在値として読むことはしない。** 読むと、電源が
+  切れる前の「完了」や古い進捗から、いま完了したと誤検知する
+- 値の時刻（`measuredAt`・`lastKnown.asOf`）は `lastMessageAt`（無ければ `lastUpdateAt`）。終了予測は
+  myroom の `estimatedFinishAt` を使い、無ければその時刻＋残り時間から求める
+- エラーは `printError` と、`severity` が `fatal`・`serious` の HMS だけを数える（myroom の通知と同じ線引き。
+  `common`・`info` で「エラーが発生」と鳴らさない）
+- AMS Lite はユニットをまたいでスロットを1列に並べる（A1 mini の AMS Lite は1台）
 
 読み取り専用の内部APIで、`room-state` と同じ `INTERNAL_API_KEY`（AIDE側は `AIDE_MYROOM_TOKEN`）で通る。
 新しい資格情報も環境変数も足していない。**未実装のバージョンに対しては404が返り、ツールは
@@ -1576,13 +1592,15 @@ deploy/systemd/aide-printer-watch.*   サブPCの systemd timer
 
 | `freshness` | 意味 | `printer` | `lastKnown` |
 |---|---|---|---|
-| `fresh` | 最終更新がしきい値以内で、接続できている | **入る** | なし |
-| `stale` | 最終更新がしきい値を超えている（電源断・収集停止・ネットワーク断） | null | 最後に確認できた値（`asOf` 付き） |
-| `disconnected` | 収集がプリンターと接続できていないと myroom が報告している | null | 同上 |
-| `unknown` | 最終更新時刻が読めず、新しいか判断できない | null | なし |
-| `never` | 収集が一度も届いていない | null | なし |
+| `freshness` | myroom の `connection` | 意味 | `printer` | `lastKnown` |
+|---|---|---|---|---|
+| `fresh` | `online` | プリンターに繋がっていて、収集からの最終受信がしきい値以内 | **入る** | なし |
+| `stale` | `collector_stale` | 収集からの受信が途絶えている（サブPCの常駐停止・ネットワーク断） | null | 最後に確認できた値（`asOf` 付き） |
+| `disconnected` | `printer_offline` | 収集は生きているが、プリンターに繋がっていない（電源断など） | null | 同上 |
+| `unknown` | 上記以外・時刻が読めない | 新しいか判断できない | null | なし |
+| `never` | `no_data` | 収集が一度も届いていない | null | なし |
 
-- **判定は myroom の `stale` とAIDEが `updatedAt` から数え直した経過分の両方を見て、どちらかが切れていれば切れている。**
+- **`online` でも、AIDEが `lastUpdateAt` から数え直した経過秒が `staleThresholdSeconds` を超えていれば `stale`。**
   片方だけを信じると、どちらかの時計・判定のずれがそのまま「古い値を現在値」にする
 - **`lastKnown` には残り時間・終了予測・温度を入れない。** 時間が経てば意味を失い、現在値と読み違えやすい。
   入れるのは状態・ジョブ名・進捗・エラーだけで、`asOf`（その時刻時点の値）を必ず添える
@@ -1636,9 +1654,9 @@ deploy/systemd/aide-printer-watch.*   サブPCの systemd timer
 | VPS（サーバー） | 追加なし。既存の `AIDE_MYROOM_TOKEN` をそのまま使う |
 | サブPCの `~/apps/aide/.env` | `AIDE_MYROOM_URL`（myroom の公開URL。`https://myroom.gucchii.com`）・`AIDE_MYROOM_TOKEN`（myroom の `INTERNAL_API_KEY` と同じ値）・`AIDE_SIGNALY_WEBHOOK_URL`（既存） |
 
-**リリース順は myroom#428 が先。** myroom が `main` で `printer-state` を返す状態になってから、
-サブPCの `.env` を設定し、`aide-printer-watch.timer` を有効にする。順序が逆だと、ツールは
-「内部APIが未実装」を返すだけで壊れないが、`printer-watch` は404で失敗し続ける
+**リリース順は myroom#428 が先。** myroom が `main` で `bambu/printer` を返す状態（v4.18.0 以降）で、
+かつ AIDE の #401 が `main` へ出てから、サブPCの `.env` を設定し、`aide-printer-watch.timer` を有効にする
+（guchi-apps/subpc#108）。順序が逆だと、ツールは「内部APIが未実装」を返すだけで壊れないが、`printer-watch` は404で失敗し続ける
 （[ジョブ失敗の通知](#ジョブ失敗の通知)が6時間に1回まで送る）。
 
 **ユニットの配置と有効化はサブPCのリポジトリ（`guchi-apps/subpc`）の `setup.sh` が持つ**

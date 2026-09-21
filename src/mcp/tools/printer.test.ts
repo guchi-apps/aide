@@ -18,14 +18,31 @@ let seen: { url?: string; authorization?: string } = {};
 
 function freshPrinter(): Record<string, unknown> {
   return {
-    online: true,
-    updatedAt: new Date(Date.now() - 60_000).toISOString(),
-    state: "RUNNING",
-    jobName: "benchy.3mf",
-    progressPercent: 42,
-    remainingMinutes: 35,
+    state: "printing",
+    rawState: "RUNNING",
+    job: { name: "benchy.3mf", progressPercent: 42, remainingMinutes: 35 },
+    errors: { printError: null, hms: [] },
     serial: "01P00A000000000",
     accessCode: "12345678",
+  };
+}
+
+/** myroom `bambu.build_response()` の online の形。 */
+function onlineBody(): Record<string, unknown> {
+  const minuteAgo = new Date(Date.now() - 60_000).toISOString();
+  return {
+    fetchedAt: new Date().toISOString(),
+    staleThresholdSeconds: 180,
+    configured: true,
+    connection: "online",
+    online: true,
+    stale: false,
+    lastUpdateAt: minuteAgo,
+    ageSeconds: 60,
+    lastMessageAt: minuteAgo,
+    messageAgeSeconds: 60,
+    printer: freshPrinter(),
+    lastKnown: null,
   };
 }
 
@@ -52,7 +69,7 @@ after(async () => {
 beforeEach(() => {
   seen = {};
   process.env["AIDE_MYROOM_TOKEN"] = TOKEN;
-  respond = () => ({ status: 200, body: { staleThresholdMinutes: 10, printer: freshPrinter() } });
+  respond = () => ({ status: 200, body: onlineBody() });
 });
 
 async function call(): Promise<Record<string, any>> {
@@ -65,7 +82,7 @@ describe("aide_printer_status", () => {
   it("内部APIへ Bearer で問い合わせ、現在の状態と鮮度を返す", async () => {
     const payload = await call();
 
-    assert.equal(seen.url, "/api/internal/printer-state");
+    assert.equal(seen.url, "/api/internal/bambu/printer");
     assert.equal(seen.authorization, `Bearer ${TOKEN}`);
     assert.equal(payload["freshness"], "fresh");
     assert.equal(payload["fresh"], true);
@@ -82,12 +99,19 @@ describe("aide_printer_status", () => {
     }
   });
 
-  it("更新が止まっていれば、現在の状態を返さず stale と最後の値を分けて返す", async () => {
+  it("収集が止まっていれば、現在の状態を返さず stale と最後の値を分けて返す", async () => {
+    const longAgo = new Date(Date.now() - 45 * 60_000).toISOString();
     respond = () => ({
       status: 200,
       body: {
-        staleThresholdMinutes: 10,
-        printer: { ...freshPrinter(), updatedAt: new Date(Date.now() - 45 * 60_000).toISOString() },
+        ...onlineBody(),
+        connection: "collector_stale",
+        online: false,
+        stale: true,
+        lastUpdateAt: longAgo,
+        lastMessageAt: longAgo,
+        printer: null,
+        lastKnown: freshPrinter(),
       },
     });
 
@@ -132,7 +156,10 @@ describe("aide_printer_status", () => {
   });
 
   it("収集が一度も届いていなければ never を返す", async () => {
-    respond = () => ({ status: 200, body: { printer: null } });
+    respond = () => ({
+      status: 200,
+      body: { configured: false, connection: "no_data", online: false, stale: true, printer: null, lastKnown: null },
+    });
 
     const payload = await call();
 
