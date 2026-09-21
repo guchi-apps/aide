@@ -80,6 +80,14 @@ describe("機能一覧ページ", () => {
     assert.ok(render(registryWith(pingTool), "https://aide.example.com").includes("https://aide.example.com/mcp"));
   });
 
+  it("接続先URLが狭い画面で枠からはみ出さないよう、値の列を折り返せるようにする", () => {
+    // 切れ目のないURLは、値の列が min-width:0 と折り返しの許可を持たないと枠を突き抜ける（#356）。
+    const html = render(registryWith(pingTool));
+    const rule = html.match(/\.connect dd\{([^}]*)\}/)?.[1] ?? "";
+    assert.ok(rule.includes("min-width:0"), ".connect dd に min-width:0 が無い");
+    assert.ok(rule.includes("overflow-wrap:anywhere"), ".connect dd に overflow-wrap:anywhere が無い");
+  });
+
   it("ツールの説明に含まれるHTMLをエスケープする", () => {
     const evil: Tool = {
       name: "aide_<script>",
