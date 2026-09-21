@@ -28,6 +28,8 @@ import { buildToolRegistry } from "./mcp/catalog.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
+  handleStatusAppAuthConsume,
+  handleStatusAppAuthStart,
   handleStatusAuthCallback,
   handleStatusAuthStart,
   handleStatusLogin,
@@ -121,6 +123,14 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // （src/web/login.ts）。
   if (path === "/status/auth/start" && (req.method === "GET" || req.method === "HEAD")) {
     await handleStatusAuthStart(req, res, url, loginOptions);
+    return;
+  }
+  if (path === "/status/auth/app/start" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleStatusAppAuthStart(req, res, url, loginOptions);
+    return;
+  }
+  if (path === "/status/auth/app/consume" && req.method === "POST") {
+    await handleStatusAppAuthConsume(req, res, loginOptions);
     return;
   }
   if (path === CALLBACK_PATH && (req.method === "GET" || req.method === "HEAD")) {

@@ -87,6 +87,18 @@ export const ENDPOINTS: FeatureItem[] = [
       "Googleログインの戻り先。メールアドレスが許可リストにあるときだけログイン状態にする。",
   },
   {
+    name: "/status/auth/app/start",
+    meta: "GET",
+    description:
+      "iOSアプリのGoogleログインを始める。アプリが作ったPKCE challengeを認証の往復に保持する。",
+  },
+  {
+    name: "/status/auth/app/consume",
+    meta: "POST",
+    description:
+      "iOSアプリの短寿命・一回限りコードをPKCE verifierと交換し、WKWebViewへ画面用Cookieを発行する。",
+  },
+  {
     name: "/features",
     meta: "GET",
     description: "このページ。ログインが要る（/map と同じ。許可されたGoogleアカウント、未設定の環境ではパスワード）。",
