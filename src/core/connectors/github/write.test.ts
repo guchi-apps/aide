@@ -6,6 +6,8 @@ import {
   CREATION_MAX,
   CREATION_WINDOW_MS,
   CreationGuard,
+  DEFAULT_LABELS,
+  defaultLabelWarning,
   FOOTNOTE,
   normalizeRepo,
   selectExistingLabels,
@@ -43,10 +45,10 @@ describe("normalizeRepo", () => {
 describe("selectExistingLabels", () => {
   it("実在するものだけを付け、残りは落とす", () => {
     const { applied, dropped } = selectExistingLabels(
-      ["70.confirm", "50.feature"],
-      ["00.check-user", "70.confirm"],
+      ["70.needs-decision", "50.feature"],
+      ["00.check-user", "70.needs-decision"],
     );
-    assert.deepEqual(applied, ["70.confirm"]);
+    assert.deepEqual(applied, ["70.needs-decision"]);
     assert.deepEqual(dropped, ["50.feature"]);
   });
 
@@ -57,15 +59,33 @@ describe("selectExistingLabels", () => {
   });
 
   it("重複と空白だけの指定は無視する", () => {
-    const { applied } = selectExistingLabels(["70.confirm", " 70.confirm ", "  "], ["70.confirm"]);
-    assert.deepEqual(applied, ["70.confirm"]);
+    const { applied } = selectExistingLabels(["70.needs-decision", " 70.needs-decision ", "  "], ["70.needs-decision"]);
+    assert.deepEqual(applied, ["70.needs-decision"]);
   });
 
   it("ラベル一覧が引けなかった場合（空）は1つも付けない", () => {
     // ここで素通しすると、GitHubがラベルを勝手に新規作成してしまう。
-    const { applied, dropped } = selectExistingLabels(["70.confirm"], []);
+    const { applied, dropped } = selectExistingLabels(["70.needs-decision"], []);
     assert.deepEqual(applied, []);
-    assert.deepEqual(dropped, ["70.confirm"]);
+    assert.deepEqual(dropped, ["70.needs-decision"]);
+  });
+});
+
+describe("defaultLabelWarning", () => {
+  it("既定ラベルが落ちていなければ警告しない", () => {
+    assert.equal(defaultLabelWarning([]), null);
+    assert.equal(defaultLabelWarning(["50.feature"]), null);
+  });
+
+  it("既定ラベルが落ちたら、無人実行が着手し得ることを警告する", () => {
+    const warning = defaultLabelWarning([...DEFAULT_LABELS, "50.feature"]);
+    assert.ok(warning);
+    assert.ok(warning.includes(DEFAULT_LABELS[0]!));
+    assert.match(warning, /無人実行/);
+  });
+
+  it("既定ラベルは改名後の70.needs-decisionである", () => {
+    assert.deepEqual(DEFAULT_LABELS, ["70.needs-decision"]);
   });
 });
 

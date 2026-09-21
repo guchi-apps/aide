@@ -23,7 +23,7 @@ const REST_ROOT = "https://api.github.com";
 const TIMEOUT_MS = 5_000;
 
 /** 起票時に既定で付けるラベル。人が着手要否を判断するまで実装フローへ自動で乗せないため。 */
-export const DEFAULT_LABELS = ["70.confirm"];
+export const DEFAULT_LABELS = ["70.needs-decision"];
 
 /** 本文の上限。GitHubのAPI上限（65536）よりかなり手前で切る。口述の書き起こしがこれを超えることはない。 */
 const MAX_BODY_LENGTH = 20_000;
@@ -74,6 +74,31 @@ export interface CreateIssueOutcome {
    * 要るときに限る。色や説明まで要るなら `aide_dev_status` に repo を指定して呼ぶ。
    */
   availableLabels?: string[];
+  /**
+   * 既定ラベル（`DEFAULT_LABELS`）が落ちたときの警告。**起票は止めずに、気づけるよう返す。**
+   *
+   * 既定ラベルは「人が判断するまで無人実行に乗せない」ためのガードで、外れたまま黙って起票すると
+   * 無人実行が着手し得る。ラベル体系の改名（旧名から `70.needs-decision` へ、#382）で実際に
+   * ガードが外れたが、`droppedLabels` は落ちたラベルを読み取る側が気にしない限り見落とされる。
+   * 起票そのものを止めないのは、ラベル一覧が引けないときや issue-deck を使わないリポジトリで
+   * Claudeアプリから何も起票できなくなるのを避けるため。
+   */
+  warning?: string;
+}
+
+/**
+ * 既定ラベルが落ちていたら、その旨の警告を返す。落ちていなければ null。
+ *
+ * 呼び出し側が `labels` を明示したときの脱落は、呼び出し側が選んだ結果なので対象にしない
+ * （それは `droppedLabels` と `availableLabels` が伝える）。
+ */
+export function defaultLabelWarning(dropped: readonly string[]): string | null {
+  const lost = DEFAULT_LABELS.filter((name) => dropped.includes(name));
+  if (lost.length === 0) return null;
+  return (
+    `既定ラベル ${lost.join(" / ")} を付けられませんでした（起票先に無いか、ラベル一覧を取得できなかった）。` +
+    "このIssueは人の判断を待つ印が無いため、無人実行が着手し得ます。ラベルを手で付けてください。"
+  );
 }
 
 /**
@@ -183,7 +208,7 @@ export class CreationGuard {
 /**
  * 既定のガードの窓と上限。1時間あたり100件（#319）。
  *
- * 当初は10分あたり3件だったが、起票したIssueには既定で `70.confirm` が付き実装フローへ
+ * 当初は10分あたり3件だったが、起票したIssueには既定で `70.needs-decision` が付き実装フローへ
  * 自動では乗らない（実行するかは人が決める）ため、まとめて起票する使い方を妨げない値へ緩めた。
  * 会話の暴走で際限なく立つのを止める役目は、上限そのものより「直前と同一なら拒否」と
  * 1時間の窓で果たす。
@@ -281,6 +306,9 @@ export async function createIssue(
     return { ok: false, reason: describeWriteFailure(cause, config.org, repo) };
   }
 
+  // 既定ラベルで起票したときだけ。明示した `labels` の脱落は `droppedLabels` が伝える。
+  const warning = input.labels === undefined ? defaultLabelWarning(dropped) : null;
+
   return {
     ok: true,
     repo: `${config.org}/${repo}`,
@@ -289,5 +317,6 @@ export async function createIssue(
     labels: applied,
     droppedLabels: dropped,
     ...(dropped.length > 0 ? { availableLabels: existing } : {}),
+    ...(warning ? { warning } : {}),
   };
 }

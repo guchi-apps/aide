@@ -28,7 +28,8 @@ export const createIssueTool: Tool = {
     "「Issueにしておいて」「起票して」「あとで対応したいので残しておいて」と明示的に頼まれたときだけ呼ぶ。" +
     "会話の中で課題や改善案が出てきただけでは呼ばない（勝手に起票するとIssueが量産される）。" +
     "1回の呼び出しで作れるのは1件だけで、複数の話題があるなら1件ずつ、本当に必要なものに絞ること。" +
-    `既定で ${DEFAULT_LABELS.join(" / ")} ラベルが付き、対象リポジトリに存在しないラベルは黙って落ちる。` +
+    `既定で ${DEFAULT_LABELS.join(" / ")} ラベルが付き、対象リポジトリに存在しないラベルは落ちる` +
+    "（既定ラベルが落ちたときは warning を返す。その場合は利用者へ伝え、ラベルを手で付けてもらうこと）。" +
     "作成したIssueのURLと番号を返す。既存Issueの編集・close・コメントはできない（issue-deckの画面で行う）。" +
     "**内容を利用者に確かめてもらいたいときは dryRun: true で呼ぶ**と、起票せずに" +
     "「何が起票されるか」だけを返す。",
@@ -128,6 +129,7 @@ export const createIssueTool: Tool = {
     const outcome = await createIssue(config, { repo, title, body, labels });
     if (outcome.ok) {
       console.log(`[issue] 起票: ${outcome.repo}#${outcome.number}`);
+      if (outcome.warning) console.warn(`[issue] ${outcome.repo}#${outcome.number}: ${outcome.warning}`);
     } else {
       console.warn(`[issue] 起票せず: ${outcome.reason}`);
     }
