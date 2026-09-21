@@ -3,6 +3,7 @@ import { airconControlTool } from "./tools/aircon-control.ts";
 import { claudeSessionsTool } from "./tools/claude-sessions.ts";
 import { createEventTool } from "./tools/create-event.ts";
 import { devStatusTool, repoLabelsTool, repoStatusTool } from "./tools/dev.ts";
+import { garbageCollectionTool } from "./tools/garbage.ts";
 import { createIssueTool } from "./tools/issue.ts";
 import { balancesTool, fixedCostsTool } from "./tools/money.ts";
 import {
@@ -62,6 +63,7 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(airconControlTool);
   registry.register(weatherTool);
   registry.register(scheduleTool);
+  registry.register(garbageCollectionTool);
   // 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
   registry.register(createEventTool);
   // 開発状況は俯瞰・1リポジトリの詳細・起票用ラベルで分ける（#373）。
