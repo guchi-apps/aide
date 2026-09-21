@@ -82,9 +82,11 @@ describe("resolveDate", () => {
 });
 
 describe("aide_schedule の宣言", () => {
-  it("`aide_daily_briefing` との使い分けを説明文に書いている", () => {
-    // 横断ビュー同士でも、選択が曖昧になればMCP層を狭くしている意味が無くなる。
-    assert.match(scheduleTool.description, /aide_daily_briefing/);
+  it("天気は返さないこと・今日もここで引くことを説明文に書いている", () => {
+    // #373 で aide_daily_briefing を畳んだため、今日ぶんの予定もこのツールが答える。
+    // 天気まで答えると読まれかねないので、境界を description に書いておく。
+    assert.match(scheduleTool.description, /aide_weather/);
+    assert.match(scheduleTool.description, /天気は返さない/);
     assert.match(scheduleTool.description, /終日の予定は時間帯を持たない/);
   });
 

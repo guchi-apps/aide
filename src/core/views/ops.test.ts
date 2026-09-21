@@ -289,6 +289,37 @@ describe("残枠", () => {
   });
 });
 
+describe("問題の区画（source）", () => {
+  it("ホスト・外形監視・残枠をそれぞれの区画として印を付ける", () => {
+    // MCP層はこの印だけを見て `aide_host_status` / `aide_uptime_monitors` /
+    // `aide_service_quotas` へ振り分ける。文面から判定させないための土台。
+    const status = summarizeOps(
+      raw({
+        hostStats: {
+          hosts: [host({ latest: snapshot({ cpuPercent: 99 }) })],
+          offlineAfterSeconds: 300,
+        },
+        kumaMonitors: [{ name: "aide", status: "down" }],
+        aiUsage: {
+          providers: [
+            { name: "Claude", status: "ok", windows: [{ label: "週", usedPercent: 97, resetsAt: null }] },
+          ],
+        },
+      }),
+      NOW,
+    );
+
+    const sources = new Map(status.problems.map((problem) => [problem.source, problem.message]));
+    assert.ok(sources.has("hosts"), JSON.stringify(status.problems));
+    assert.ok(sources.has("monitors"), JSON.stringify(status.problems));
+    assert.ok(sources.has("quotas"), JSON.stringify(status.problems));
+    // どの問題もいずれかの区画に属する（印の付け忘れをここで止める）。
+    for (const problem of status.problems) {
+      assert.ok(["hosts", "monitors", "quotas"].includes(problem.source), problem.message);
+    }
+  });
+});
+
 describe("一部のソースを取得できなかったとき", () => {
   it("取れた範囲では ok のまま、complete を落として範囲が限定的だと伝える", () => {
     const status = summarizeOps(

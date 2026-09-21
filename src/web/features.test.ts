@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, it } from "node:test";
 import { ToolRegistry } from "../mcp/registry.ts";
 import type { Tool } from "../mcp/types.ts";
-import { moneySummaryTool } from "../mcp/tools/money.ts";
+import { balancesTool } from "../mcp/tools/money.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { buildSections, ENDPOINTS, handleFeaturesPage, renderFeaturesPage } from "./features.ts";
@@ -21,8 +21,8 @@ function registryWith(...tools: Tool[]): ToolRegistry {
 
 describe("機能一覧ページ", () => {
   it("登録済みのMCPツールが名前と説明つきで載る", () => {
-    const html = render(registryWith(pingTool, moneySummaryTool));
-    for (const tool of [pingTool, moneySummaryTool]) {
+    const html = render(registryWith(pingTool, balancesTool));
+    for (const tool of [pingTool, balancesTool]) {
       assert.ok(html.includes(tool.name), `${tool.name} が出力に含まれていない`);
       // 説明は分割して連結しているため、先頭の一節だけ照合する。
       assert.ok(html.includes(tool.description.slice(0, 12)), `${tool.name} の説明が出力に含まれていない`);

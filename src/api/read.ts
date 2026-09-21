@@ -50,7 +50,7 @@ function authorize(req: IncomingMessage, res: ServerResponse, label: string): bo
 /**
  * `GET /api/money/summary`
  *
- * MCPツール `aide_money_summary` と同じ内容を返す。呼び出し側（asset-manager）が要る
+ * MCPツール `aide_balances` と `aide_fixed_costs` を合わせた内容を返す。呼び出し側（asset-manager）が要る
  * `balances`・`holdings` に加えて、`fetchedAt`・`ageMinutes`・`stale` を必ず併せて返す。
  * **鮮度の判断は呼び出し側に委ねる**（`src/core/views/money.ts` と同じ方針）。
  */

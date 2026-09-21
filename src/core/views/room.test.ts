@@ -139,6 +139,21 @@ describe("summarizeRoom", () => {
     );
   });
 
+  it("センサーとエアコンをそれぞれの区画として印を付ける", () => {
+    // MCP層はこの印だけを見て `aide_room_sensors` / `aide_aircon_status` へ振り分ける。
+    const status = summarizeRoom(
+      snapshot({
+        sensors: [sensor({ co2: 1800 })],
+        aircons: [{ acId: 1, name: "リビング", power: "off", online: false }],
+      }),
+      NOW,
+    );
+
+    const sources = status.problems.map((problem) => problem.source);
+    assert.ok(sources.includes("sensors"), JSON.stringify(status.problems));
+    assert.ok(sources.includes("aircons"), JSON.stringify(status.problems));
+  });
+
   it("エアコンがオフラインなら気になる点に挙げる", () => {
     const status = summarizeRoom(
       snapshot({ aircons: [{ acId: 1, name: "リビング", power: "off", online: false }] }),

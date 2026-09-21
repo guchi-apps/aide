@@ -198,7 +198,9 @@ export const zaimPaymentTool: Tool = {
     "**同じ内容（日付・金額・分類・店名・品名）が既に登録されている場合は登録せずに止まる。** " +
     "本当に別の支出なら、**利用者に確認したうえで** allowDuplicate: true を付けて呼び直す" +
     "（確認せずに付け直さないこと。二重登録になり、取り消せない）。" +
-    "登録できたら moneyId と、実際に登録された内容（解決後の口座名・カテゴリ名・ジャンル名）を返す。",
+    "登録できたら moneyId と、実際に登録された内容（解決後の口座名・カテゴリ名・ジャンル名）を返す。" +
+    "**分類や金額に自信が無いときは dryRun: true で呼ぶ**と、登録せずに" +
+    "「何が登録されるか」だけを返すので、利用者に確かめてもらえる。",
   inputSchema: {
     type: "object",
     properties: {
@@ -235,6 +237,13 @@ export const zaimPaymentTool: Tool = {
           "**利用者に確認せずに指定しないこと。** 同じ日に同じ店で同じ金額を2回払った、" +
           "というように利用者が別件だと明言した場合にだけ true にする。" +
           "前回の結果が確定していない（kind: conflict）場合は、これを付けても登録されない。",
+      },
+      dryRun: {
+        type: "boolean",
+        description:
+          "**登録せずに、何が登録されるかだけを返す。** 金額・日付の検査、IDの実在確認、" +
+          "二重登録の判定まで本番と同じものを通すので、解決後のカテゴリ名・ジャンル名・口座名を" +
+          "利用者に読み上げて確かめられる。確認が取れたら dryRun を外して呼び直す。",
       },
     },
     required: ["amount", "date", "categoryId", "genreId"],
@@ -323,6 +332,28 @@ export const zaimPaymentTool: Tool = {
         hint:
           "本当に別の支出かどうかを**利用者に確認**してください。別件だと確認できた場合だけ、" +
           "同じ引数に allowDuplicate: true を付けて呼び直します。",
+      });
+    }
+
+    // **冪等キーの採番より前で止める。** `nextRequestId()` の結果を使わずに抜けても
+    // 実害は無いが、下見のつもりの呼び出しが連番を進めるのは筋が悪い。
+    if (args["dryRun"] === true) {
+      return json({
+        ok: true,
+        dryRun: true,
+        // 解決後の名前まで返す。桁違い・分類の取り違えに、利用者がこの内容で気づける。
+        wouldRegister: {
+          date: input.date,
+          amount: input.amount,
+          categoryName: resolved?.ok ? resolved.names.categoryName : null,
+          genreName: resolved?.ok ? resolved.names.genreName : null,
+          accountName: resolved?.ok ? resolved.names.accountName : null,
+          place: input.place ?? null,
+          name: input.name ?? null,
+          comment: input.comment ?? null,
+        },
+        note: "登録していません。この内容でよければ dryRun を外して呼び直してください。",
+        ...(resolved === null ? { masterUnavailable: true } : {}),
       });
     }
 

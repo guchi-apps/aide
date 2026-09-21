@@ -572,9 +572,9 @@ describe("asset_manager_subscriptions", () => {
     }
   });
 
-  it("ツール説明で、金額の読み方・解約予定・excludedFromTotal・aide_money_summaryとの使い分けを示す", () => {
+  it("ツール説明で、金額の読み方・解約予定・excludedFromTotal・aide_fixed_costsとの使い分けを示す", () => {
     const description = assetManagerSubscriptionsTool.description;
-    for (const keyword of ["monthlyAmountJpy", "amount", "SCHEDULED_TO_END", "ENDED", "excludedFromTotal", "aide_money_summary", "includeEnded"]) {
+    for (const keyword of ["monthlyAmountJpy", "amount", "SCHEDULED_TO_END", "ENDED", "excludedFromTotal", "aide_fixed_costs", "includeEnded"]) {
       assert.ok(description.includes(keyword), keyword);
     }
   });
