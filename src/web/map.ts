@@ -286,7 +286,11 @@ function markers(prefix: string): string {
   return `<defs>${marker("r", "")}${marker("w", " w")}</defs>`;
 }
 
-/** AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。 */
+/**
+ * AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。
+ * **読む・書く両方あるコネクタは呼び出し側で2本の線に分け、read・writeそれぞれでこの関数を呼ぶ**
+ * （1本に両端の矢じりを付けると向きが読み取りづらいため。#426）。ここへ`dir: "both"`は渡らない。
+ */
 function edge(prefix: string, d: string, dir: Direction, extra = ""): string {
   const start = dir === "write" ? "" : ` marker-start="url(#${prefix}r)"`;
   const end = dir === "read" ? "" : ` marker-end="url(#${prefix}w)"`;
@@ -297,8 +301,43 @@ interface PlacedRow extends Destination {
   y: number;
 }
 
-/** 繋ぐ先を上から順に並べたときの行の位置と、領域の見出しの位置。 */
-function layoutRows(start: number, rowH: number, headH: number, gap: number) {
+/** 全角（CJK・全角記号）か半角かを判定する。折り返し幅の概算に使う（実測はしない）。 */
+function isWideChar(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return (
+    (code >= 0x3000 && code <= 0x30ff) || // 全角記号・ひらがな・カタカナ
+    (code >= 0x3400 && code <= 0x4dbf) || // CJK拡張A
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK統合漢字
+    (code >= 0xf900 && code <= 0xfaff) || // CJK互換漢字
+    (code >= 0xff00 && code <= 0xffef) // 全角英数・記号
+  );
+}
+
+/**
+ * 説明文を、指定した幅（SVGのユーザー単位）に収まるよう複数行に分ける。
+ * サーバー側にはフォント計測が無いため、全角を1em・半角を0.58emとして概算する
+ * （見切れをゼロにすることを優先し、行の折り返し位置の最適さは求めない）。
+ */
+function wrapText(text: string, maxWidth: number, fontSize: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  let width = 0;
+  for (const ch of Array.from(text)) {
+    const w = isWideChar(ch) ? fontSize : fontSize * 0.58;
+    if (line && width + w > maxWidth) {
+      lines.push(line);
+      line = "";
+      width = 0;
+    }
+    line += ch;
+    width += w;
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+/** 繋ぐ先を上から順に並べたときの行の位置と、領域の見出しの位置。行の高さはアプリごとに変わる（説明文の折り返し行数ぶん）。 */
+function layoutRows(start: number, rowHeight: (app: Destination) => number, headH: number, gap: number) {
   let y = start;
   const rows: PlacedRow[] = [];
   const heads: { name: string; y: number }[] = [];
@@ -308,7 +347,7 @@ function layoutRows(start: number, rowH: number, headH: number, gap: number) {
     y += headH;
     for (const app of group.apps) {
       rows.push({ ...app, y });
-      y += rowH;
+      y += rowHeight(app);
     }
   });
   return { rows, heads, end: y };
@@ -323,13 +362,20 @@ function hubLogo(centerX: number, top: number, height: number): string {
   return logoSvg(`x="${centerX - logoWidth(height) / 2}" y="${top}" ${logoSize(height)}`);
 }
 
+/** PC・iPad向け。長い説明文は右端で見切れず複数行に折り返す。枠の高さはその行数ぶん広げる。 */
+function wideRowGeometry(app: Destination): { lines: string[]; boxHeight: number } {
+  const textX = 662 + 176;
+  const maxWidth = 1030 - textX - 10;
+  const lines = wrapText(app.what, maxWidth, 11.5);
+  return { lines, boxHeight: 30 + Math.max(0, lines.length - 1) * 14 };
+}
+
 /** PC・iPad向け。左に使う側、中央にAIDE、右に繋ぐ先。 */
 export function renderWideMap(): string {
   const p = "mw-";
   const W = 1030;
   const RX = 662;
-  const rowH = 34;
-  const { rows, heads, end } = layoutRows(6, rowH, 26, 14);
+  const { rows, heads, end } = layoutRows(6, (app) => wideRowGeometry(app).boxHeight + 4, 26, 14);
   const H = end + 6;
   const hy = H / 2;
   const hubH = 150;
@@ -349,13 +395,23 @@ export function renderWideMap(): string {
     );
   });
   rows.forEach((row, i) => {
-    const my = row.y + (rowH - 4) / 2;
+    const { lines, boxHeight } = wideRowGeometry(row);
+    const my = row.y + boxHeight / 2;
     const ty = Math.round(hy - 60 + (i * 120) / Math.max(1, rows.length - 1));
-    parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
+    if (row.dir === "both") {
+      const o = 4;
+      parts.push(edge(p, `M592,${ty - o} C630,${ty - o} 630,${my - o} ${RX - 2},${my - o}`, "read"));
+      parts.push(edge(p, `M592,${ty + o} C630,${ty + o} 630,${my + o} ${RX - 2},${my + o}`, "write"));
+    } else {
+      parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
+    }
+    const whatTspans = lines
+      .map((line, li) => `<tspan x="${RX + 176}" y="${row.y + 20 + li * 14}">${escapeHtml(line)}</tspan>`)
+      .join("");
     parts.push(
-      `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="${rowH - 4}" class="row-box"/>` +
+      `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="${boxHeight}" class="row-box"/>` +
         `<text x="${RX + 10}" y="${row.y + 20}" class="row-name">${escapeHtml(row.name)}</text>` +
-        `<text x="${RX + 176}" y="${row.y + 20}" class="row-what">${escapeHtml(row.what)}</text></a>`,
+        `<text class="row-what">${whatTspans}</text></a>`,
     );
   });
   for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
@@ -385,6 +441,14 @@ function tags(right: number, y: number, dir: Direction): string {
   return out.join("");
 }
 
+/** スマホ向け。長い説明文は右端で見切れず複数行に折り返す。枠の高さはその行数ぶん広げる。 */
+function narrowRowGeometry(app: Destination): { lines: string[]; boxHeight: number } {
+  const RX = 38;
+  const maxWidth = 360 - RX - 9 - 6;
+  const lines = wrapText(app.what, maxWidth, 11);
+  return { lines, boxHeight: 40 + Math.max(0, lines.length - 1) * 13 };
+}
+
 /** スマホ向け。上に使う側を2列で、中央にAIDE、下に繋ぐ先を縦に並べる。 */
 export function renderNarrowMap(): string {
   const p = "mn-";
@@ -393,7 +457,7 @@ export function renderNarrowMap(): string {
   const ch = 50;
   const hubY = 240;
   const hubH = 76;
-  const { rows, heads, end } = layoutRows(hubY + hubH + 30, 44, 22, 10);
+  const { rows, heads, end } = layoutRows(hubY + hubH + 30, (app) => narrowRowGeometry(app).boxHeight + 4, 22, 10);
   const H = end + 4;
   const TX = 14;
   const RX = 38;
@@ -414,15 +478,27 @@ export function renderNarrowMap(): string {
   });
   const last = rows[rows.length - 1];
   if (last) {
-    parts.push(`<path d="M90,${hubY + hubH / 2} H${TX} V${last.y + 20}" class="edge trunk"/>`);
+    const { boxHeight } = narrowRowGeometry(last);
+    parts.push(`<path d="M90,${hubY + hubH / 2} H${TX} V${last.y + boxHeight / 2}" class="edge trunk"/>`);
   }
   for (const row of rows) {
-    parts.push(edge(p, `M${TX},${row.y + 20} H${RX - 1}`, row.dir, " solid"));
+    const { lines, boxHeight } = narrowRowGeometry(row);
+    const my = row.y + boxHeight / 2;
+    if (row.dir === "both") {
+      const o = 3;
+      parts.push(edge(p, `M${TX},${my - o} H${RX - 1}`, "read", " solid"));
+      parts.push(edge(p, `M${TX},${my + o} H${RX - 1}`, "write", " solid"));
+    } else {
+      parts.push(edge(p, `M${TX},${my} H${RX - 1}`, row.dir, " solid"));
+    }
+    const whatTspans = lines
+      .map((line, li) => `<tspan x="${RX + 9}" y="${row.y + 33 + li * 13}">${escapeHtml(line)}</tspan>`)
+      .join("");
     parts.push(
-      `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="40" class="row-box"/>` +
+      `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="${boxHeight}" class="row-box"/>` +
         `<text x="${RX + 9}" y="${row.y + 17}" class="row-name" style="font-size:12.5px">${escapeHtml(row.name)}</text>` +
         tags(W - 6, row.y + 12, row.dir) +
-        `<text x="${RX + 9}" y="${row.y + 33}" class="row-what" style="font-size:11px">${escapeHtml(row.what)}</text></a>`,
+        `<text class="row-what" style="font-size:11px">${whatTspans}</text></a>`,
     );
   }
   for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);

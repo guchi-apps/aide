@@ -154,7 +154,7 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .items li:last-child{border-bottom:0}
 .items .nm{font-family:${FONT_MONO};font-size:.84rem;font-weight:500;color:var(--accent);overflow-wrap:anywhere}
 .items .mt{font-family:${FONT_MONO};font-size:.72rem;color:var(--muted);margin-left:.5rem}
-.items .ds{font-size:.82rem;color:var(--ink-2)}
+.items .ds{font-size:.82rem;color:var(--ink-2);overflow-wrap:anywhere}
 /* 説明文のインラインMarkdown（src/web/markdown.ts）。機能一覧と、アプリ連携のポップアップで共通。 */
 .items .ds strong,.detail-popover strong{color:var(--ink);font-weight:600}
 .items .ds code,.detail-popover code{font-family:${FONT_MONO};font-size:.92em;padding:0 .25em;background:var(--panel-2);border:1px solid var(--line-2)}
@@ -209,7 +209,7 @@ ${ARRIVE_KEYFRAMES("arrive-again")}
 .b{font-size:.7rem;font-weight:700;padding:0 .4rem;border:1px solid;white-space:nowrap}
 .b.r{color:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
 .b.w{color:var(--wr);background:var(--wr-bg);border-color:var(--wr)}
-.apps .ds{grid-column:1/-1;font-size:.84rem;color:var(--ink-2)}
+.apps .ds{grid-column:1/-1;font-size:.84rem;color:var(--ink-2);overflow-wrap:anywhere}
 .chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.3rem;margin:.15rem 0 0;padding:0;list-style:none}
 .chips span,.detail-trigger{font-family:${FONT_MONO};font-size:.72rem;padding:.05rem .45rem;background:var(--panel-2);
  color:var(--muted);border:1px solid var(--line);overflow-wrap:anywhere}
