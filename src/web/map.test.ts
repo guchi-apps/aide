@@ -6,6 +6,7 @@ import type { CreateIssueOutcome } from "../core/connectors/github/write.ts";
 import { buildToolRegistry } from "../mcp/catalog.ts";
 import { ToolRegistry } from "../mcp/registry.ts";
 import { pingTool } from "../mcp/tools/ping.ts";
+import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { ENDPOINTS } from "./features.ts";
 import type { LoginOptions } from "./login.ts";
 import {
@@ -91,6 +92,17 @@ describe("アプリ連携の図", () => {
       assert.ok(x >= box.left && x + Number(logo[2]) <= box.right, `ロゴが囲み（${box.left}〜${box.right}）に収まっていない`);
     });
   }
+
+  it("ハブに「VPS」と「Worker＝サブPC」の役割を示し、Workerは一覧のWorkerカードへリンクする（#431）", () => {
+    for (const render of [renderWideMap, renderNarrowMap]) {
+      const svg = render();
+      assert.match(svg, /<text[^>]*class="hub-vps">VPS/, "VPSの表示が無い");
+      assert.match(svg, /<text[^>]*class="hub-worker">Worker ＝ サブPC<\/text>/, "Workerの表示が無い");
+      assert.ok(svg.includes(`重い処理を定期実行（${JOB_CATALOG.length}件）`), "workerジョブの件数が無い");
+      assert.ok(svg.includes('href="#worker-jobs"'), "Workerから一覧へのリンクが無い");
+      assert.ok(!svg.includes("NaN"), "座標の計算が壊れている");
+    }
+  });
 
   it("読むと書くで矢じりの向きを分ける", () => {
     const svg = renderWideMap();
@@ -195,6 +207,21 @@ describe("アプリ連携の画面", () => {
   it("認証が無効なら警告する", () => {
     assert.ok(renderMapPage({ authDisabled: true }).includes("認証が無効です"));
     assert.ok(!renderMapPage().includes("認証が無効です"));
+  });
+
+  it("一覧にWorker（サブPC）のカードを出し、workerジョブすべてを名前・実行間隔・説明で表示する（#431）", () => {
+    const html = renderMapPage();
+    assert.ok(html.includes('id="worker-jobs"'));
+    assert.ok(html.includes("Worker（サブPC・重い処理）"));
+    assert.ok(html.includes(`<span class="n">${JOB_CATALOG.length}</span>`));
+    for (const job of JOB_CATALOG) {
+      assert.ok(html.includes(job.name), `${job.name} が一覧に無い`);
+      assert.ok(html.includes(job.interval), `${job.name} の実行間隔が一覧に無い`);
+    }
+  });
+
+  it("リード文に、重い処理をサブPCのWorkerが担う旨を書く（#431）", () => {
+    assert.ok(renderMapPage().includes("重い処理（Zaimの巡回など）はサブPCで動くWorkerが定期的に行い"));
   });
 });
 
