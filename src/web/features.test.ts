@@ -41,6 +41,37 @@ describe("機能一覧ページ", () => {
     assert.ok(render(registryWith(pingTool, extra)).includes("aide_extra"));
   });
 
+  it("MCPツールを選ぶとtools/callのリクエストと入力スキーマを確認できる", () => {
+    const html = render(registryWith(pingTool));
+    assert.match(html, /class="nm feature-trigger"[^>]*>aide_ping/);
+    assert.ok(html.includes("&quot;method&quot;: &quot;tools/call&quot;"));
+    assert.ok(html.includes("&quot;name&quot;: &quot;aide_ping&quot;"));
+    assert.ok(html.includes("入力スキーマ:"));
+    assert.ok(html.includes("JSON-RPCのresult.content[0].text"));
+    assert.ok(html.includes("データなし・未取得"));
+  });
+
+  it("HTTPエンドポイントを選ぶと呼び出しと成功・失敗・空データの意味を確認できる", () => {
+    const html = render(registryWith(pingTool));
+    assert.match(html, /class="nm feature-trigger"[^>]*>\/api\/money\/transactions/);
+    assert.ok(html.includes("GET /api/money/transactions"));
+    assert.ok(html.includes("明細が無い場合は空配列（[]）を返す"));
+    assert.ok(html.includes("401: 認証情報が無い、または一致しない。"));
+    assert.ok(html.includes("409: 前回の登録結果が確定しておらず、再送不可。"));
+  });
+
+  it("詳細に渡すリクエスト情報をHTMLとして解釈しない", () => {
+    const tool: Tool = {
+      name: "aide_detail",
+      description: "詳細のエスケープ確認",
+      inputSchema: { type: "object", properties: { value: { description: "<script>" } } },
+      handler: () => ({ content: [] }),
+    };
+    const html = render(registryWith(tool));
+    assert.ok(html.includes("&lt;script&gt;"));
+    assert.ok(!html.includes('<pre><script>'));
+  });
+
   it("worker ジョブがカタログの分だけ載る", () => {
     const html = render(registryWith(pingTool));
     for (const job of JOB_CATALOG) {
@@ -113,7 +144,7 @@ describe("機能一覧ページ", () => {
     const html = render(registryWith(marked));
     assert.ok(html.includes('<span class="ds"><strong>書き込みを伴う。</strong> <code>on</code> / <code>off</code> を返す。</span>'));
     // 名前・注記は説明文ではないため変換しない。
-    assert.ok(html.includes('<span class="nm">aide_marked</span>'));
+    assert.match(html, /class="nm feature-trigger"[^>]*>aide_marked/);
   });
 
   it("実際に登録されているツールの説明に、記号のままの ** が残らない（#364）", () => {

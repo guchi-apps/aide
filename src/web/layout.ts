@@ -230,6 +230,10 @@ ${ARRIVE_KEYFRAMES("arrive-again")}
 .detail-popover>p{font-size:.84rem;color:var(--ink-2);margin:.7rem 0}
 .popover-items{list-style:none;margin:0;padding:0}.popover-items li{padding:.55rem 0;border-top:1px solid var(--line-2)}
 .popover-items li>.mono{color:var(--accent);font-size:.84rem;overflow-wrap:anywhere}.popover-items li>span:last-child{display:block;font-size:.8rem;color:var(--ink-2)}
+/* 機能一覧の詳細。項目を選んだ人が、画面を離れずに呼び出しと結果を照合できるようにする。 */
+.feature-trigger{padding:0;background:none;border:0;cursor:pointer;text-align:left}
+.feature-trigger:hover{text-decoration:underline}.feature-detail{margin:auto;width:min(42rem,calc(100% - 2rem));max-height:calc(100vh - 2rem);overflow:auto;padding:.9rem 1rem;background:var(--panel);color:var(--ink);border:1px solid var(--line);box-shadow:0 .8rem 2rem #0004}
+.feature-detail::backdrop{background:#0003}.feature-detail>p{font-size:.84rem;color:var(--ink-2);margin:.7rem 0}.feature-detail h3{font-size:.8rem;margin:1rem 0 .35rem}.feature-detail pre{margin:0;padding:.65rem .75rem;background:var(--panel-2);border:1px solid var(--line-2);font-family:${FONT_MONO};font-size:.73rem;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.feature-responses{list-style:none;margin:0;padding:0}.feature-responses li{padding:.55rem 0;border-top:1px solid var(--line-2);display:grid;grid-template-columns:7.5rem minmax(0,1fr);gap:.5rem;font-size:.8rem}.feature-responses b{color:var(--accent)}.feature-responses span{color:var(--ink-2);overflow-wrap:anywhere}
 .notice{margin:0;padding:.55rem .7rem;background:var(--bad-bg);border-left:3px solid var(--bad);font-size:.86rem}
 
 /* ---- 機能の同期（アプリ連携。#355） ---- */
