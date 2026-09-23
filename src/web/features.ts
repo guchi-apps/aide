@@ -32,6 +32,16 @@ export interface FeatureItem {
   description: string;
   /** 名前の脇に小さく添える補足（HTTPメソッド・実行間隔など）。 */
   meta?: string;
+  /** 選択時に出す、静的な呼び出し・応答の案内。workerジョブには持たせない。 */
+  detail?: FeatureDetail;
+}
+
+export interface FeatureDetail {
+  request: string;
+  success: string;
+  /** 空配列・未取得など、データ量による成功時の意味。 */
+  empty?: string;
+  errors: string[];
 }
 
 export interface FeatureSection {
@@ -153,12 +163,24 @@ export const ENDPOINTS: FeatureItem[] = [
     meta: "GET",
     description:
       "個人アプリ向けの読み取りAPI。aide_balances と aide_fixed_costs を合わせた内容（残高一覧・保有銘柄・連携口座のZaim側の最終更新・取得時刻・経過分数・月額固定費）をJSONで返す。読み取り専用の共有シークレットで認証する。",
+    detail: {
+      request: "GET /api/money/summary\nAuthorization: Bearer <AIDE_READ_SECRET>",
+      success: "200: 残高・保有銘柄・固定費・取得時刻を含むJSONオブジェクトを返す。",
+      empty: "キャッシュが未取得でも200を返す。empty と fetchedAt を見て、残高ゼロと区別する。",
+      errors: ["401: 認証情報が無い、または一致しない。", "503: 読み取り用の共有シークレットが未設定。", "405: GET・HEAD以外。"],
+    },
   },
   {
     name: "/api/money/transactions",
     meta: "GET",
     description:
       "Zaim Web版の家計簿明細一覧（当月＋先月ぶん、JST）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
+    detail: {
+      request: "GET /api/money/transactions\nAuthorization: Bearer <AIDE_READ_SECRET>",
+      success: "200: 当月と先月の明細をJSON配列で返す。",
+      empty: "明細が無い場合は空配列（[]）を返す。取得失敗ではない。",
+      errors: ["401: 認証情報が無い、または一致しない。", "503: 読み取り用の共有シークレットが未設定。", "405: GET・HEAD以外。"],
+    },
   },
   {
     name: "/api/status",
@@ -177,6 +199,11 @@ export const ENDPOINTS: FeatureItem[] = [
     meta: "POST",
     description:
       "個人アプリ向けのZaim登録API。支出を1件Zaimへ登録し、Zaim側のレコードID（money_id）を返す。requestId が同じ再送はZaimへ送らず前回の結果を返す。Zaim書き込み専用の共有シークレットで認証する。",
+    detail: {
+      request: "POST /api/zaim/payment\nAuthorization: Bearer <AIDE_ZAIM_WRITE_SECRET>\nContent-Type: application/json\n\n金額・日付・カテゴリ等と requestId をJSONで送る。",
+      success: "200: ok、moneyId、requestIdを返す。再送が既存結果なら duplicated がtrueになる。",
+      errors: ["400: JSONまたは入力項目が不正。", "401: 認証情報が無い、または一致しない。", "409: 前回の登録結果が確定しておらず、再送不可。", "422: Zaimが登録内容を拒否。", "502: Zaimとの通信・処理に失敗。", "503: AIDE側のZaim OAuth設定が未設定。"],
+    },
   },
   {
     name: "/api/zaim/payment/web",
@@ -221,7 +248,19 @@ export function buildSections(registry: ToolRegistry): FeatureSection[] {
     {
       title: "MCPツール",
       note: "ClaudeアプリなどのLLMクライアントから呼べる機能。横断ビューと、公式MCPが無い領域だけを出している。",
-      items: registry.list().map((tool) => ({ name: tool.name, description: tool.description })),
+      items: registry.list().map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        detail: {
+          request:
+            "POST /mcp\nAuthorization: Bearer <access token>\nContent-Type: application/json\n\n" +
+            JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name, arguments: {} } }, null, 2) +
+            "\n\n入力スキーマ:\n" + JSON.stringify(tool.inputSchema, null, 2),
+          success: "JSON-RPCのresult.content[0].textに、このツールが返すJSONまたはテキストを返す。内容は上の説明にあるデータに限る。",
+          empty: "データが無い・未取得の場合も、ツールごとの状態値を返す。エラーとして再試行する前に、説明にあるempty・configured等の状態を確認する。",
+          errors: ["入力が要件を満たさない場合はJSON-RPCのInvalidParamsを返す。", "ツール内の取得・処理が失敗した場合は、resultのisErrorと理由を返す。", "接続・認可に失敗した場合は、MCPのOAuth認証エラーとなる。"],
+        },
+      })),
     },
     {
       title: "HTTPエンドポイント",
@@ -240,16 +279,43 @@ export function buildSections(registry: ToolRegistry): FeatureSection[] {
   ];
 }
 
-function renderItem(item: FeatureItem): string {
+function defaultHttpDetail(item: FeatureItem): FeatureDetail {
+  return {
+    request: `${item.meta ?? "GET"} ${item.name}\n認証が必要なAPIは Authorization: Bearer <token> を付けて呼び出す。`,
+    success: "200番台の応答で、この項目の説明にあるJSON・画面・静的ファイルを返す。",
+    errors: ["401: 認証が必要な経路で、認証情報が無い、または一致しない。", "405: 記載以外のHTTPメソッド。", "5xx: AIDEまたは接続先の設定・処理に失敗。"],
+  };
+}
+
+function renderDetail(id: string, item: FeatureItem, section: FeatureSection): string {
+  const detail = item.detail ?? (section.title === "HTTPエンドポイント" ? defaultHttpDetail(item) : undefined);
+  if (!detail) return "";
+  const empty = detail.empty ? `<li><b>データなし・未取得</b><span>${escapeHtml(detail.empty)}</span></li>` : "";
+  return `<section id="${id}" class="feature-detail" popover="auto" role="dialog" aria-labelledby="${id}-title">
+<div class="popover-head"><h2 id="${id}-title">${escapeHtml(item.name)}</h2>${item.meta ? `<span class="popover-meta">${escapeHtml(item.meta)}</span>` : ""}
+<button type="button" class="popover-close" popovertarget="${id}" popovertargetaction="hide" aria-label="閉じる">×</button></div>
+<p>${renderInlineMarkdown(item.description)}</p>
+<h3>リクエスト方法</h3><pre>${escapeHtml(detail.request).replaceAll("**", "&#42;&#42;")}</pre>
+<h3>レスポンス</h3><ul class="feature-responses"><li><b>成功</b><span>${escapeHtml(detail.success)}</span></li>${empty}${detail.errors.map((error) => `<li><b>失敗</b><span>${escapeHtml(error)}</span></li>`).join("")}</ul>
+</section>`;
+}
+
+function renderItem(item: FeatureItem, section: FeatureSection, index: number, details: string[]): string {
   const meta = item.meta ? `<span class="mt">${escapeHtml(item.meta)}</span>` : "";
-  return `<li><span><span class="nm">${escapeHtml(item.name)}</span>${meta}</span>
+  const id = `feature-detail-${details.length}`;
+  const detail = item.detail ?? (section.title === "HTTPエンドポイント" ? defaultHttpDetail(item) : undefined);
+  if (detail) details.push(renderDetail(id, item, section));
+  const name = detail
+    ? `<button type="button" class="nm feature-trigger" popovertarget="${id}" aria-haspopup="dialog">${escapeHtml(item.name)}</button>`
+    : `<span class="nm">${escapeHtml(item.name)}</span>`;
+  return `<li data-feature-index="${index}"><span>${name}${meta}</span>
 <span class="ds">${renderInlineMarkdown(item.description)}</span></li>`;
 }
 
-function renderSection(section: FeatureSection): string {
+function renderSection(section: FeatureSection, details: string[]): string {
   const note = section.note ? `<p class="sub">${escapeHtml(section.note)}</p>` : "";
   const items = section.items.length
-    ? `<ul class="items">${section.items.map(renderItem).join("\n")}</ul>`
+    ? `<ul class="items">${section.items.map((item, index) => renderItem(item, section, index, details)).join("\n")}</ul>`
     : `<p class="sub">（まだありません）</p>`;
   return card({
     title: section.title,
@@ -278,7 +344,7 @@ export function renderFeaturesPage(
     : "";
   const body = `<section class="hero">
 <div class="hero-top"><h1>機能一覧</h1></div>
-<p class="lead">生活情報まわりの共通バックエンド／ハブ。このサーバーで使える機能の一覧です。</p>
+<p class="lead">生活情報まわりの共通バックエンド／ハブ。このサーバーで使える機能の一覧です。MCPツール・HTTPエンドポイントを選ぶと、リクエスト方法とレスポンスを確認できます。</p>
 ${warning}
 <dl class="connect">
   <dt>MCP接続先</dt>
@@ -288,8 +354,7 @@ ${warning}
 </dl>
 </section>
 <div class="grid">
-${sections.map(renderSection).join("\n")}
-</div>`;
+${(() => { const details: string[] = []; const cards = sections.map((section) => renderSection(section, details)).join("\n"); return `${cards}</div>${details.join("\n")}`; })()}`;
 
   return renderPage({
     title: "AIDE の機能一覧",
