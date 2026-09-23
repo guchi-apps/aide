@@ -234,3 +234,23 @@ describe("記録に残さないもの", () => {
     ]);
   });
 });
+
+describe("未対応メソッドの扱い（#438）", () => {
+  const discover = () =>
+    entry({ method: "server/discover", tool: null, ok: false, detail: "未対応のメソッド: server/discover", unsupported: true });
+
+  it("失敗にも「注意」にも数えず、件数だけ別に返す", () => {
+    const summary = summarizeMcpAccess([entry(), discover(), discover()], NOW);
+    assert.equal(summary.failures, 0);
+    assert.equal(summary.recentFailures, 0);
+    assert.equal(summary.unsupportedCalls, 2);
+    assert.equal(summary.severity, "ok");
+    assert.equal(summary.visible, 1);
+  });
+
+  it("ツールの失敗は従来どおり「注意」になる", () => {
+    const summary = summarizeMcpAccess([discover(), entry({ ok: false, detail: "失敗" })], NOW);
+    assert.equal(summary.failures, 1);
+    assert.equal(summary.severity, "warn");
+  });
+});

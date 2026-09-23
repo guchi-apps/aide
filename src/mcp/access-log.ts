@@ -67,6 +67,11 @@ export interface McpAccessEntry {
   ms: number;
   /** 失敗の理由（1行）。成功時は空文字。 */
   detail: string;
+  /**
+   * AIDEが実装していないメソッドへの問い合わせ（`MethodNotFound`）だったときだけ true。
+   * ツールの失敗ではないため、集計では失敗・「注意」の判定から外す（#438）。
+   */
+  unsupported?: boolean;
 }
 
 /**
@@ -84,6 +89,11 @@ const QUIET_METHODS = new Set([
 
 export function isQuietMethod(method: string): boolean {
   return QUIET_METHODS.has(method) || method.startsWith("notifications/");
+}
+
+/** 畳む行か。メソッド名で決まるものに加え、未対応メソッドへの問い合わせも畳む。 */
+function isQuietEntry(entry: McpAccessEntry): boolean {
+  return entry.unsupported === true || isQuietMethod(entry.method);
 }
 
 /**
@@ -133,7 +143,7 @@ function load(): Promise<McpAccessEntry[]> {
  */
 function trim(entries: McpAccessEntry[]): void {
   while (entries.length > MAX_ENTRIES) {
-    const quiet = entries.findIndex((entry) => isQuietMethod(entry.method));
+    const quiet = entries.findIndex(isQuietEntry);
     const auth = quiet === -1 ? entries.findIndex((entry) => entry.method === AUTH_METHOD) : -1;
     entries.splice(quiet !== -1 ? quiet : auth !== -1 ? auth : 0, 1);
   }
@@ -264,6 +274,8 @@ export interface McpAccessSummary {
   failures: number;
   /** そのうち、認証で弾いたもの（JSON-RPCまで届いていない）。 */
   authFailures: number;
+  /** 未対応メソッドへの問い合わせ（`server/discover` など）。失敗には数えない。 */
+  unsupportedCalls: number;
   /** 直近24時間の失敗。カードの状態はこれで決める。 */
   recentFailures: number;
   lastAt: string | null;
@@ -311,14 +323,17 @@ export function summarizeMcpAccess(
     ? Math.max(0, Math.round((now.getTime() - new Date(last.at).getTime()) / 60_000))
     : null;
 
-  const recentFailures = entries.filter(
-    (entry) => !entry.ok && now.getTime() - new Date(entry.at).getTime() < RECENT_WINDOW_MS,
+  // 未対応メソッドはツールの失敗ではない。数えると「注意」が恒常的に点く（#438）。
+  const failed = entries.filter((entry) => !entry.ok && !entry.unsupported);
+  const recentFailures = failed.filter(
+    (entry) => now.getTime() - new Date(entry.at).getTime() < RECENT_WINDOW_MS,
   ).length;
 
   return {
     total: entries.length,
     toolCalls: calls.length,
-    failures: entries.filter((entry) => !entry.ok).length,
+    failures: failed.length,
+    unsupportedCalls: entries.filter((entry) => entry.unsupported).length,
     authFailures: entries.filter((entry) => entry.method === AUTH_METHOD).length,
     recentFailures,
     lastAt: last?.at ?? null,
@@ -328,7 +343,7 @@ export function summarizeMcpAccess(
       .map(([tool, count]) => ({ tool, count }))
       .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool)),
     entries: newestFirst.slice(0, limit),
-    visible: newestFirst.slice(0, limit).filter((entry) => !isQuietMethod(entry.method)).length,
+    visible: newestFirst.slice(0, limit).filter((entry) => !isQuietEntry(entry)).length,
     // 記録が無いのは異常ではない（起動直後・まだ誰も繋いでいない）。
     // 失敗も、古いものまで警告し続けると本物の異常が埋もれるため24時間だけ見る。
     severity: entries.length === 0 ? "unknown" : recentFailures > 0 ? "warn" : "ok",
