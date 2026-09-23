@@ -282,10 +282,18 @@ export class McpTransport {
  * 畳んでいるため（そうしないとClaudeが復旧できない）、そこも見ないと失敗を見落とす。
  * 記録に載せるのは失敗の1行だけで、成功した応答の中身は読まない。
  */
-function outcome(response: JsonRpcResponse | null): { ok: boolean; detail: string } {
+function outcome(
+  response: JsonRpcResponse | null,
+): { ok: boolean; detail: string; unsupported?: true } {
   // 通知（応答を返さないもの）。受け取れた時点で成功とみなす。
   if (!response) return { ok: true, detail: "" };
-  if (response.error) return { ok: false, detail: response.error.message };
+  if (response.error) {
+    // 未実装のメソッドへの問い合わせ（`server/discover` など）。ツールの失敗ではないので
+    // 印を付け、集計で「注意」の判定から外せるようにする（#438）。
+    return response.error.code === RpcError.MethodNotFound
+      ? { ok: false, detail: response.error.message, unsupported: true }
+      : { ok: false, detail: response.error.message };
+  }
 
   const result = response.result as ToolResult | undefined;
   if (result?.isError) {
