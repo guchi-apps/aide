@@ -140,7 +140,7 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 /* ---- カード ---- */
 .grid{display:grid;gap:.9rem;grid-template-columns:minmax(0,1fr)}
 @media (min-width:720px){.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:1.1rem}}
-.card{background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;min-width:0;scroll-margin-top:1rem}
 .card.wide{grid-column:1/-1}
 .card-head{display:flex;align-items:center;gap:.6rem;padding:.6rem .9rem;border-bottom:1px solid var(--line-2)}
 .card-head h2{font-size:.9rem;margin:0;font-weight:700;margin-right:auto}
@@ -180,6 +180,11 @@ main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;fl
 .n-via{fill:var(--accent);font-size:11px;font-family:${FONT_MONO};font-weight:600}
 .hub-box{fill:var(--panel);stroke:var(--accent);stroke-width:1.5}
 .hub-sub{fill:var(--ink-2);font-size:11.5px}
+.hub-split{stroke:var(--line)}
+.hub-vps{fill:var(--muted);font-size:10px;font-weight:700;letter-spacing:.03em}
+.hub-worker-bg{fill:var(--accent-soft);stroke:var(--accent);stroke-width:.75}
+.hub-worker{fill:var(--accent);font-size:11px;font-weight:700}
+.hub-worker-sub{fill:var(--ink-2);font-size:9.5px}
 .g-name{fill:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.1em}
 .row-box{fill:var(--panel);stroke:var(--line)}
 svg a:hover .row-box,svg a:hover .n-box{stroke:var(--accent)}
@@ -388,11 +393,14 @@ export interface CardOptions {
   body: string;
   /** 2列レイアウトのときに1行ぶん使う。 */
   wide?: boolean;
+  /** 図など、他の場所からページ内リンクで飛んでくる先にするときのid。 */
+  id?: string;
 }
 
 export function card(options: CardOptions): string {
   const meta = options.meta ? `<span class="n">${escapeHtml(options.meta)}</span>` : "";
-  return `<section class="card${options.wide ? " wide" : ""}">
+  const id = options.id ? ` id="${escapeHtml(options.id)}"` : "";
+  return `<section class="card${options.wide ? " wide" : ""}"${id}>
 <div class="card-head"><h2>${escapeHtml(options.title)}</h2>${meta}</div>
 <div class="card-body">${options.body}</div></section>`;
 }
