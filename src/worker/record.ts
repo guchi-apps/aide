@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { JOB_KEY_PREFIX } from "./job-history.ts";
 import { type PublishOptions, publish } from "./sink.ts";
 
 /**
@@ -12,15 +13,16 @@ import { type PublishOptions, publish } from "./sink.ts";
  * ファイルに書いてもサーバーからは見えない。取得結果と同じ経路（`POST /api/cache/:key`）に
  * 載せれば、開発機（両方ローカル）と本番（別マシン）で同じコードのまま届く。
  *
- * ジョブごとに別のキーへ書く。1つのキーにまとめると、書く前に現在値を読む必要があり、
- * 受け口（書き込み専用）に読み取り口を足すことになる。
+ * ジョブごとに別のキーへ、実行のたびに1件だけ送る。**直近30件の履歴は受け取った側が足す**
+ * （`job-history.ts`）。worker が現在値を読んで足すには、受け口（書き込み専用）に読み取り口を
+ * 足すことになるため（#441）。
  *
  * 記録するのは成否・時刻・所要時間・1行のメッセージ・実行ホストだけ。取得した値そのもの
  * （残高など）は入れない。
  */
 
 /** キャッシュキーの接頭辞。`[a-z0-9][a-z0-9-]*` の制約に収まる形にしてある。 */
-const KEY_PREFIX = "job-";
+const KEY_PREFIX = JOB_KEY_PREFIX;
 
 /**
  * 記録の送信は再試行せず、待つのも10秒まで。

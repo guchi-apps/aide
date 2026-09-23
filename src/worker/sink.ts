@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { writeCache } from "../core/cache/store.ts";
+import { writeCacheWithHistory } from "./job-history.ts";
 
 /**
  * 1回の送信で待つ上限。VPSが応答しないまま止まっているときに、ジョブを居座らせない。
@@ -74,7 +74,7 @@ export async function publish(
   const secret = process.env["AIDE_INGEST_SECRET"];
 
   if (!url) {
-    await writeCache(key, source, data);
+    await writeCacheWithHistory(key, source, data);
     return "ローカルのキャッシュへ書いた";
   }
   if (!secret) {

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { writeCache } from "../core/cache/store.ts";
+import { writeCacheWithHistory } from "../worker/job-history.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { CLAUDE_SESSIONS_CACHE_KEY } from "../worker/jobs/claude-sessions-sync.ts";
 import { WEATHER_CACHE_KEY } from "../worker/jobs/weather-sync.ts";
@@ -105,7 +105,7 @@ export async function handleIngest(
     return;
   }
 
-  await writeCache(key, payload.source ?? "worker", payload.data);
+  await writeCacheWithHistory(key, payload.source ?? "worker", payload.data);
   console.log(`[ingest] 受信: key=${key} source=${payload.source ?? "worker"}`);
   res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true }));
 }
