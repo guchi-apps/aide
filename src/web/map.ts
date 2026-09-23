@@ -286,7 +286,11 @@ function markers(prefix: string): string {
   return `<defs>${marker("r", "")}${marker("w", " w")}</defs>`;
 }
 
-/** AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。 */
+/**
+ * AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。
+ * **読む・書く両方あるコネクタは呼び出し側で2本の線に分け、read・writeそれぞれでこの関数を呼ぶ**
+ * （1本に両端の矢じりを付けると向きが読み取りづらいため。#426）。ここへ`dir: "both"`は渡らない。
+ */
 function edge(prefix: string, d: string, dir: Direction, extra = ""): string {
   const start = dir === "write" ? "" : ` marker-start="url(#${prefix}r)"`;
   const end = dir === "read" ? "" : ` marker-end="url(#${prefix}w)"`;
@@ -351,7 +355,13 @@ export function renderWideMap(): string {
   rows.forEach((row, i) => {
     const my = row.y + (rowH - 4) / 2;
     const ty = Math.round(hy - 60 + (i * 120) / Math.max(1, rows.length - 1));
-    parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
+    if (row.dir === "both") {
+      const o = 4;
+      parts.push(edge(p, `M592,${ty - o} C630,${ty - o} 630,${my - o} ${RX - 2},${my - o}`, "read"));
+      parts.push(edge(p, `M592,${ty + o} C630,${ty + o} 630,${my + o} ${RX - 2},${my + o}`, "write"));
+    } else {
+      parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
+    }
     parts.push(
       `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="${rowH - 4}" class="row-box"/>` +
         `<text x="${RX + 10}" y="${row.y + 20}" class="row-name">${escapeHtml(row.name)}</text>` +
@@ -417,7 +427,13 @@ export function renderNarrowMap(): string {
     parts.push(`<path d="M90,${hubY + hubH / 2} H${TX} V${last.y + 20}" class="edge trunk"/>`);
   }
   for (const row of rows) {
-    parts.push(edge(p, `M${TX},${row.y + 20} H${RX - 1}`, row.dir, " solid"));
+    if (row.dir === "both") {
+      const o = 3;
+      parts.push(edge(p, `M${TX},${row.y + 20 - o} H${RX - 1}`, "read", " solid"));
+      parts.push(edge(p, `M${TX},${row.y + 20 + o} H${RX - 1}`, "write", " solid"));
+    } else {
+      parts.push(edge(p, `M${TX},${row.y + 20} H${RX - 1}`, row.dir, " solid"));
+    }
     parts.push(
       `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="40" class="row-box"/>` +
         `<text x="${RX + 9}" y="${row.y + 17}" class="row-name" style="font-size:12.5px">${escapeHtml(row.name)}</text>` +
