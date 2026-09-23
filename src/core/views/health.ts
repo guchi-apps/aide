@@ -4,6 +4,7 @@ import { readAuthSummary, type AuthSummary } from "../../auth/store.ts";
 import type { SupabaseAuthConfig } from "../../auth/supabase.ts";
 import { readMcpAccessSummary, type McpAccessSummary } from "../../mcp/access-log.ts";
 import { JOB_CATALOG, type JobInfo } from "../../worker/jobs/catalog.ts";
+import { readJobRuns, type JobRun } from "../../worker/job-history.ts";
 import { jobRecordKey, type JobRecord } from "../../worker/record.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
 import { readCache, type CachedValue } from "../cache/store.ts";
@@ -65,6 +66,11 @@ export interface HealthJob extends JobInfo {
     message: string;
     host: string;
   } | null;
+  /**
+   * 実行記録の履歴。新しい順で最大30件。まだ1件も無ければ空配列（#441）。
+   * `lastRun` は互換のため残してあり、`recentRuns[0]` と同じ内容。
+   */
+  recentRuns: JobRun[];
 }
 
 export interface HealthCache {
@@ -139,8 +145,12 @@ export function formatDuration(minutes: number): string {
  * 記録が無い状態を「異常」にしない。デプロイ直後や、そのジョブをまだ一度も動かして
  * いない環境では記録が無いのが正しく、異常として出すと本物の失敗が埋もれる。
  */
-export function summarizeJob(info: JobInfo, cached: CachedValue<JobRecord> | null): HealthJob {
-  if (!cached) return { ...info, severity: "unknown", lastRun: null };
+export function summarizeJob(
+  info: JobInfo,
+  cached: CachedValue<JobRecord> | null,
+  runs: JobRun[] = [],
+): HealthJob {
+  if (!cached) return { ...info, severity: "unknown", lastRun: null, recentRuns: [] };
 
   const record = cached.data;
   const lastRun = {
@@ -151,12 +161,25 @@ export function summarizeJob(info: JobInfo, cached: CachedValue<JobRecord> | nul
     message: record.message,
     host: record.host,
   };
+  // 履歴を持つ前から動いている環境では、最初の記録が届くまで履歴が無い。空にせず最新1件を出す。
+  const recentRuns =
+    runs.length > 0
+      ? runs
+      : [
+          {
+            ok: lastRun.ok,
+            at: lastRun.at,
+            seconds: lastRun.seconds,
+            message: lastRun.message,
+            host: lastRun.host,
+          },
+        ];
 
-  if (!record.ok) return { ...info, severity: "danger", lastRun };
+  if (!record.ok) return { ...info, severity: "danger", lastRun, recentRuns };
   // 成功しているのに間隔ぶん動いていない＝スケジューラ側が止まっている疑い。
   // ジョブ自身は何も報告しないため、この経路でしか気づけない。
   const severity = cached.ageMinutes > info.staleAfterMinutes ? "warn" : "ok";
-  return { ...info, severity, lastRun };
+  return { ...info, severity, lastRun, recentRuns };
 }
 
 function jobAttention(job: HealthJob): HealthAttention[] {
@@ -373,15 +396,18 @@ export interface HealthInput {
 export async function buildHealth(input: HealthInput): Promise<Health> {
   const now = input.now ?? new Date();
 
-  const [version, jobRecords, zaimCache, mcp, mcpAccess] = await Promise.all([
+  const [version, jobRecords, jobRuns, zaimCache, mcp, mcpAccess] = await Promise.all([
     readVersion(),
     Promise.all(JOB_CATALOG.map((job) => readCache<JobRecord>(jobRecordKey(job.name)))),
+    Promise.all(JOB_CATALOG.map((job) => readJobRuns(jobRecordKey(job.name)))),
     readCache<ZaimSnapshot>(ZAIM_CACHE_KEY),
     readAuthSummary(),
     readMcpAccessSummary(now),
   ]);
 
-  const jobs = JOB_CATALOG.map((job, index) => summarizeJob(job, jobRecords[index] ?? null));
+  const jobs = JOB_CATALOG.map((job, index) =>
+    summarizeJob(job, jobRecords[index] ?? null, jobRuns[index] ?? []),
+  );
   const cache = summarizeCache(zaimCache, now);
   const connectors = readConnectors({ supabase: input.supabase ?? null });
 

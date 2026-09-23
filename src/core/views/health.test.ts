@@ -36,6 +36,25 @@ describe("ジョブの判定", () => {
     const job = summarizeJob(JOB, null);
     assert.equal(job.severity, "unknown");
     assert.equal(job.lastRun, null);
+    assert.deepEqual(job.recentRuns, []);
+  });
+
+  it("履歴があればそのまま返し、lastRun と severity は変えない", () => {
+    const runs = [
+      { ok: true, at: "2026-08-18T06:00:00.000Z", seconds: 3.2, message: "新", host: "subpc" },
+      { ok: false, at: "2026-08-18T05:30:00.000Z", seconds: 1, message: "旧", host: "subpc" },
+    ];
+    const job = summarizeJob(JOB, run({ ageMinutes: 30 }), runs);
+    assert.deepEqual(job.recentRuns, runs);
+    assert.equal(job.severity, "ok");
+    assert.equal(job.lastRun?.ok, true);
+  });
+
+  it("履歴がまだ無い環境では、最新1件を recentRuns に出す", () => {
+    const job = summarizeJob(JOB, run({ message: "延長した" }));
+    assert.equal(job.recentRuns.length, 1);
+    assert.equal(job.recentRuns[0]?.message, "延長した");
+    assert.equal(job.recentRuns[0]?.at, job.lastRun?.at);
   });
 
   it("直近が成功で間隔の内なら正常", () => {
