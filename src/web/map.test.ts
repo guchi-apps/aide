@@ -98,6 +98,26 @@ describe("アプリ連携の図", () => {
     assert.match(svg, /marker-start="url\(#mw-r\)"/);
     assert.match(svg, /marker-end="url\(#mw-w\)"/);
   });
+
+  it("読む・書く両方あるコネクタは、矢印を2本に分ける（#426）", () => {
+    const destinations = GROUPS.flatMap((group) => group.apps);
+    assert.ok(destinations.some((d) => d.dir === "both"), "検証対象の「両方向」コネクタが無い");
+    const readCount = destinations.filter((d) => d.dir === "read" || d.dir === "both").length;
+    const writeCount = destinations.filter((d) => d.dir === "write" || d.dir === "both").length;
+
+    for (const [prefix, render] of [
+      ["mw-", renderWideMap],
+      ["mn-", renderNarrowMap],
+    ] as const) {
+      const svg = render();
+      const starts = svg.match(new RegExp(`marker-start="url\\(#${prefix}r\\)"`, "g")) ?? [];
+      const ends = svg.match(new RegExp(`marker-end="url\\(#${prefix}w\\)"`, "g")) ?? [];
+      assert.equal(starts.length, readCount, `${prefix}: 読む矢印の本数`);
+      assert.equal(ends.length, writeCount, `${prefix}: 書く矢印の本数`);
+      // 1本の線の両端に矢じりを付ける（分割前の表現）行が残っていない。
+      assert.doesNotMatch(svg, /<path[^>]*marker-start="url\(#\w+-r\)"[^>]*marker-end="url\(#\w+-w\)"/);
+    }
+  });
 });
 
 describe("アプリ連携の画面", () => {

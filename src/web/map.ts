@@ -286,7 +286,11 @@ function markers(prefix: string): string {
   return `<defs>${marker("r", "")}${marker("w", " w")}</defs>`;
 }
 
-/** AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。 */
+/**
+ * AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。
+ * **読む・書く両方あるコネクタは呼び出し側で2本の線に分け、read・writeそれぞれでこの関数を呼ぶ**
+ * （1本に両端の矢じりを付けると向きが読み取りづらいため。#426）。ここへ`dir: "both"`は渡らない。
+ */
 function edge(prefix: string, d: string, dir: Direction, extra = ""): string {
   const start = dir === "write" ? "" : ` marker-start="url(#${prefix}r)"`;
   const end = dir === "read" ? "" : ` marker-end="url(#${prefix}w)"`;
@@ -394,7 +398,13 @@ export function renderWideMap(): string {
     const { lines, boxHeight } = wideRowGeometry(row);
     const my = row.y + boxHeight / 2;
     const ty = Math.round(hy - 60 + (i * 120) / Math.max(1, rows.length - 1));
-    parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
+    if (row.dir === "both") {
+      const o = 4;
+      parts.push(edge(p, `M592,${ty - o} C630,${ty - o} 630,${my - o} ${RX - 2},${my - o}`, "read"));
+      parts.push(edge(p, `M592,${ty + o} C630,${ty + o} 630,${my + o} ${RX - 2},${my + o}`, "write"));
+    } else {
+      parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
+    }
     const whatTspans = lines
       .map((line, li) => `<tspan x="${RX + 176}" y="${row.y + 20 + li * 14}">${escapeHtml(line)}</tspan>`)
       .join("");
@@ -474,7 +484,13 @@ export function renderNarrowMap(): string {
   for (const row of rows) {
     const { lines, boxHeight } = narrowRowGeometry(row);
     const my = row.y + boxHeight / 2;
-    parts.push(edge(p, `M${TX},${my} H${RX - 1}`, row.dir, " solid"));
+    if (row.dir === "both") {
+      const o = 3;
+      parts.push(edge(p, `M${TX},${my - o} H${RX - 1}`, "read", " solid"));
+      parts.push(edge(p, `M${TX},${my + o} H${RX - 1}`, "write", " solid"));
+    } else {
+      parts.push(edge(p, `M${TX},${my} H${RX - 1}`, row.dir, " solid"));
+    }
     const whatTspans = lines
       .map((line, li) => `<tspan x="${RX + 9}" y="${row.y + 33 + li * 13}">${escapeHtml(line)}</tspan>`)
       .join("");
