@@ -3,6 +3,7 @@ import { createIssue, DEFAULT_LABELS } from "../core/connectors/github/write.ts"
 import { readGitHubWriteConfig } from "../core/connectors/github/index.ts";
 import { buildToolRegistry } from "../mcp/catalog.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
+import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { logoSize, logoSvg, logoWidth } from "./brand.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { ENDPOINTS, type FeatureItem } from "./features.ts";
@@ -362,6 +363,31 @@ function hubLogo(centerX: number, top: number, height: number): string {
   return logoSvg(`x="${centerX - logoWidth(height) / 2}" y="${top}" ${logoSize(height)}`);
 }
 
+/**
+ * ロゴの下に積む「VPS」「Worker＝サブPC」の2段（#431）。ロゴの上に何もつながないと、
+ * AIDEが常時1台で動いていると誤解されるため、重い処理を担うWorkerがサブPCで動いていること
+ * を文字で示す。Worker側は下の一覧の`#worker-jobs`カードへ飛ぶページ内リンクにする。
+ * `top`はハブの箱の上端。返り値の`height`が箱に必要な高さ（呼び出し側が`hub-box`へ渡す）。
+ */
+function hubBody(centerX: number, top: number, width: number, logoHeight: number): { svg: string; height: number } {
+  const left = centerX - width / 2;
+  const logoY = top + 10;
+  const textY = logoY + logoHeight + 14;
+  const splitY = textY + 8;
+  const vpsY = splitY + 14;
+  const workerTop = vpsY + 8;
+  const workerH = 30;
+  const svg =
+    hubLogo(centerX, logoY, logoHeight) +
+    `<text x="${centerX}" y="${textY}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>` +
+    `<line x1="${left + 8}" y1="${splitY}" x2="${left + width - 8}" y2="${splitY}" class="hub-split"/>` +
+    `<text x="${left + 8}" y="${vpsY}" class="hub-vps">VPS ・常時稼働</text>` +
+    `<a href="#worker-jobs"><rect x="${left + 6}" y="${workerTop}" width="${width - 12}" height="${workerH}" rx="4" class="hub-worker-bg"/>` +
+    `<text x="${left + 12}" y="${workerTop + 13}" class="hub-worker">Worker ＝ サブPC</text>` +
+    `<text x="${left + 12}" y="${workerTop + 25}" class="hub-worker-sub">重い処理を定期実行（${JOB_CATALOG.length}件）</text></a>`;
+  return { svg, height: workerTop + workerH + 8 - top };
+}
+
 /** PC・iPad向け。長い説明文は右端で見切れず複数行に折り返す。枠の高さはその行数ぶん広げる。 */
 function wideRowGeometry(app: Destination): { lines: string[]; boxHeight: number } {
   const textX = 662 + 176;
@@ -378,7 +404,7 @@ export function renderWideMap(): string {
   const { rows, heads, end } = layoutRows(6, (app) => wideRowGeometry(app).boxHeight + 4, 26, 14);
   const H = end + 6;
   const hy = H / 2;
-  const hubH = 150;
+  const { height: hubH } = hubBody(500, 0, 184, 64);
   const cH = 56;
   const cGap = (H - CALLERS.length * cH) / Math.max(1, CALLERS.length - 1);
 
@@ -415,11 +441,9 @@ export function renderWideMap(): string {
     );
   });
   for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
+  const hubTop = hy - hubH / 2;
   parts.push(
-    `<rect x="408" y="${hy - hubH / 2}" width="184" height="${hubH}" class="hub-box"/>` +
-      hubLogo(500, hy - 56, 64) +
-      `<text x="500" y="${hy + 30}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>` +
-      `<text x="500" y="${hy + 48}" text-anchor="middle" class="hub-sub">VPS ＋ サブPC</text>`,
+    `<rect x="408" y="${hubTop}" width="184" height="${hubH}" class="hub-box"/>` + hubBody(500, hubTop, 184, 64).svg,
   );
 
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="AIDEとアプリのつながり">${markers(p)}${parts.join("")}</svg>`;
@@ -456,7 +480,7 @@ export function renderNarrowMap(): string {
   const cw = 174;
   const ch = 50;
   const hubY = 240;
-  const hubH = 76;
+  const { height: hubH } = hubBody(180, hubY, 180, 40);
   const { rows, heads, end } = layoutRows(hubY + hubH + 30, (app) => narrowRowGeometry(app).boxHeight + 4, 22, 10);
   const H = end + 4;
   const TX = 14;
@@ -502,11 +526,7 @@ export function renderNarrowMap(): string {
     );
   }
   for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
-  parts.push(
-    `<rect x="90" y="${hubY}" width="180" height="${hubH}" class="hub-box"/>` +
-      hubLogo(180, hubY + 9, 40) +
-      `<text x="180" y="${hubY + 66}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>`,
-  );
+  parts.push(`<rect x="90" y="${hubY}" width="180" height="${hubH}" class="hub-box"/>` + hubBody(180, hubY, 180, 40).svg);
 
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="AIDEとアプリのつながり">${markers(p)}${parts.join("")}</svg>`;
 }
@@ -528,11 +548,12 @@ interface MapPopover {
   items?: FeatureItem[];
 }
 
-/** MCPの登録簿とHTTPの静的カタログを、連携図のチップと同じ説明の出典にする。 */
+/** MCPの登録簿・HTTPの静的カタログ・workerジョブを、連携図のチップと同じ説明の出典にする。 */
 function featureCatalog(): Map<string, FeatureItem> {
   const catalog = new Map<string, FeatureItem>();
   for (const tool of buildToolRegistry().list()) catalog.set(tool.name, tool);
   for (const endpoint of ENDPOINTS) catalog.set(endpoint.name, endpoint);
+  for (const job of JOB_CATALOG) catalog.set(job.name, { name: job.name, description: job.description, meta: job.interval });
   return catalog;
 }
 
@@ -616,6 +637,26 @@ function groupCard(
     )
     .join("");
   return card({ title: group.name, meta: String(group.apps.length), body: `<ul class="apps">${items}</ul>` });
+}
+
+/**
+ * Worker（サブPC・重い処理）の一覧（#431）。図のハブから`#worker-jobs`でここへ飛べる。
+ * 出典は機能一覧の「workerジョブ」節と同じ `JOB_CATALOG`（`src/worker/jobs/catalog.ts`）で、
+ * 実行間隔・何をするかを図の宣言とは別に自動で追従させる。
+ */
+function workerCard(): string {
+  const items = JOB_CATALOG.map(
+    (job) =>
+      `<li><span class="nm">${escapeHtml(job.name)}</span><span class="mt">${escapeHtml(job.interval)}</span>` +
+      `<span class="ds">${renderInlineMarkdown(job.description)}</span></li>`,
+  ).join("");
+  return card({
+    id: "worker-jobs",
+    title: "Worker（サブPC・重い処理）",
+    meta: String(JOB_CATALOG.length),
+    body: `<ul class="items">${items}</ul>`,
+    wide: true,
+  });
 }
 
 // ---- 機能の同期（#355） ----
@@ -853,7 +894,7 @@ export function renderMapPage(options: MapPageOptions = {}): string {
     : "";
   const body = `<section class="hero">
 <div class="hero-top"><h1>アプリ連携</h1>${syncButton(options.sync)}</div>
-<p class="lead">AIDEを中心に、どのアプリがどうつながっているかを示します。左（スマホでは上）がAIDEを使うアプリ、右（スマホでは下）がAIDEが読みに行く・書き込む先です。アプリを押すと、下の一覧の該当する行へ移ります。</p>
+<p class="lead">AIDEを中心に、どのアプリがどうつながっているかを示します。左（スマホでは上）がAIDEを使うアプリ、右（スマホでは下）がAIDEが読みに行く・書き込む先です。アプリを押すと、下の一覧の該当する行へ移ります。重い処理（Zaimの巡回など）はサブPCで動くWorkerが定期的に行い、結果をVPSへ送ります。</p>
 ${LEGEND}${warning}
 </section>
 ${options.sync ? syncResult(options.sync) : ""}
@@ -864,6 +905,7 @@ ${options.sync ? syncResult(options.sync) : ""}
 <div class="grid">
 ${options.sync ? foundCard(options.sync.result) : ""}
 ${callersCard(catalog, popovers, gone)}
+${workerCard()}
 ${GROUPS.map((group) => groupCard(group, catalog, popovers, gone)).join("\n")}
 </div>
 ${popovers.map(renderPopover).join("\n")}
@@ -875,7 +917,7 @@ ${BUSY_SCRIPT}`;
     nav: siteNav("map"),
     headerAction: options.headerAction ?? "",
     body,
-    footer: "細かなエンドポイントの一覧とworkerのジョブは「機能一覧」にあります。動作状況は ops-dashboard の「AIDE」タブで確認できます。",
+    footer: "細かなエンドポイントの一覧は「機能一覧」にあります。動作状況は ops-dashboard の「AIDE」タブで確認できます。",
   });
 }
 
