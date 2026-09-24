@@ -3,6 +3,7 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMobileRoomTemperature, handleMobileToken, type MobileApiOptions } from "./api/mobile.ts";
+import { handleRoomSummary } from "./api/room.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
@@ -198,6 +199,13 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // Zaim Web版の家計簿明細一覧（公式APIが返さない自動連携明細を含む）を読む口（#244）。
   if (path === "/api/money/transactions") {
     await handleMoneyTransactions(req, res);
+    return;
+  }
+
+  // ---- iOSウィジェット向けの室温API（#455） ----
+  // 共有シークレットではなく画面と同じセッション（aide_status Cookie）で認証する。
+  if (path === "/api/room/summary") {
+    await handleRoomSummary(req, res, loginOptions);
     return;
   }
 

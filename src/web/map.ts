@@ -164,8 +164,8 @@ export const CALLERS: Caller[] = [
     id: "aide-ios",
     name: "AIDE iOSアプリ",
     via: "API",
-    what: "ショートカット・Siriから室温を読む",
-    uses: ["/api/mobile/token", "/api/mobile/room-temperature"],
+    what: "ショートカット・Siriから室温を読む／ホーム画面ウィジェットに表示",
+    uses: ["/api/mobile/token", "/api/mobile/room-temperature", "/api/room/summary"],
   },
 ];
 
