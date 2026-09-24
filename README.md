@@ -644,6 +644,34 @@ IssueDeck で見られる。古いブックマークから来た人は `/map` �
 ナビに載っている画面（`src/web/layout.ts` の `NAV`）以外は既定（`/map`）へ落とす。外部URLを
 そのまま `Location` に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
 
+### iOSアプリ向けの室温API（aide#454）
+
+iOSアプリ（`guchi-apps/aide-ios`）のApp Intent（ショートカット・Siri）が、現在の室温をHTTPSで読む
+ための口。**アプリからmyroomへは直接繋がず、AIDEが窓口になる。読み取り専用で、操作系は置かない。**
+
+| 口 | 内容 |
+|---|---|
+| `GET /api/mobile/room-temperature` | `{sensorName, temperature(℃), measuredAt, stale}`。認証なし・不正は401、myroom未設定・取得失敗は503、室温にできるセンサーが無ければ502。`stale: true` は現在値ではない |
+| `POST /api/mobile/token` | ログイン引き継ぎコードをトークンへ交換（form: `code`・`code_verifier`） |
+| `DELETE /api/mobile/token` | 自分のトークンを失効（`Authorization: Bearer`）。存在しないトークンでも204 |
+
+**認証は専用のBearerトークン**（`src/auth/mobile-token.ts`）。MCPのOAuthトークンとは別系統で、
+`/api/mobile/*` にしか通らない（`/mcp`・他の `/api/*` は通らない）ため、Keychainから漏れても
+読めるのは室温だけ。保存するのはSHA-256ハッシュだけ（`data/auth/mobile-tokens.json`・600）、有効期間は180日、
+使うたびに許可メール（`AIDE_STATUS_ALLOWED_EMAILS`）を照合する。
+
+**iOS側がトークンを取る手順:**
+
+1. `code_verifier` を作り、そのS256を `code_challenge` にする
+2. ASWebAuthenticationSessionで `/status/auth/app/start?scope=mobile&code_challenge=<challenge>` を開く（Googleログイン）
+3. `com.gucchii.aide:/auth/callback?code=<code>` で戻る。コードは2分・一回限り、**`scope=mobile` で発行したコードだけがトークンに交換できる**（画面用コードとは交換できない）
+4. `POST /api/mobile/token` に `code` と `code_verifier` を送り、`token` をKeychainへ保存する（この応答でしか平文は得られない）
+5. 以後 `Authorization: Bearer <token>` で室温を読む。401ならステップ1からやり直す
+
+「室温」にするセンサーは `AIDE_MOBILE_ROOM_SENSOR`（センサー名かdeviceId。任意）で選ぶ。未設定なら
+受信が止まっていない最初のセンサー、全部止まっていれば最初の温度ありセンサーを `stale: true` で返す。
+指定したセンサーが見つからないときは、別の部屋の温度を黙って返さず502にする。
+
 ### ログインは許可したGoogleアカウントだけ
 
 ログインには他アプリ（dayspan・shopping-list）と同じ共有SupabaseプロジェクトのGoogleログインを使い、

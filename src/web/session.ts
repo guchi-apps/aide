@@ -183,6 +183,8 @@ export interface Handshake {
    * アプリ向けの一回限りコードを発行する。Webログインでは未指定。
    */
   appChallenge?: string;
+  /** `mobile` のとき、引き継ぎコードをネイティブ向けトークン用として発行する。未指定は画面用。 */
+  appPurpose?: "mobile";
 }
 
 export function issueHandshake(key: Buffer, handshake: Handshake, now: Date = new Date()): string {
@@ -190,7 +192,8 @@ export function issueHandshake(key: Buffer, handshake: Handshake, now: Date = ne
   // パスは `.`（区切り）や `/` を含みうるので、メールアドレスと同じく base64url にしてから並べる。
   const next = Buffer.from(handshake.next ?? "", "utf8").toString("base64url");
   const appChallenge = Buffer.from(handshake.appChallenge ?? "", "utf8").toString("base64url");
-  const parts = [String(expiresAt), handshake.state, handshake.verifier, next, appChallenge];
+  const appPurpose = handshake.appPurpose ?? "";
+  const parts = [String(expiresAt), handshake.state, handshake.verifier, next, appChallenge, appPurpose];
   return `${parts.join(".")}.${sign(HANDSHAKE_PURPOSE, parts, key)}`;
 }
 
@@ -199,14 +202,16 @@ export function readHandshake(
   key: Buffer,
   now: Date = new Date(),
 ): Handshake | null {
-  const body = readSigned(value, key, HANDSHAKE_PURPOSE, 4, now);
+  const body = readSigned(value, key, HANDSHAKE_PURPOSE, 5, now);
   if (!body) return null;
   const appChallenge = Buffer.from(body[3]!, "base64url").toString("utf8");
+  const appPurpose = body[4] === "mobile" ? "mobile" : undefined;
   return {
     state: body[0]!,
     verifier: body[1]!,
     next: Buffer.from(body[2]!, "base64url").toString("utf8"),
     ...(appChallenge ? { appChallenge } : {}),
+    ...(appChallenge && appPurpose ? { appPurpose } : {}),
   };
 }
 
