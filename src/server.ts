@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
-import { handleMobileRoomTemperature, handleMobileToken, type MobileApiOptions } from "./api/mobile.ts";
+import { handleMobilePushDevices, handleMobileRoomTemperature, handleMobileToken, type MobileApiOptions } from "./api/mobile.ts";
 import { handleRoomSummary } from "./api/room.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
@@ -226,6 +226,10 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // このトークンは /api/mobile/* の読み取りにしか通らない。操作系は置かない。
   if (path === "/api/mobile/token") {
     await handleMobileToken(req, res, mobileApiOptions);
+    return;
+  }
+  if (path === "/api/mobile/push/devices") {
+    await handleMobilePushDevices(req, res, mobileApiOptions);
     return;
   }
   if (path === "/api/mobile/room-temperature") {
