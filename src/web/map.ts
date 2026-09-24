@@ -4,7 +4,7 @@ import { readGitHubWriteConfig } from "../core/connectors/github/index.ts";
 import { buildToolRegistry } from "../mcp/catalog.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
-import { logoSize, logoSvg, logoWidth } from "./brand.ts";
+import { logoSize, logoSvg } from "./brand.ts";
 import { card, escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { ENDPOINTS, type FeatureItem } from "./features.ts";
 import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
@@ -35,8 +35,8 @@ import {
  * 分からない。代わりに、宣言に書いたツール名・パスが実在すること、登録簿の全ツールが
  * どこかに載っていることを `map.test.ts` が確かめる。MCPツールやコネクタを足したら、ここへも足す。
  *
- * 図はサーバー側でSVGとして組み立て、JavaScriptも外部の描画ライブラリも使わない
- * （実行時依存を増やさない方針。README）。図の各アプリは下の一覧へのページ内リンクになっている。
+ * 図はHTML/CSSの枠と、JavaScriptが引く矢印でできている（#460。外部の描画ライブラリは使わない。
+ * 実行時依存を増やさない方針。README）。図の各アプリは下の一覧へのページ内リンクになっている。
  *
  * **「機能を同期」（#355）は、宣言と今の機能の差を画面に出すだけで、宣言は書き換えない。**
  * 突き合わせは `map-sync.ts`。差があれば、図を直すIssueを起案できる（`POST /map/issue`）。
@@ -285,258 +285,125 @@ export const GROUPS: DestinationGroup[] = [
 // ---- 図 ----
 
 /**
- * 矢印の定義。**向きはデータの流れ。** 読む（アプリ→AIDE）は差し色、書く（AIDE→アプリ）は茶。
- * 2枚の図が同じページに載るため、IDは図ごとに接頭辞を変える。
+ * 図は**HTMLの枠（CSS Grid）と、JavaScriptが引く矢印**でできている（#460）。
+ * 枠・文字はふつうのHTMLなので、説明文の折り返しやスマホ幅への切り替えはブラウザに任せ、
+ * 座標や文字幅を計算しない。矢印だけは枠の実際の位置が要るため、`MAP_WIRE_SCRIPT` が測って
+ * 重ねたSVGへ引く（ウィンドウ幅が変わるたびに引き直す）。JavaScriptが動かない環境では矢印が
+ * 出ないが、枠のリンクと下の一覧は読める。
+ * 矢印の向きはデータの流れ。**読む（アプリ→AIDE）は差し色、書く（AIDE→アプリ）は茶。**
+ * 読む・書く両方あるコネクタは `data-dir="both"` で、スクリプトが2本の線に分けて引く（#426）。
  */
-function markers(prefix: string): string {
-  const marker = (id: string, cls: string) =>
-    `<marker id="${prefix}${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow${cls}"/></marker>`;
-  return `<defs>${marker("r", "")}${marker("w", " w")}</defs>`;
-}
 
-/**
- * AIDE と繋ぐ先の間の線。読むはAIDE側に、書くはアプリ側に矢じりを付ける。
- * **読む・書く両方あるコネクタは呼び出し側で2本の線に分け、read・writeそれぞれでこの関数を呼ぶ**
- * （1本に両端の矢じりを付けると向きが読み取りづらいため。#426）。ここへ`dir: "both"`は渡らない。
- */
-function edge(prefix: string, d: string, dir: Direction, extra = ""): string {
-  const start = dir === "write" ? "" : ` marker-start="url(#${prefix}r)"`;
-  const end = dir === "read" ? "" : ` marker-end="url(#${prefix}w)"`;
-  return `<path d="${d}" class="edge${dir === "read" ? "" : " w"}${extra}"${start}${end}/>`;
-}
-
-interface PlacedRow extends Destination {
-  y: number;
-}
-
-/** 全角（CJK・全角記号）か半角かを判定する。折り返し幅の概算に使う（実測はしない）。 */
-function isWideChar(ch: string): boolean {
-  const code = ch.codePointAt(0) ?? 0;
+/** 行の右端に置く「読む」「書く」の札。色だけに頼らず語でも向きが分かるようにする（スマホ幅で表示）。 */
+function tags(dir: Direction): string {
   return (
-    (code >= 0x3000 && code <= 0x30ff) || // 全角記号・ひらがな・カタカナ
-    (code >= 0x3400 && code <= 0x4dbf) || // CJK拡張A
-    (code >= 0x4e00 && code <= 0x9fff) || // CJK統合漢字
-    (code >= 0xf900 && code <= 0xfaff) || // CJK互換漢字
-    (code >= 0xff00 && code <= 0xffef) // 全角英数・記号
+    '<span class="tags">' +
+    (dir !== "write" ? '<span class="tag r">読む</span>' : "") +
+    (dir !== "read" ? '<span class="tag w">書く</span>' : "") +
+    "</span>"
   );
 }
 
 /**
- * 説明文を、指定した幅（SVGのユーザー単位）に収まるよう複数行に分ける。
- * サーバー側にはフォント計測が無いため、全角を1em・半角を0.58emとして概算する
- * （見切れをゼロにすることを優先し、行の折り返し位置の最適さは求めない）。
+ * 図の中央。ロゴは**左上のブランド表示と同じデータ**（`brand.ts`）を使い、`取得・整形・中継` は文字で置く。
+ * ロゴの下に「VPS」「Worker＝サブPC」の2段を積む（#431）。ロゴだけだとAIDEが常時1台で動いていると
+ * 誤解されるため、重い処理を担うWorkerがサブPCで動いていることを文字で示す。
+ * Workerは下の一覧の`#worker-jobs`カードへ飛ぶページ内リンク。
  */
-function wrapText(text: string, maxWidth: number, fontSize: number): string[] {
-  const lines: string[] = [];
-  let line = "";
-  let width = 0;
-  for (const ch of Array.from(text)) {
-    const w = isWideChar(ch) ? fontSize : fontSize * 0.58;
-    if (line && width + w > maxWidth) {
-      lines.push(line);
-      line = "";
-      width = 0;
-    }
-    line += ch;
-    width += w;
-  }
-  if (line) lines.push(line);
-  return lines.length ? lines : [""];
+function hubHtml(): string {
+  return `<div class="hub">${logoSvg(logoSize(52))}
+<div class="hub-sub">取得・整形・中継</div><hr>
+<div class="hub-vps">VPS ・常時稼働</div>
+<a class="hub-worker" href="#worker-jobs"><b>Worker ＝ サブPC</b><span>重い処理を定期実行（${JOB_CATALOG.length}件）</span></a></div>`;
 }
 
-/** 繋ぐ先を上から順に並べたときの行の位置と、領域の見出しの位置。行の高さはアプリごとに変わる（説明文の折り返し行数ぶん）。 */
-function layoutRows(start: number, rowHeight: (app: Destination) => number, headH: number, gap: number) {
-  let y = start;
-  const rows: PlacedRow[] = [];
-  const heads: { name: string; y: number }[] = [];
-  GROUPS.forEach((group, index) => {
-    if (index > 0) y += gap;
-    heads.push({ name: group.name, y: y + headH - 9 });
-    y += headH;
-    for (const app of group.apps) {
-      rows.push({ ...app, y });
-      y += rowHeight(app);
-    }
-  });
-  return { rows, heads, end: y };
+/** 使う側の枠。押すと下の一覧の行（`#from-…`）へ飛ぶ。スマホ幅では短い名前を出す。 */
+function callerNode(caller: Caller): string {
+  return `<a class="node caller" href="#from-${caller.id}"><span class="nm"><span class="nm-l">${escapeHtml(caller.name)}</span><span class="nm-s">${escapeHtml(caller.short ?? caller.name)}</span></span>` +
+    `<span class="what"><span class="via">${caller.via}</span>　${escapeHtml(caller.what)}</span></a>`;
+}
+
+function destNode(app: Destination): string {
+  return `<a class="node dest" href="#to-${app.id}" data-dir="${app.dir}"><span class="nm">${escapeHtml(app.name)}</span>${tags(app.dir)}` +
+    `<span class="what">${escapeHtml(app.what)}</span></a>`;
+}
+
+/** アプリ連携の図。PC・iPadは左に使う側・中央にAIDE・右に繋ぐ先、スマホ幅は上・中央・下の縦並び。 */
+export function renderMap(): string {
+  const dests = GROUPS.map(
+    (group) => `<p class="gname">${escapeHtml(group.name)}</p>${group.apps.map(destNode).join("")}`,
+  ).join("");
+  return `<div class="map" id="map-figure"><div class="stage">
+<svg class="wires" aria-hidden="true" focusable="false"><defs>
+<marker id="map-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker>
+<marker id="map-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrow w"/></marker></defs></svg>
+<div class="col callers"><p class="colhead">AIDEを使うアプリ</p>${CALLERS.map(callerNode).join("")}</div>
+<div class="col hubcol">${hubHtml()}</div>
+<div class="col dests"><p class="colhead">AIDEがつなぐ先</p>${dests}</div>
+</div></div>`;
 }
 
 /**
- * 図の中央に置くワードマーク。**左上のブランド表示と同じデータ**（`brand.ts`）を、中心の
- * x・上端のy・高さで指定して置く。`取得・整形・中継` はこの下に文字（`<text>`）で置き、
- * 画像には焼かない。
+ * 矢印を引くスクリプト。枠の位置は `offsetLeft` / `offsetTop` を `.stage` まで辿って求める
+ * （スクロールや拡大の影響を受けない）。スマホ幅（CSSの `max-width:719px` と同じ条件）では
+ * 使う側から中央へ、中央の左の幹から繋ぐ先の各行へ、PC・iPadでは中央の左右へ引く。
  */
-function hubLogo(centerX: number, top: number, height: number): string {
-  return logoSvg(`x="${centerX - logoWidth(height) / 2}" y="${top}" ${logoSize(height)}`);
-}
-
-/**
- * ロゴの下に積む「VPS」「Worker＝サブPC」の2段（#431）。ロゴの上に何もつながないと、
- * AIDEが常時1台で動いていると誤解されるため、重い処理を担うWorkerがサブPCで動いていること
- * を文字で示す。Worker側は下の一覧の`#worker-jobs`カードへ飛ぶページ内リンクにする。
- * `top`はハブの箱の上端。返り値の`height`が箱に必要な高さ（呼び出し側が`hub-box`へ渡す）。
- */
-function hubBody(centerX: number, top: number, width: number, logoHeight: number): { svg: string; height: number } {
-  const left = centerX - width / 2;
-  const logoY = top + 10;
-  const textY = logoY + logoHeight + 14;
-  const splitY = textY + 8;
-  const vpsY = splitY + 14;
-  const workerTop = vpsY + 8;
-  const workerH = 30;
-  const svg =
-    hubLogo(centerX, logoY, logoHeight) +
-    `<text x="${centerX}" y="${textY}" text-anchor="middle" class="hub-sub">取得・整形・中継</text>` +
-    `<line x1="${left + 8}" y1="${splitY}" x2="${left + width - 8}" y2="${splitY}" class="hub-split"/>` +
-    `<text x="${left + 8}" y="${vpsY}" class="hub-vps">VPS ・常時稼働</text>` +
-    `<a href="#worker-jobs"><rect x="${left + 6}" y="${workerTop}" width="${width - 12}" height="${workerH}" rx="4" class="hub-worker-bg"/>` +
-    `<text x="${left + 12}" y="${workerTop + 13}" class="hub-worker">Worker ＝ サブPC</text>` +
-    `<text x="${left + 12}" y="${workerTop + 25}" class="hub-worker-sub">重い処理を定期実行（${JOB_CATALOG.length}件）</text></a>`;
-  return { svg, height: workerTop + workerH + 8 - top };
-}
-
-/** PC・iPad向け。長い説明文は右端で見切れず複数行に折り返す。枠の高さはその行数ぶん広げる。 */
-function wideRowGeometry(app: Destination): { lines: string[]; boxHeight: number } {
-  const textX = 662 + 176;
-  const maxWidth = 1030 - textX - 10;
-  const lines = wrapText(app.what, maxWidth, 11.5);
-  return { lines, boxHeight: 30 + Math.max(0, lines.length - 1) * 14 };
-}
-
-/** PC・iPad向け。左に使う側、中央にAIDE、右に繋ぐ先。 */
-export function renderWideMap(): string {
-  const p = "mw-";
-  const W = 1030;
-  const RX = 662;
-  const { rows, heads, end } = layoutRows(6, (app) => wideRowGeometry(app).boxHeight + 4, 26, 14);
-  const H = end + 6;
-  const hy = H / 2;
-  const { height: hubH } = hubBody(500, 0, 184, 64);
-  const cH = 56;
-  const cGap = (H - CALLERS.length * cH) / Math.max(1, CALLERS.length - 1);
-
-  const parts: string[] = [];
-  CALLERS.forEach((caller, i) => {
-    const cy = Math.round(i * (cH + cGap));
-    const my = cy + cH / 2;
-    const ty = Math.round(hy - 50 + (i * 100) / Math.max(1, CALLERS.length - 1));
-    parts.push(`<path d="M232,${my} C320,${my} 330,${ty} 408,${ty}" class="edge" marker-end="url(#${p}r)"/>`);
-    parts.push(
-      `<a href="#from-${caller.id}"><rect x="0" y="${cy}" width="232" height="${cH}" class="n-box"/>` +
-        `<text x="12" y="${cy + 23}" class="n-name">${escapeHtml(caller.name)}</text>` +
-        `<text x="12" y="${cy + 43}" class="n-sub"><tspan class="n-via">${caller.via}</tspan>  ${escapeHtml(caller.what)}</text></a>`,
-    );
-  });
-  rows.forEach((row, i) => {
-    const { lines, boxHeight } = wideRowGeometry(row);
-    const my = row.y + boxHeight / 2;
-    const ty = Math.round(hy - 60 + (i * 120) / Math.max(1, rows.length - 1));
-    if (row.dir === "both") {
-      const o = 4;
-      parts.push(edge(p, `M592,${ty - o} C630,${ty - o} 630,${my - o} ${RX - 2},${my - o}`, "read"));
-      parts.push(edge(p, `M592,${ty + o} C630,${ty + o} 630,${my + o} ${RX - 2},${my + o}`, "write"));
-    } else {
-      parts.push(edge(p, `M592,${ty} C630,${ty} 630,${my} ${RX - 2},${my}`, row.dir));
-    }
-    const whatTspans = lines
-      .map((line, li) => `<tspan x="${RX + 176}" y="${row.y + 20 + li * 14}">${escapeHtml(line)}</tspan>`)
-      .join("");
-    parts.push(
-      `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="${boxHeight}" class="row-box"/>` +
-        `<text x="${RX + 10}" y="${row.y + 20}" class="row-name">${escapeHtml(row.name)}</text>` +
-        `<text class="row-what">${whatTspans}</text></a>`,
-    );
-  });
-  for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
-  const hubTop = hy - hubH / 2;
-  parts.push(
-    `<rect x="408" y="${hubTop}" width="184" height="${hubH}" class="hub-box"/>` + hubBody(500, hubTop, 184, 64).svg,
-  );
-
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="AIDEとアプリのつながり">${markers(p)}${parts.join("")}</svg>`;
-}
-
-/** 行の右端に置く「読む」「書く」の札。色だけに頼らず語でも向きが分かるようにする。 */
-function tags(right: number, y: number, dir: Direction): string {
-  const out: string[] = [];
-  let x = right;
-  const put = (label: string, kind: "r" | "w") => {
-    out.push(
-      `<rect x="${x - 30}" y="${y - 9}" width="30" height="18" class="tag-${kind}"/>` +
-        `<text x="${x - 15}" y="${y + 4}" text-anchor="middle" class="tag-${kind}t">${label}</text>`,
-    );
-    x -= 34;
+const MAP_WIRE_SCRIPT = `<script>
+(() => {
+  const stage = document.querySelector("#map-figure .stage");
+  if (!stage) return;
+  const svg = stage.querySelector("svg.wires");
+  const narrow = matchMedia("(max-width:719px)");
+  const rect = (el) => {
+    let l = 0, t = 0;
+    for (let e = el; e && e !== stage; e = e.offsetParent) { l += e.offsetLeft; t += e.offsetTop; }
+    return { l, t, r: l + el.offsetWidth, b: t + el.offsetHeight, cx: l + el.offsetWidth / 2, cy: t + el.offsetHeight / 2 };
   };
-  if (dir !== "read") put("書く", "w");
-  if (dir !== "write") put("読む", "r");
-  return out.join("");
-}
-
-/** スマホ向け。長い説明文は右端で見切れず複数行に折り返す。枠の高さはその行数ぶん広げる。 */
-function narrowRowGeometry(app: Destination): { lines: string[]; boxHeight: number } {
-  const RX = 38;
-  const maxWidth = 360 - RX - 9 - 6;
-  const lines = wrapText(app.what, maxWidth, 11);
-  return { lines, boxHeight: 40 + Math.max(0, lines.length - 1) * 13 };
-}
-
-/** スマホ向け。上に使う側を2列で、中央にAIDE、下に繋ぐ先を縦に並べる。 */
-export function renderNarrowMap(): string {
-  const p = "mn-";
-  const W = 360;
-  const cw = 174;
-  const ch = 50;
-  const hubY = 240;
-  const { height: hubH } = hubBody(180, hubY, 180, 40);
-  const { rows, heads, end } = layoutRows(hubY + hubH + 30, (app) => narrowRowGeometry(app).boxHeight + 4, 22, 10);
-  const H = end + 4;
-  const TX = 14;
-  const RX = 38;
-
-  const parts: string[] = [];
-  CALLERS.forEach((caller, i) => {
-    const x = (i % 2) * (cw + 12);
-    const y = Math.floor(i / 2) * (ch + 10);
-    const tx = Math.round(110 + (i * 140) / Math.max(1, CALLERS.length - 1));
-    parts.push(
-      `<path d="M${x + cw / 2},${y + ch} C${x + cw / 2},212 ${tx},196 ${tx},${hubY - 2}" class="edge" marker-end="url(#${p}r)"/>`,
-    );
-    parts.push(
-      `<a href="#from-${caller.id}"><rect x="${x}" y="${y}" width="${cw}" height="${ch}" class="n-box"/>` +
-        `<text x="${x + 9}" y="${y + 20}" class="n-name" style="font-size:12.5px">${escapeHtml(caller.short ?? caller.name)}</text>` +
-        `<text x="${x + 9}" y="${y + 38}" class="n-via">${caller.via}</text></a>`,
-    );
-  });
-  const last = rows[rows.length - 1];
-  if (last) {
-    const { boxHeight } = narrowRowGeometry(last);
-    parts.push(`<path d="M90,${hubY + hubH / 2} H${TX} V${last.y + boxHeight / 2}" class="edge trunk"/>`);
-  }
-  for (const row of rows) {
-    const { lines, boxHeight } = narrowRowGeometry(row);
-    const my = row.y + boxHeight / 2;
-    if (row.dir === "both") {
-      const o = 3;
-      parts.push(edge(p, `M${TX},${my - o} H${RX - 1}`, "read", " solid"));
-      parts.push(edge(p, `M${TX},${my + o} H${RX - 1}`, "write", " solid"));
-    } else {
-      parts.push(edge(p, `M${TX},${my} H${RX - 1}`, row.dir, " solid"));
+  const path = (d, cls, marker) => {
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", d);
+    p.setAttribute("class", cls);
+    if (marker) p.setAttribute("marker-end", "url(#" + marker + ")");
+    svg.appendChild(p);
+  };
+  const draw = () => {
+    svg.querySelectorAll("path.edge").forEach((p) => p.remove());
+    const hub = rect(stage.querySelector(".hub"));
+    const callers = [...stage.querySelectorAll(".caller")];
+    const dests = [...stage.querySelectorAll(".dest")];
+    const step = (i, n) => (n > 1 ? i / (n - 1) : 0.5);
+    callers.forEach((el, i) => {
+      const a = rect(el), f = step(i, callers.length);
+      if (narrow.matches) {
+        const x = hub.l + 20 + f * (hub.r - hub.l - 40);
+        path("M" + a.cx + "," + a.b + " C" + a.cx + "," + (a.b + 16) + " " + x + "," + (hub.t - 20) + " " + x + "," + (hub.t - 2), "edge", "map-r");
+      } else {
+        const y = hub.cy - 50 + f * 100;
+        path("M" + a.r + "," + a.cy + " C" + (a.r + 70) + "," + a.cy + " " + (hub.l - 70) + "," + y + " " + (hub.l - 2) + "," + y, "edge", "map-r");
+      }
+    });
+    if (narrow.matches && dests.length) {
+      const trunk = 12;
+      path("M" + hub.l + "," + hub.cy + " H" + trunk + " V" + rect(dests[dests.length - 1]).t + " ", "edge trunk");
     }
-    const whatTspans = lines
-      .map((line, li) => `<tspan x="${RX + 9}" y="${row.y + 33 + li * 13}">${escapeHtml(line)}</tspan>`)
-      .join("");
-    parts.push(
-      `<a href="#to-${row.id}"><rect x="${RX}" y="${row.y}" width="${W - RX}" height="${boxHeight}" class="row-box"/>` +
-        `<text x="${RX + 9}" y="${row.y + 17}" class="row-name" style="font-size:12.5px">${escapeHtml(row.name)}</text>` +
-        tags(W - 6, row.y + 12, row.dir) +
-        `<text class="row-what" style="font-size:11px">${whatTspans}</text></a>`,
-    );
-  }
-  for (const head of heads) parts.push(`<text x="${RX}" y="${head.y}" class="g-name">${escapeHtml(head.name)}</text>`);
-  parts.push(`<rect x="90" y="${hubY}" width="180" height="${hubH}" class="hub-box"/>` + hubBody(180, hubY, 180, 40).svg);
-
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="AIDEとアプリのつながり">${markers(p)}${parts.join("")}</svg>`;
-}
+    dests.forEach((el, i) => {
+      const a = rect(el), dir = el.dataset.dir, o = dir === "both" ? 4 : 0;
+      const reads = dir !== "write", writes = dir !== "read";
+      if (narrow.matches) {
+        const y = a.t + 14, trunk = 12;
+        if (reads) path("M" + (a.l - 1) + "," + (y - o / 2) + " H" + trunk, "edge solid", "map-r");
+        if (writes) path("M" + trunk + "," + (y + o / 2) + " H" + (a.l - 2), "edge solid w", "map-w");
+      } else {
+        const y = hub.cy - 60 + step(i, dests.length) * 120;
+        if (reads) path("M" + (a.l - 2) + "," + (a.cy - o) + " C" + (a.l - 40) + "," + (a.cy - o) + " " + (hub.r + 40) + "," + (y - o) + " " + (hub.r + 2) + "," + (y - o), "edge", "map-r");
+        if (writes) path("M" + hub.r + "," + (y + o) + " C" + (hub.r + 40) + "," + (y + o) + " " + (a.l - 40) + "," + (a.cy + o) + " " + (a.l - 2) + "," + (a.cy + o), "edge w", "map-w");
+      }
+    });
+  };
+  draw();
+  new ResizeObserver(draw).observe(stage);
+})();
+</script>`;
 
 // ---- 一覧 ----
 
@@ -906,8 +773,7 @@ ${LEGEND}${warning}
 </section>
 ${options.sync ? syncResult(options.sync) : ""}
 <section class="mapcard">
-<div class="map-wide"><div class="maphead"><span>AIDEを使うアプリ</span><span>AIDEがつなぐ先</span></div>${renderWideMap()}</div>
-<div class="map-narrow">${renderNarrowMap()}</div>
+${renderMap()}
 </section>
 <div class="grid">
 ${options.sync ? foundCard(options.sync.result) : ""}
@@ -916,6 +782,7 @@ ${workerCard()}
 ${GROUPS.map((group) => groupCard(group, catalog, popovers, gone)).join("\n")}
 </div>
 ${popovers.map(renderPopover).join("\n")}
+${MAP_WIRE_SCRIPT}
 ${CENTER_TARGET_SCRIPT}
 ${BUSY_SCRIPT}`;
 

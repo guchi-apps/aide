@@ -14,9 +14,8 @@ import {
   GROUPS,
   handleMapIssue,
   handleMapPage,
+  renderMap,
   renderMapPage,
-  renderNarrowMap,
-  renderWideMap,
   syncMap,
   type MapDeps,
   type SyncView,
@@ -60,75 +59,65 @@ describe("アプリ連携の宣言", () => {
 });
 
 describe("アプリ連携の図", () => {
-  for (const [label, render] of [
-    ["横長", renderWideMap],
-    ["縦長", renderNarrowMap],
-  ] as const) {
-    it(`${label}の図にすべてのアプリが載り、一覧へリンクする`, () => {
-      const svg = render();
-      for (const caller of CALLERS) assert.ok(svg.includes(`href="#from-${caller.id}"`), caller.id);
-      for (const app of GROUPS.flatMap((group) => group.apps)) {
-        assert.ok(svg.includes(`href="#to-${app.id}"`), app.id);
-      }
-      assert.ok(!svg.includes("NaN"), "座標の計算が壊れている");
-    });
-  }
+  const figure = renderMap();
 
-  for (const [label, render, box] of [
-    ["横長", renderWideMap, { left: 408, right: 592 }],
-    ["縦長", renderNarrowMap, { left: 90, right: 270 }],
-  ] as const) {
-    it(`${label}の図の中央は AIde のロゴで、旧 AIDE のブロックは残っていない`, () => {
-      const svg = render();
-      assert.equal(svg.match(/aria-label="AIde"/g)?.length, 1, "ロゴがちょうど1つ載っていない");
-      assert.ok(!svg.includes("hub-name"), "旧AIDEの文字が残っている");
-      assert.doesNotMatch(svg, /<text[^>]*>AIDE<\/text>/);
-      // 取得・整形・中継は画像に焼かず、文字として残す。
-      assert.match(svg, /<text[^>]*class="hub-sub">取得・整形・中継<\/text>/);
-      // ロゴが囲みからはみ出して、周りの矢印と重ならない。
-      const logo = /<svg class="logo" x="([\d.]+)" y="[\d.]+" width="(\d+)" height="\d+"/.exec(svg);
-      assert.ok(logo, "ロゴの位置が読めない");
-      const x = Number(logo[1]);
-      assert.ok(x >= box.left && x + Number(logo[2]) <= box.right, `ロゴが囲み（${box.left}〜${box.right}）に収まっていない`);
-    });
-  }
+  it("すべてのアプリが図に載り、一覧へリンクする", () => {
+    for (const caller of CALLERS) assert.ok(figure.includes(`href="#from-${caller.id}"`), caller.id);
+    for (const app of GROUPS.flatMap((group) => group.apps)) {
+      assert.ok(figure.includes(`href="#to-${app.id}"`), app.id);
+    }
+  });
+
+  it("図は画像やSVGの文字ではなく、HTMLの枠で描く（#460）", () => {
+    assert.doesNotMatch(figure, /<text[\s>]/);
+    assert.doesNotMatch(figure, /class="(n|row)-box"/);
+    assert.match(figure, /<a class="node caller"/);
+    assert.match(figure, /<a class="node dest"/);
+    assert.ok(figure.includes('<svg class="wires"'), "矢印を引く先が無い");
+  });
+
+  it("繋ぐ先の説明文は文字として枠の中にある", () => {
+    for (const app of GROUPS.flatMap((group) => group.apps)) {
+      assert.ok(figure.includes(`<span class="what">${app.what}</span>`), app.id);
+    }
+  });
+
+  it("中央は AIde のロゴ1つで、旧 AIDE の文字は残っていない", () => {
+    assert.equal(figure.match(/aria-label="AIde"/g)?.length, 1, "ロゴがちょうど1つ載っていない");
+    assert.ok(!figure.includes("hub-name"), "旧AIDEの文字が残っている");
+    // 取得・整形・中継は画像に焼かず、文字として残す。
+    assert.match(figure, /<div class="hub-sub">取得・整形・中継<\/div>/);
+  });
 
   it("ハブに「VPS」と「Worker＝サブPC」の役割を示し、Workerは一覧のWorkerカードへリンクする（#431）", () => {
-    for (const render of [renderWideMap, renderNarrowMap]) {
-      const svg = render();
-      assert.match(svg, /<text[^>]*class="hub-vps">VPS/, "VPSの表示が無い");
-      assert.match(svg, /<text[^>]*class="hub-worker">Worker ＝ サブPC<\/text>/, "Workerの表示が無い");
-      assert.ok(svg.includes(`重い処理を定期実行（${JOB_CATALOG.length}件）`), "workerジョブの件数が無い");
-      assert.ok(svg.includes('href="#worker-jobs"'), "Workerから一覧へのリンクが無い");
-      assert.ok(!svg.includes("NaN"), "座標の計算が壊れている");
-    }
+    assert.match(figure, /<div class="hub-vps">VPS/, "VPSの表示が無い");
+    assert.match(figure, /<b>Worker ＝ サブPC<\/b>/, "Workerの表示が無い");
+    assert.ok(figure.includes(`重い処理を定期実行（${JOB_CATALOG.length}件）`), "workerジョブの件数が無い");
+    assert.ok(figure.includes('href="#worker-jobs"'), "Workerから一覧へのリンクが無い");
   });
 
-  it("読むと書くで矢じりの向きを分ける", () => {
-    const svg = renderWideMap();
-    // ops-dashboard は読むだけ、aide-bot は書くだけ。
-    assert.match(svg, /marker-start="url\(#mw-r\)"/);
-    assert.match(svg, /marker-end="url\(#mw-w\)"/);
-  });
-
-  it("読む・書く両方あるコネクタは、矢印を2本に分ける（#426）", () => {
+  it("繋ぐ先ごとに向き（読む・書く・両方）を持ち、両方は矢印を2本に分ける材料になる（#426）", () => {
     const destinations = GROUPS.flatMap((group) => group.apps);
     assert.ok(destinations.some((d) => d.dir === "both"), "検証対象の「両方向」コネクタが無い");
-    const readCount = destinations.filter((d) => d.dir === "read" || d.dir === "both").length;
-    const writeCount = destinations.filter((d) => d.dir === "write" || d.dir === "both").length;
-
-    for (const [prefix, render] of [
-      ["mw-", renderWideMap],
-      ["mn-", renderNarrowMap],
-    ] as const) {
-      const svg = render();
-      const starts = svg.match(new RegExp(`marker-start="url\\(#${prefix}r\\)"`, "g")) ?? [];
-      const ends = svg.match(new RegExp(`marker-end="url\\(#${prefix}w\\)"`, "g")) ?? [];
-      assert.equal(starts.length, readCount, `${prefix}: 読む矢印の本数`);
-      assert.equal(ends.length, writeCount, `${prefix}: 書く矢印の本数`);
-      // 1本の線の両端に矢じりを付ける（分割前の表現）行が残っていない。
-      assert.doesNotMatch(svg, /<path[^>]*marker-start="url\(#\w+-r\)"[^>]*marker-end="url\(#\w+-w\)"/);
+    for (const dir of ["read", "write", "both"] as const) {
+      const expected = destinations.filter((d) => d.dir === dir).length;
+      assert.equal(figure.match(new RegExp(`data-dir="${dir}"`, "g"))?.length ?? 0, expected, dir);
     }
+    // 読む・書くの札は、スマホ幅で色に頼らず語で向きを示す。
+    assert.ok(figure.includes('<span class="tag r">読む</span>'));
+    assert.ok(figure.includes('<span class="tag w">書く</span>'));
+  });
+
+  it("矢印を引くスクリプトが、読む・書くの矢じりと両方向の分割を持つ", () => {
+    const html = renderMapPage();
+    assert.ok(html.includes('id="map-r"') && html.includes('id="map-w"'));
+    assert.ok(html.includes('"map-r"') && html.includes('"map-w"'));
+    assert.ok(html.includes('dir === "both"'));
+  });
+
+  it("名前・説明のHTMLはエスケープする", () => {
+    assert.ok(!figure.includes("NaN"));
+    assert.ok(!figure.includes("<script"));
   });
 });
 
