@@ -162,10 +162,10 @@ export const CALLERS: Caller[] = [
   },
   {
     id: "aide-ios",
-    name: "aide-ios",
+    name: "AIDE iOSアプリ",
     via: "API",
-    what: "ホーム画面ウィジェットに室温を表示",
-    uses: ["/api/room/summary"],
+    what: "ショートカット・Siriから室温を読む／ホーム画面ウィジェットに表示",
+    uses: ["/api/mobile/token", "/api/mobile/room-temperature", "/api/room/summary"],
   },
 ];
 

@@ -109,6 +109,18 @@ export const ENDPOINTS: FeatureItem[] = [
       "iOSアプリの短寿命・一回限りコードをPKCE verifierと交換し、WKWebViewへ画面用Cookieを発行する。",
   },
   {
+    name: "/api/mobile/token",
+    meta: "POST / DELETE",
+    description:
+      "iOSアプリ専用の読み取りトークンを発行・失効する。POSTは `/status/auth/app/start?scope=mobile` のログインで得た一回限りコードをPKCE verifierと交換する（form: code・code_verifier）。DELETEは自分のトークンを失効させる。",
+  },
+  {
+    name: "/api/mobile/room-temperature",
+    meta: "GET",
+    description:
+      "iOSアプリ向けに、いまの室温を1件だけ返す（`{sensorName, temperature, measuredAt, stale}`）。専用トークンのBearer認証。センサーは AIDE_MOBILE_ROOM_SENSOR（任意）で選ぶ。読み取り専用。",
+  },
+  {
     name: "/features",
     meta: "GET",
     description: "このページ。ログインが要る（/map と同じ。許可されたGoogleアカウント、未設定の環境ではパスワード）。",
