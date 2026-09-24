@@ -49,6 +49,8 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_NEWS_MAIL_IDEMPOTENCY_LOG_PATH: "業界ニュース週報メール送信の冪等記録の置き場。既定（data/news-mail-idempotency.json）で足りる",
   AIDE_NEWS_MAIL_LOG_PATH: "業界ニュース週報メール送信の履歴の置き場。既定（data/news-mail-log.json）で足りる",
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",
+  AIDE_APNS_BUNDLE_ID: "APNsのtopic（iOSアプリのBundle ID）。既定 com.gucchii.AIDEios で足りる（#463）",
+  AIDE_PUSH_DEVICES_PATH: "プッシュ通知の宛先（デバイストークン）の置き場。既定（data/push-devices.json）で足りる（#463）",
   AIDE_MOBILE_ROOM_SENSOR: "iOSアプリへ返す室温のセンサー（名前かdeviceId）。未設定なら受信が止まっていない最初のセンサーを選ぶ（#454）",
   AIDE_MOBILE_TOKEN_PATH: "モバイル向けトークンの置き場。テストが本番の状態を汚さないための差し替えで、既定（data/auth/mobile-tokens.json）で足りる",
   AIDE_MYROOM_URL: "既定 http://127.0.0.1:8000 で足りる",
@@ -173,6 +175,9 @@ describe("本番の.envへの配線（deploy.yml）", () => {
       "AIDE_DAYSPAN_WRITE_TOKEN",
       "AIDE_GITHUB_TOKEN",
       "AIDE_GITHUB_ISSUE_TOKEN",
+      "AIDE_APNS_KEY",
+      "AIDE_APNS_KEY_ID",
+      "AIDE_APNS_TEAM_ID",
     ]) {
       assert.match(
         envHeredoc,

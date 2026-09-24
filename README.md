@@ -654,6 +654,28 @@ iOSアプリ（`guchi-apps/aide-ios`）のApp Intent（ショートカット・S
 | `GET /api/mobile/room-temperature` | `{sensorName, temperature(℃), measuredAt, stale}`。認証なし・不正は401、myroom未設定・取得失敗は503、室温にできるセンサーが無ければ502。`stale: true` は現在値ではない |
 | `POST /api/mobile/token` | ログイン引き継ぎコードをトークンへ交換（form: `code`・`code_verifier`） |
 | `DELETE /api/mobile/token` | 自分のトークンを失効（`Authorization: Bearer`）。存在しないトークンでも204 |
+| `PUT /api/mobile/push/devices` | APNsデバイストークンの登録（JSON: `{deviceToken(hex), environment: development\|production, preferences?: {<種別>: bool}}`）。同じトークンの再登録は更新。成功204・不正400・認証失敗401 |
+| `DELETE /api/mobile/push/devices` | 登録の失効（JSON: `{deviceToken}`）。未登録でも204 |
+
+### プッシュ通知（APNs。#463）
+
+登録された端末へ `src/core/push/send.ts` の `sendPush(kind, path)` で送る。認証は `.p8` のトークン認証
+（`node:http2`＋ES256のJWT。実行時依存なし）。ペイロードは
+`{"aps":{"alert":{"title":"AIDE","body":"<種別ごとの固定文>"},"sound":"default"},"kind":"<種別>","path":"/map"}`。
+**本文は固定文だけで、金額・個人情報・トークンを入れない**（詳細はアプリからAIDEの画面を開いて確認する）。
+`path` は `/` 始まりの相対パスだけ受け付ける。`environment` が `development` ならAPNsのsandbox、
+`production` なら本番のエンドポイントへ送る。`preferences` が `false` の種別は、その端末へ送らない。
+
+APNsが `410`・`400 BadDeviceToken` を返したトークンは、送信のたびに登録簿（`data/push-devices.json`）から自動で消す。
+テスト通知は認証情報のある環境（VPS）で `npm run push-test [-- <path>]`（既定 `/map`）。
+
+| 環境変数 | 内容 |
+|---|---|
+| `AIDE_APNS_KEY` | `.p8` の中身（改行は `\n` の2文字にした1行でもよい） |
+| `AIDE_APNS_KEY_ID` / `AIDE_APNS_TEAM_ID` | Key ID・Team ID |
+| `AIDE_APNS_BUNDLE_ID` | 任意。既定 `com.gucchii.AIDEios` |
+
+値の正は1Password（`op://apps/aide/apns-auth-key` `apns-key-id` `apns-team-id`）。3つ未設定なら送信せず「未設定」になる。
 
 **認証は専用のBearerトークン**（`src/auth/mobile-token.ts`）。MCPのOAuthトークンとは別系統で、
 `/api/mobile/*` にしか通らない（`/mcp`・他の `/api/*` は通らない）ため、Keychainから漏れても
