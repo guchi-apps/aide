@@ -14,10 +14,18 @@ const HANDOFF_TTL_MS = 2 * 60 * 1000;
 const S256_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
 
+/**
+ * 引き継ぎの用途。**用途が違うコードは交換できない。**
+ * `web` は画面用Cookie（WKWebView）、`mobile` は室温などを読むネイティブ向けトークン。
+ * 交換口を分けても、コードの側に用途が無いと「Web用に発行したコードでトークンを取る」ことができてしまう。
+ */
+export type AppHandoffPurpose = "web" | "mobile";
+
 interface StoredAppHandoff {
   email: string;
   next: string;
   challenge: string;
+  purpose: AppHandoffPurpose;
   expiresAt: number;
 }
 
@@ -55,7 +63,7 @@ export function isAppChallenge(value: string | null | undefined): value is strin
 
 /** Googleログイン完了後に、短寿命・一回限りの交換コードを発行する。 */
 export function issueAppHandoff(
-  input: { email: string; next: string; challenge: string },
+  input: { email: string; next: string; challenge: string; purpose?: AppHandoffPurpose },
   now: number = Date.now(),
 ): string {
   if (!isAppChallenge(input.challenge)) throw new Error("invalid app PKCE challenge");
@@ -66,6 +74,7 @@ export function issueAppHandoff(
     email: input.email,
     next: input.next,
     challenge: input.challenge,
+    purpose: input.purpose ?? "web",
     expiresAt: now + HANDOFF_TTL_MS,
   });
   return code;
@@ -78,12 +87,14 @@ export function issueAppHandoff(
 export function consumeAppHandoff(
   code: string,
   verifier: string,
+  purpose: AppHandoffPurpose = "web",
   now: number = Date.now(),
 ): AppHandoff | null {
   const found = handoffs.get(code);
   if (!found) return null;
   handoffs.delete(code);
 
+  if (found.purpose !== purpose) return null;
   if (found.expiresAt <= now || !PKCE_VERIFIER.test(verifier)) return null;
   if (!valueMatches(s256(verifier), found.challenge)) return null;
   return { email: found.email, next: found.next };

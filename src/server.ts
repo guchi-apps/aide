@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
+import { handleMobileRoomTemperature, handleMobileToken, type MobileApiOptions } from "./api/mobile.ts";
 import { handleRoomSummary } from "./api/room.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
@@ -65,6 +66,9 @@ const statusApiOptions: StatusApiOptions = {
   supabase: supabaseAuthConfig,
   registry,
 };
+
+// iOSアプリ向けの室温API（#454）。
+const mobileApiOptions: MobileApiOptions = { authConfig, supabase: supabaseAuthConfig };
 
 const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
 
@@ -214,6 +218,18 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
   if (path === "/api/status/checks") {
     await handleStatusApiChecks(req, res, statusApiOptions);
+    return;
+  }
+
+  // ---- iOSアプリ向けAPI（#454） ----
+  // 認証は専用のBearerトークン（src/auth/mobile-token.ts）。MCPのOAuthとも共有シークレットとも別系統で、
+  // このトークンは /api/mobile/* の読み取りにしか通らない。操作系は置かない。
+  if (path === "/api/mobile/token") {
+    await handleMobileToken(req, res, mobileApiOptions);
+    return;
+  }
+  if (path === "/api/mobile/room-temperature") {
+    await handleMobileRoomTemperature(req, res, mobileApiOptions);
     return;
   }
 
