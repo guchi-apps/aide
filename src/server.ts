@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
-import { handleMobileRoomTemperature, handleMobileToken, type MobileApiOptions } from "./api/mobile.ts";
+import { handleMobilePushDevices, handleMobileRoomTemperature, handleMobileToken, type MobileApiOptions } from "./api/mobile.ts";
 import { handleRoomSummary } from "./api/room.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
@@ -27,6 +27,7 @@ import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { recordMcpAuthFailure } from "./mcp/access-log.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { buildToolRegistry } from "./mcp/catalog.ts";
+import { handleAasa } from "./web/aasa.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
@@ -94,6 +95,9 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
 
   // アイコンとPWAマニフェスト。公開してよい静的ファイルなので認証は通さない。
   if (await handleAsset(req.method, path, res)) return;
+
+  // iOSアプリのUniversal Links用（#464）。認証もリダイレクトも通さない。
+  if (handleAasa(req.method, path, res)) return;
 
   // ---- 画面（アプリ連携 #328・機能一覧 #332） ----
   // **どちらもログインの内側に置く。** 公開してよい静的ファイル（上のアイコン等）とは扱いが違う。
@@ -226,6 +230,10 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // このトークンは /api/mobile/* の読み取りにしか通らない。操作系は置かない。
   if (path === "/api/mobile/token") {
     await handleMobileToken(req, res, mobileApiOptions);
+    return;
+  }
+  if (path === "/api/mobile/push/devices") {
+    await handleMobilePushDevices(req, res, mobileApiOptions);
     return;
   }
   if (path === "/api/mobile/room-temperature") {

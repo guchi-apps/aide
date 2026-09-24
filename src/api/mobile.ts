@@ -2,6 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthConfig } from "../auth/config.ts";
 import { findMobileToken, issueMobileToken, revokeMobileToken } from "../auth/mobile-token.ts";
 import { isAllowedEmail, type SupabaseAuthConfig } from "../auth/supabase.ts";
+import {
+  normalizeDeviceToken,
+  normalizeEnvironment,
+  normalizePreferences,
+  removeDevice,
+  shortToken,
+  upsertDevice,
+} from "../core/push/devices.ts";
 import { buildRoomStatus, type RoomSensorSummary, type RoomStatus } from "../core/views/room.ts";
 import { consumeAppHandoff } from "../web/app-auth.ts";
 import { bearerToken } from "./secret.ts";
@@ -12,8 +20,9 @@ import { bearerToken } from "./secret.ts";
  * - `POST /api/mobile/token` ログイン引き継ぎコードをモバイル専用トークンへ交換する
  * - `DELETE /api/mobile/token` アプリ自身が自分のトークンを失効させる
  * - `GET /api/mobile/room-temperature` 「室温」を1件だけ返す（読み取り専用）
+ * - `PUT|DELETE /api/mobile/push/devices` APNsデバイストークンの登録・失効（#463）
  *
- * **操作系は置かない。** トークンは `/api/mobile/*` の読み取りにしか通らない
+ * **操作系は置かない**（プッシュ通知の宛先の登録はこの端末自身の設定で、AIDEの他の状態を変えない）。 トークンは `/api/mobile/*` の読み取りにしか通らない
  * （`src/auth/mobile-token.ts`）。myroomへ繋ぐのは従来どおりAIDEだけで、アプリは直接繋がない。
  */
 
@@ -190,4 +199,63 @@ export async function handleMobileRoomTemperature(
     return;
   }
   json(res, 200, picked);
+}
+
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_FORM_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `PUT /api/mobile/push/devices`（登録。同じトークンの再登録は更新）と
+ * `DELETE /api/mobile/push/devices`（失効。未登録でも204）。
+ *
+ * 204 成功 / 400 リクエスト不正 / 401 認証失敗。ボディはJSON
+ * （`{deviceToken, environment, preferences?}` / `{deviceToken}`）。
+ */
+export async function handleMobilePushDevices(
+  req: IncomingMessage,
+  res: ServerResponse,
+  options: MobileApiOptions,
+): Promise<void> {
+  if (req.method !== "PUT" && req.method !== "DELETE") {
+    methodNotAllowed(res, "PUT, DELETE");
+    return;
+  }
+  if (!(await authorize(req, res, options))) return;
+
+  const body = await readJson(req);
+  const deviceToken = normalizeDeviceToken(body?.["deviceToken"]);
+  if (!body || !deviceToken) {
+    json(res, 400, { error: "invalid_device_token" });
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    await removeDevice(deviceToken);
+    console.log(`[mobile-api] プッシュ先を失効: ${shortToken(deviceToken)}`);
+    res.writeHead(204, { "Cache-Control": "no-store" }).end();
+    return;
+  }
+
+  const environment = normalizeEnvironment(body["environment"]);
+  const preferences = normalizePreferences(body["preferences"]);
+  if (!environment || !preferences) {
+    json(res, 400, { error: "invalid_request" });
+    return;
+  }
+  await upsertDevice({ deviceToken, environment, preferences });
+  console.log(`[mobile-api] プッシュ先を登録: ${shortToken(deviceToken)} (${environment})`);
+  res.writeHead(204, { "Cache-Control": "no-store" }).end();
 }

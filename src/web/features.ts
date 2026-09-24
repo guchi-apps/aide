@@ -151,6 +151,11 @@ export const ENDPOINTS: FeatureItem[] = [
     description: "認可サーバーのメタデータ。クライアントはここから各エンドポイントを見つける。",
   },
   {
+    name: "/.well-known/apple-app-site-association",
+    meta: "GET",
+    description: "iOSアプリのUniversal Links用。認証は不要。AIDE_IOS_TEAM_ID が未設定なら404。",
+  },
+  {
     name: "/oauth/register",
     meta: "POST",
     description: "動的クライアント登録（RFC 7591）。仕様上、未認証で公開される。",
