@@ -160,6 +160,13 @@ export const CALLERS: Caller[] = [
     what: "AIDEの動作状況を表示",
     uses: ["/api/status", "/api/status/checks"],
   },
+  {
+    id: "aide-ios",
+    name: "aide-ios",
+    via: "API",
+    what: "ホーム画面ウィジェットに室温を表示",
+    uses: ["/api/room/summary"],
+  },
 ];
 
 export const GROUPS: DestinationGroup[] = [

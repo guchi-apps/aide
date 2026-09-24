@@ -183,6 +183,12 @@ export const ENDPOINTS: FeatureItem[] = [
     },
   },
   {
+    name: "/api/room/summary",
+    meta: "GET",
+    description:
+      "iOSウィジェット向けの室温API。受信が止まっていないセンサー1台分の室温・湿度・屋外との気温差・最終測定時刻をJSONで返す。画面と同じログインのCookieで認証し、未ログインは401（リダイレクトしない）。値が取れないときは最終測定時刻を添えて503。",
+  },
+  {
     name: "/api/status",
     meta: "GET",
     description:
