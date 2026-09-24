@@ -27,6 +27,7 @@ import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { recordMcpAuthFailure } from "./mcp/access-log.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { buildToolRegistry } from "./mcp/catalog.ts";
+import { handleAasa } from "./web/aasa.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
@@ -94,6 +95,9 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
 
   // アイコンとPWAマニフェスト。公開してよい静的ファイルなので認証は通さない。
   if (await handleAsset(req.method, path, res)) return;
+
+  // iOSアプリのUniversal Links用（#464）。認証もリダイレクトも通さない。
+  if (handleAasa(req.method, path, res)) return;
 
   // ---- 画面（アプリ連携 #328・機能一覧 #332） ----
   // **どちらもログインの内側に置く。** 公開してよい静的ファイル（上のアイコン等）とは扱いが違う。
