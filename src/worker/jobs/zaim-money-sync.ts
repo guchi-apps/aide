@@ -1,31 +1,14 @@
 import { fetchZaimMoneyList } from "../../core/connectors/zaim/index.ts";
 import type { ZaimMoneyEntry, ZaimMoneyList } from "../../core/connectors/zaim/types.ts";
+import {
+  coveredCalendarMonths,
+  zaimMonthStartDay,
+  zaimMonthsToRead,
+} from "../../core/connectors/zaim/zaim-month.ts";
 import { publish } from "../sink.ts";
 
 /** Zaim家計簿明細キャッシュのキー。参照側（ビュー）と共有する。 */
 export const ZAIM_MONEY_CACHE_KEY = "zaim-money-snapshot";
-
-/** 当月（JST）を `YYYYMM` で返す。 */
-export function currentZaimMonth(now: Date): string {
-  const [year, month] = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-  })
-    .format(now)
-    .split("-");
-  return `${year}${month}`;
-}
-
-/** 先月（JST）を `YYYYMM` で返す。 */
-export function previousZaimMonth(now: Date): string {
-  const month = currentZaimMonth(now);
-  const year = Number(month.slice(0, 4));
-  const m = Number(month.slice(4, 6));
-  const prevYear = m === 1 ? year - 1 : year;
-  const prevMonth = m === 1 ? 12 : m - 1;
-  return `${prevYear}${String(prevMonth).padStart(2, "0")}`;
-}
 
 /**
  * 複数月ぶんの取得結果を1つにまとめる。**純粋関数。**
@@ -51,24 +34,29 @@ export function mergeZaimMoneyLists(lists: readonly ZaimMoneyList[]): ZaimMoneyL
 }
 
 /**
- * Zaim Web版の家計簿明細一覧（当月＋先月ぶん、JST）を巡回してキャッシュを更新する。
+ * Zaim Web版の家計簿明細（今日を含むZaimの月＋その前月、JST）を巡回してキャッシュを更新する。
  *
  * 公式API（`GET /v2/home/money`）が返さない自動連携明細（スマートレシート等）も、
  * この経路なら公式APIと同じように取得できる（aide#244）。ヘッドレスChromiumを起動するため
  * 重く、`zaim-sync` と同じくworkerから定期実行する。
  *
- * **先月分も読む理由**: asset-manager側（guchi-apps/asset-manager#443）が「反映待ち」明細の
+ * **読むのは「Zaimの月」で、暦月ではない**（aide#481）。開始日が25日なら `202609` は
+ * 8/25〜9/24。暦月で作ると毎月25日〜月末の明細がどちらの月にも入らない。一方キャッシュの
+ * `months` は**暦月のまま**で、全日を読めた暦月だけを入れる（asset-managerが暦月として
+ * 「AIDEが読めた範囲」を判定しているため。`coveredCalendarMonths` 参照）。
+ *
+ * **前月分も読む理由**: asset-manager側（guchi-apps/asset-manager#443）が「反映待ち」明細の
  * 置き換え前候補をこの一覧から探すが、当月分だけでは月初に先月のカード連携明細が候補から
  * 漏れる（aide#286）。
  *
- * 当月分の取得に失敗した場合はジョブ全体を失敗させる（従来どおり）。**先月分だけの取得に
- * 失敗した場合は当月分のみで保存する**（`months` も当月だけになる）。当月分の欠落のほうが
- * 実害が大きいと判断したため。
+ * 今日を含む月の取得に失敗した場合はジョブ全体を失敗させる（従来どおり）。**前月分だけの取得に
+ * 失敗した場合は今日を含む月のみで保存する**（`months` もその範囲で覆える暦月だけになる）。
  */
 export async function runZaimMoneySync(): Promise<string> {
   const now = new Date();
-  const month = currentZaimMonth(now);
-  const prevMonth = previousZaimMonth(now);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
+  const startDay = zaimMonthStartDay();
+  const [prevMonth, month] = zaimMonthsToRead(today, startDay) as [string, string];
 
   const current = await fetchZaimMoneyList(month);
 
@@ -81,13 +69,14 @@ export async function runZaimMoneySync(): Promise<string> {
   }
 
   const merged = mergeZaimMoneyLists(lists);
-  const destination = await publish(ZAIM_MONEY_CACHE_KEY, "zaim-money", merged);
+  const covered = coveredCalendarMonths(merged.months, today, startDay);
+  const destination = await publish(ZAIM_MONEY_CACHE_KEY, "zaim-money", { ...merged, months: covered });
 
   const parts = [
-    `${merged.months.join("・")}分の明細 ${merged.entries.length} 件を取得し、${destination}`,
+    `Zaimの${merged.months.join("・")}月（暦月で${covered.join("・") || "なし"}が全日分）の明細 ${merged.entries.length} 件を取得し、${destination}`,
   ];
   if (previousFailureMessage) {
-    parts.push(`（${prevMonth}分の取得に失敗したため当月のみ: ${previousFailureMessage}）`);
+    parts.push(`（${prevMonth}分の取得に失敗したため今日を含む月のみ: ${previousFailureMessage}）`);
   }
   return parts.join("");
 }
