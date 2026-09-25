@@ -386,6 +386,33 @@ describe("parseZaimMoneyDate", () => {
     })
 })
 
+describe("buildZaimMoneyList（明細JSON由来）", () => {
+    it("isoDate があれば表示テキストではなくそれを使う（月をまたぐ範囲でも年を誤らない）", () => {
+        const list = buildZaimMoneyList({
+            url: "",
+            month: "202601",
+            entries: [
+                {
+                    editUrl: "/money/10242099495/edit",
+                    isoDate: "2025-12-28",
+                    date: "",
+                    amount: "1589",
+                    category: "食費",
+                    genre: "",
+                    account: "スマートレシート",
+                    toAccount: "",
+                    place: "ライフ 高槻城西店",
+                    name: "",
+                    comment: "",
+                },
+            ],
+        })
+        assert.equal(list.entries[0]?.date, "2025-12-28")
+        assert.equal(list.entries[0]?.amount, 1589)
+        assert.equal(list.entries[0]?.id, 10242099495)
+    })
+})
+
 describe("buildZaimMoneyList", () => {
     it("一覧の生テキストから明細を組み立てる", () => {
         const list = buildZaimMoneyList({

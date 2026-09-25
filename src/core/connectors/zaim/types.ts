@@ -119,8 +119,13 @@ export interface ZaimRefreshResult {
 export interface ZaimRawMoneyEntry {
   /** 明細の編集リンク（例: `/money/10228209053/edit`）。IDはここから取り出す。 */
   editUrl: string;
-  /** 表示のまま（例: `"9月2日（水）"`）。年は month パラメータ側で補う。 */
+  /** 表示のまま（例: `"9月2日（水）"`）。年は month パラメータ側で補う。`isoDate` があればそちらを使う。 */
   date: string;
+  /**
+   * `YYYY-MM-DD`。明細JSON（`/money/details`）から読んだ場合の日付（aide#481）。
+   * Zaimの「月」は暦月ではなく年をまたぐこともあるため、month から年を補うより確実。
+   */
+  isoDate?: string;
   /** 「￥1,238」のような表示のまま。 */
   amount: string;
   category: string;
@@ -165,6 +170,10 @@ export interface ZaimMoneyEntry {
 
 export interface ZaimMoneyList {
   entries: ZaimMoneyEntry[];
-  /** 実際に読んだ月（`YYYYMM`）。1件の取得結果なら1要素、複数月をまとめた結果なら複数要素になる。 */
+  /**
+   * 明細を漏れなく読めた**暦月**（`YYYYMM`）。asset-managerが「AIDEが読めた範囲」の判定に使う。
+   * 取得結果1件では、取得に使った**Zaimの月**（開始日区切り。暦月とは限らない）が入る。
+   * 暦月へ直すのは `zaim-month.ts` の `coveredCalendarMonths`。
+   */
   months: string[];
 }
