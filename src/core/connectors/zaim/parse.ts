@@ -266,7 +266,9 @@ export function buildZaimMoneyList(raw: ZaimRawMoneyListResult): ZaimMoneyList {
   const entries: ZaimMoneyEntry[] = [];
   for (const entry of raw.entries) {
     const amount = parseYenAmount(entry.amount);
-    const date = parseZaimMoneyDate(entry.date, raw.month);
+    const date = entry.isoDate && isValidCalendarDate(entry.isoDate)
+      ? entry.isoDate
+      : parseZaimMoneyDate(entry.date, raw.month);
     if (amount === null || date === null) continue;
 
     entries.push({

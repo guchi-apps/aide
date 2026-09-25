@@ -2498,12 +2498,18 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 `GET /v2/home/money`（公式API）は、**銀行・カード・スマートレシート由来の自動連携レコードを
 返さない**（`src/core/connectors/zaim/write.ts:13-15` を参照。guchi-apps/asset-manager#379 で実測）。
 `GET /api/money/transactions` は、Zaim Web版の家計簿一覧画面（`https://zaim.net/money?month=YYYYMM`）を
-Playwrightでそのまま読むため、公式APIに現れない明細もここでは取得できる。
+Playwrightで読むため、公式APIに現れない明細もここでは取得できる。一覧はDOMを仮想スクロールで描くため
+（最初の23行ほどしか出ない）、DOMではなく画面が裏で読む `/money/details?month=YYYYMM` のJSONを読む（#481）。
+
+**Zaimの「月」は暦月ではない。** 「月の開始日」設定（`ZAIM_MONTH_START_DAY`。既定25）に従い、
+`month=202609` は 2026-08-25〜2026-09-24。ジョブは「今日を含むZaimの月＋その前月」を読み、
+レスポンスの `months` には**全日を読めた暦月だけ**を入れる（asset-managerが暦月として読むため。
+`src/core/connectors/zaim/zaim-month.ts`）。
 
 | | |
 |---|---|
 | エンドポイント | `GET /api/money/transactions` |
-| 返す内容 | 当月＋先月（JST）ぶんの明細一覧（`buildMoneyTransactions()`） |
+| 返す内容 | 今日を含むZaimの月＋前月ぶんの明細一覧（`buildMoneyTransactions()`） |
 | 認証 | `Authorization: Bearer $AIDE_READ_SECRET`（`/api/money/summary` と同じ値） |
 | 取得ジョブ | `zaim-money-sync`（1日2回。実体は `src/core/connectors/zaim/money-list.ts`） |
 
