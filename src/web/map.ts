@@ -141,21 +141,21 @@ export const CALLERS: Caller[] = [
   },
   {
     id: "car-care",
-    name: "car-care",
+    name: "Car Care",
     via: "API",
     what: "給油をZaimへ登録",
     uses: ["/api/zaim/payment", "/api/zaim/master"],
   },
   {
     id: "research-desk",
-    name: "Research Desk",
+    name: "ワークリレー",
     via: "API",
     what: "画像・週報をメールで送る",
     uses: ["/api/image-mail/send", "/api/news-mail/send"],
   },
   {
     id: "ops-dashboard",
-    name: "ops-dashboard",
+    name: "StatusHub",
     via: "API",
     what: "AIDEの動作状況を表示",
     uses: ["/api/status", "/api/status/checks"],
@@ -218,7 +218,7 @@ export const GROUPS: DestinationGroup[] = [
     apps: [
       {
         id: "myroom",
-        name: "myroom",
+        name: "MyRoom",
         dir: "both",
         what: "部屋の室温・CO2・エアコン・3Dプリンターの状態／照明・エアコンを操作",
         uses: [
@@ -243,7 +243,7 @@ export const GROUPS: DestinationGroup[] = [
         what: "開発状況を読む／Issueを起票",
         uses: ["aide_dev_status", "aide_repo_status", "aide_repo_labels", "aide_create_issue"],
       },
-      { id: "ops-dashboard", name: "ops-dashboard", dir: "read", what: "VPS・サブPCの稼働状況", uses: ["aide_host_status", "aide_uptime_monitors", "aide_service_quotas"] },
+      { id: "ops-dashboard", name: "StatusHub", dir: "read", what: "VPS・サブPCの稼働状況", uses: ["aide_host_status", "aide_uptime_monitors", "aide_service_quotas"] },
       {
         id: "claude-code",
         name: "Claude Code",
@@ -266,14 +266,14 @@ export const GROUPS: DestinationGroup[] = [
       },
       {
         id: "aide-bot",
-        name: "aide-bot",
+        name: "Morrow",
         dir: "write",
         what: "通知・タスク候補・日次ブリーフ",
         uses: ["aide_create_notification", "aide_create_task_candidate", "aide_save_daily_brief"],
       },
       {
         id: "research-desk",
-        name: "Research Desk",
+        name: "ワークリレー",
         dir: "write",
         what: "業界情報を登録",
         uses: ["aide_research_desk_import_weekly_report"],
@@ -791,7 +791,7 @@ ${BUSY_SCRIPT}`;
     nav: siteNav("map"),
     headerAction: options.headerAction ?? "",
     body,
-    footer: "細かなエンドポイントの一覧は「機能一覧」にあります。動作状況は ops-dashboard の「AIDE」タブで確認できます。",
+    footer: "細かなエンドポイントの一覧は「機能一覧」にあります。動作状況は StatusHub の「AIDE」タブで確認できます。",
   });
 }
 
