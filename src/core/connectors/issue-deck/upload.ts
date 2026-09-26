@@ -127,5 +127,10 @@ export async function uploadImage(config: IssueDeckUploadConfig, image: ValidIma
   if (!body || typeof body.url !== "string" || typeof body.filename !== "string") {
     return { ok: false, httpStatus: response.status, reason: "IssueDeckの応答から画像のURLを読み取れませんでした" };
   }
-  return { ok: true, url: body.url, filename: body.filename };
+  // IssueDeck が返す `url` はリクエストの Host から組み立てられる。内部アドレスで繋ぐと画面で開けない
+  // URLになるため使わず、`filename` と `AIDE_ISSUE_DECK_URL`（公開URL）から組み立て直す。
+  if (!/^[0-9a-f-]{36}\.(png|jpg|gif|webp|svg)$/.test(body.filename)) {
+    return { ok: false, httpStatus: response.status, reason: "IssueDeckの応答のファイル名が想定と違います" };
+  }
+  return { ok: true, url: `${config.baseUrl}/api/issues/images/${body.filename}`, filename: body.filename };
 }

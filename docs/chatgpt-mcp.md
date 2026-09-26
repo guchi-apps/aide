@@ -174,7 +174,7 @@ ChatGPT / Claude → AIDE（issue_deck_upload_image）→ IssueDeck（POST /api/
 
 | 設定 | 内容 |
 | --- | --- |
-| `AIDE_ISSUE_DECK_URL` | IssueDeckの公開URL（GitHubのvariable） |
+| `AIDE_ISSUE_DECK_URL` | IssueDeckの**公開URL（https）**（GitHubのvariable）。返す画像URLの元になるため内部アドレスにしない |
 | `AIDE_ISSUE_DECK_UPLOAD_TOKEN` | IssueDeck側の画像アップロード用シークレットと同じ値（GitHubのsecret。1Password: `op://apps/aide/issue-deck-upload-token`） |
 
 どちらかが未設定なら、ツールは送信せず `not_configured` を返す。

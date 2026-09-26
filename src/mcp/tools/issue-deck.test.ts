@@ -37,12 +37,13 @@ describe("issue_deck_upload_image", () => {
       const file = (init?.body as FormData).get("file") as File;
       assert.equal(file.type, "image/png");
       assert.equal(file.size, 11);
-      return Response.json({ url: "https://deck.example.test/api/issues/images/a.png", filename: "a.png" });
+      return Response.json({ url: "http://127.0.0.1:3000/api/issues/images/x", filename: "0b7d2c1e-1111-4222-8333-444455556666.png" });
     });
     const out = parsed(await call({ dataBase64: `data:image/png;base64,${PNG}`, mimeType: "image/png" }));
     assert.equal(fetchMock.mock.callCount(), 1);
     assert.equal(out["status"], "uploaded");
-    assert.equal(out["url"], "https://deck.example.test/api/issues/images/a.png");
+    // 内部Hostで返ってきても、公開URLから組み立て直す。
+    assert.equal(out["url"], "https://deck.example.test/api/issues/images/0b7d2c1e-1111-4222-8333-444455556666.png");
     assert.equal(JSON.stringify(out).includes(TOKEN), false);
   });
 
@@ -67,7 +68,7 @@ describe("issue_deck_upload_image", () => {
   });
 
   it("SVGは<svg>を含めば受け付ける", async () => {
-    mock.method(globalThis, "fetch", async () => Response.json({ url: "u", filename: "f.svg" }));
+    mock.method(globalThis, "fetch", async () => Response.json({ url: "u", filename: "0b7d2c1e-1111-4222-8333-444455556666.svg" }));
     const svg = Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64");
     assert.equal(parsed(await call({ dataBase64: svg, mimeType: "image/svg+xml" }))["status"], "uploaded");
   });
