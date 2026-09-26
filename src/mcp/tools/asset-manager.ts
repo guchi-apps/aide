@@ -391,10 +391,39 @@ export const assetManagerImportPaymentTool: Tool = {
 /**
  * サブスクの一覧の読み取り（#345。Asset Manager 側は asset-manager#491 の `GET /api/subscriptions`）。
  *
- * 応答は加工せずそのまま返す。月額換算・次回請求日・契約状況・円換算は向こうが計算済みで、
+ * 応答は既定で契約ごとの履歴だけを省き（#489。`includeHistory: true` で全部返す）、それ以外は加工せず返す。
+ * 月額換算・次回請求日・契約状況・円換算は向こうが計算済みで、
  * こちらで再計算すればズレる（`aide_fixed_costs` と同じ「計算はしない」方針）。
  * `aide_fixed_costs` も同じAPIを読み、月額・支払方法別・31日以内の支払予定へ畳んで返す（#347）。
  */
+/**
+ * 契約ごとの履歴（`priceHistory`・`paymentMethodHistory`）を省く（#489）。
+ *
+ * 履歴は契約ごとに付き、支払方法の履歴は現在値（`paymentMethod`・`zaimLink`…）の重複がほとんどで、
+ * 22契約で応答が約40KBになっていた。「いくら払っているか・次にいつ請求されるか」には要らない。
+ * **ただし将来日付の料金改定は「次にいくら請求されるか」に効く**ため、`scheduledPriceChanges` へ残す。
+ * 計算はせず、Asset Manager が付けた `isCurrent` を基準に抜き出すだけ。
+ */
+export function omitSubscriptionHistory(payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const body = payload as Record<string, unknown>;
+  if (!Array.isArray(body["subscriptions"])) return payload;
+
+  const subscriptions = body["subscriptions"].map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const { priceHistory, paymentMethodHistory: _omitted, ...rest } = entry as Record<string, unknown>;
+    // Asset Manager は履歴を古い順に並べ、今適用中の行に `isCurrent` を付けている。
+    // 日付をこちらで比べると向こうの日境界とズレうるため、「isCurrent の行より後ろ」を未来の改定とする。
+    // 適用中の行が無い（解約済みなど）ときは何も残さない。
+    const current = Array.isArray(priceHistory)
+      ? priceHistory.findIndex((price) => (price as { isCurrent?: unknown } | null)?.isCurrent === true)
+      : -1;
+    const scheduled = current >= 0 ? (priceHistory as unknown[]).slice(current + 1) : [];
+    return scheduled.length > 0 ? { ...rest, scheduledPriceChanges: scheduled } : rest;
+  });
+  return { ...body, subscriptions };
+}
+
 export const assetManagerSubscriptionsTool: Tool = {
   name: "asset_manager_subscriptions",
   description:
@@ -409,13 +438,21 @@ export const assetManagerSubscriptionsTool: Tool = {
     "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
     "summary.monthlyTotalJpy などはサブスク区分だけの集計で、保険・税金・分割払いを含む固定費全体は summary.fixedCost* と byCategory にある。" +
     "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別の合計・31日以内の支払予定へ畳んだ要約で、" +
-    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。",
+    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。" +
+    "既定では応答を小さくするため、契約ごとの料金履歴（priceHistory）と支払方法の履歴（paymentMethodHistory）は省き、" +
+    "今日より先に適用される料金改定だけを scheduledPriceChanges で返す（無ければ項目自体が無い）。" +
+    "過去の料金改定・支払方法の変更履歴まで尋ねられたときだけ includeHistory: true を指定する。",
   inputSchema: {
     type: "object",
     properties: {
       includeEnded: {
         type: "boolean",
         description: "true で解約済み（ENDED）も含める。省略時は含めない。過去の契約まで尋ねられたときだけ指定する。",
+      },
+      includeHistory: {
+        type: "boolean",
+        description:
+          "true で契約ごとの料金履歴（priceHistory）と支払方法の履歴（paymentMethodHistory）も返す。省略時は返さない。過去の料金改定・支払方法の変更まで尋ねられたときだけ指定する。",
       },
     },
     additionalProperties: false,
@@ -426,7 +463,23 @@ export const assetManagerSubscriptionsTool: Tool = {
       return invalid("includeEnded は true / false で指定してください");
     }
 
-    return callAssetManager(includeEnded ? "/api/subscriptions?includeEnded=1" : "/api/subscriptions", { method: "GET" });
+    const includeHistory = args["includeHistory"];
+    if (includeHistory !== undefined && typeof includeHistory !== "boolean") {
+      return invalid("includeHistory は true / false で指定してください");
+    }
+
+    const response = await callAssetManager(
+      includeEnded ? "/api/subscriptions?includeEnded=1" : "/api/subscriptions",
+      { method: "GET" },
+    );
+    if (includeHistory || response.isError) return response;
+    // 未設定・タイムアウト（`status: "error"`）や JSON でない本文は、そのまま返す。
+    try {
+      const text = response.content[0]?.text ?? "";
+      return result(omitSubscriptionHistory(JSON.parse(text)));
+    } catch {
+      return response;
+    }
   },
 };
 
@@ -473,7 +526,8 @@ export const assetManagerAddSubscriptionPriceTool: Tool = {
   description:
     "Asset Managerの既存サブスクへ、プラン変更・値上げ・値下げ後の料金を履歴として追加する書き込みツール。" +
     "既存料金を上書きしない。対象は asset_manager_subscriptions の id で指定し、適用開始日 effectiveFrom を必ず指定する。" +
-    "同じ適用開始日の料金は追加できない。内容を利用者に確認してから呼ぶ。",
+    "同じ適用開始日の料金は追加できない。既存の適用開始日は asset_manager_subscriptions を includeHistory: true で呼んで priceHistory の effectiveFrom を確かめる。" +
+    "内容を利用者に確認してから呼ぶ。",
   inputSchema: {
     type: "object",
     properties: {
