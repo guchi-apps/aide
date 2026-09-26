@@ -505,6 +505,11 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
 | `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体10件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
+**各ツールの利用者・問い・応答サイズ・変更しない根拠は [docs/mcp-tool-inventory.md](docs/mcp-tool-inventory.md)**（#489）。
+`asset_manager_subscriptions` は既定で契約ごとの料金履歴・支払方法履歴を省く（今日より先の改定は
+`scheduledPriceChanges`。`includeHistory: true` で全部）。`aide_balances` は当日でない口座を名前だけの
+`staleAccountNames` で返す（HTTPの `staleAccounts` は不変）。ツールの応答JSONは整形せず返す。
+
 ChatGPTスケジュール向け3ツールは、サーバー側の `AIDE_BOT_URL`、`AIDE_BOT_TOKEN`、
 `AIDE_BOT_EMAIL` を使って aide-bot の `POST /api/notices` へ登録する。メールアドレスや認証トークンは
 MCPの引数・応答・ログへ出さない。詳しい設定と手動確認は [docs/chatgpt-mcp.md](docs/chatgpt-mcp.md) を参照。
@@ -2872,11 +2877,13 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 「いま何にいくら払っているか」「次に何が更新されるか」に答えるための読み取りツール
 `asset_manager_subscriptions`（#345）。asset-manager#491 でサブスク管理アプリ（旧 subscription-lists）の
 機能が Asset Manager へ移管され、その読み出し口 `GET /api/subscriptions[?includeEnded=1]` を呼ぶ。
-実装は `src/mcp/tools/asset-manager.ts`。引数は `includeEnded`（真偽値。既定は解約済みを含めない）だけ。
+実装は `src/mcp/tools/asset-manager.ts`。引数は `includeEnded`（真偽値。既定は解約済みを含めない）と
+`includeHistory`（真偽値。既定は契約ごとの `priceHistory`・`paymentMethodHistory` を省く。#489）。
 
 認証・宛先は取り込み（上）と同じ `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`・`AIDE_ASSET_MANAGER_URL`で、
 **新しい環境変数・secret は要らない**（Asset Manager 側の対象ユーザーも同じ `ZAIM_SYNC_USER_EMAIL` で決まる）。
-応答（`summary`・`subscriptions`）は**加工せず返す**。月額換算・次回請求日・契約状況・円換算は向こうが
+応答（`summary`・`subscriptions`）は、既定で省く履歴と、それに代えて付ける `scheduledPriceChanges`
+（Asset Manager が付けた `isCurrent` の行より後ろ＝今後適用される改定。無ければ項目自体が無い）以外は**加工せず返す**。月額換算・次回請求日・契約状況・円換算は向こうが
 計算済みで、こちらで再計算すればズレる。仕様は asset-manager の `docs/subscriptions.md`。
 
 ツールの説明で、答え方を取り違えやすい点を指示している。
@@ -2893,7 +2900,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 
 | | `aide_fixed_costs` | `asset_manager_subscriptions` |
 |---|---|---|
-| 返すもの | 畳んだ要約。通貨別の月額合計・支払方法別の合計・明細・31日以内の支払予定 | APIの応答そのまま。契約ごとのプラン・料金改定の履歴・ラベル・契約期間・解約予定の終了日など |
+| 返すもの | 畳んだ要約。通貨別の月額合計・支払方法別の合計・明細・31日以内の支払予定 | APIの応答（既定は契約ごとの履歴を省く。`includeHistory: true` で料金改定・支払方法の履歴も）。契約ごとのプラン・ラベル・契約期間・解約予定の終了日など |
 | 対象 | 固定費全体（サブスク・保険・税金・分割払いなど） | 全区分。`summary.monthlyTotalJpy` はサブスク区分だけ、全体は `summary.fixedCost*` |
 | 使いどころ | 「毎月いくら出ていくか」「どのカードから落ちるか」 | 契約の中身を見る・料金改定の履歴を調べる・登録前に `id` や支払方法名を確かめる |
 
