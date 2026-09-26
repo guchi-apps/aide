@@ -43,6 +43,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_create_issue`（aide#50） | ClaudeアプリからのGitHub Issue起票 | 満たす | `AIDE_GITHUB_ISSUE_TOKEN`（取得用とは別のPAT） | 作成のみ |
 | `POST /map/issue`（#355） | アプリ連携画面の「機能を同期」で見つけた差から、図を直すGitHub Issueを起票 | **例外**（下記） | `AIDE_GITHUB_ISSUE_TOKEN`（`aide_create_issue` と共用。取得用とは別のPAT） | 作成のみ |
 | `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
+| `issue_deck_upload_image`（#449） | ChatGPT・ClaudeからIssueDeckの画像置き場への画像アップロード | 満たす（下記） | `AIDE_ISSUE_DECK_UPLOAD_TOKEN`（IssueDeck専用の新しいシークレット。進捗報告・ディスパッチのものは流用しない） | 作成のみ（下記） |
 | `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 | `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
@@ -172,6 +173,21 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 3. **作成だけ。** 編集・削除は持たない。動かす・消すにはDaySpanの画面から行う
 
 詳細は `src/core/connectors/dayspan/write.ts`。
+
+#### IssueDeckへの画像アップロードは3条件を満たす（#449）
+
+`issue_deck_upload_image` は、ChatGPT・Claudeが作った画像をIssueDeckの画像置き場（`POST /api/issues/images`）へ
+保存し、Issue本文へ貼れるURLを返す。**例外を根拠にしていない。**
+
+1. **他のどこからも塞がっている経路。** その口はログインCookie専用で、ChatGPT・Claudeから届く経路が無かった
+2. **読み取りとは別の資格情報。** 専用の `AIDE_ISSUE_DECK_UPLOAD_TOKEN`。IssueDeckの画像の**読み取り**
+   （`PROGRESS_REPORT_SECRET`・`DISPATCH_SECRET`）とは別で、AIDEは何も読まない
+3. **作成のみ。** 保存のたびに新しいUUIDのファイルが増えるだけで、削除・上書き・一覧は持たない
+
+形式（png/jpeg/gif/webp/svg）・10MBの検査と、バイト列の先頭がMIMEと合うかの確認はAIDE側でも先に行う。
+画像は**base64の引数で受け取る**（URLをAIDEが取りに行く形は、内部へ向けたリクエストの踏み台になるため採らない）。
+**IssueDeck側が、このシークレットを `POST /api/issues/images` で受け付ける版が `main` に出ていること**が前提
+（出ていないうちはHTTP 401になる）。リリース順は IssueDeck → AIDE。
 
 #### 照明などの操作は条件3の例外（aide#317）
 
@@ -476,6 +492,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_repo_status` | リポジトリ1件の詳細。俯瞰の項目に加えて、直近コミットの一覧・確認待ちのIssue・open な Pull Request |
 | `aide_repo_labels` | リポジトリ1件に定義されているラベル（名前・色・説明）。`aide_create_issue` に渡す候補 |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない。`dryRun` で起票せず確認できる） |
+| `issue_deck_upload_image` | 画像を1枚 IssueDeck の画像置き場へアップロードし、Issue本文へ貼れるURLを返す。**書き込みツール**（作成のみ。base64で渡す。png/jpeg/gif/webp/svg・10MBまで。`dryRun` で送らず検査だけできる。`AIDE_ISSUE_DECK_URL` と `AIDE_ISSUE_DECK_UPLOAD_TOKEN` が要る） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 | `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
 | `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |

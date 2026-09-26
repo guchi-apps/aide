@@ -104,6 +104,7 @@ export const CALLERS: Caller[] = [
       "aide_repo_status",
       "aide_repo_labels",
       "aide_create_issue",
+      "issue_deck_upload_image",
       "aide_claude_sessions",
       "aide_zaim_master",
       "aide_zaim_payment",
@@ -240,8 +241,8 @@ export const GROUPS: DestinationGroup[] = [
         id: "github",
         name: "GitHub",
         dir: "both",
-        what: "開発状況を読む／Issueを起票",
-        uses: ["aide_dev_status", "aide_repo_status", "aide_repo_labels", "aide_create_issue"],
+        what: "開発状況を読む／Issueを起票／画像をIssueDeckへアップロード",
+        uses: ["aide_dev_status", "aide_repo_status", "aide_repo_labels", "aide_create_issue", "issue_deck_upload_image"],
       },
       { id: "ops-dashboard", name: "StatusHub", dir: "read", what: "VPS・サブPCの稼働状況", uses: ["aide_host_status", "aide_uptime_monitors", "aide_service_quotas"] },
       {
