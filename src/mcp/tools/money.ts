@@ -25,7 +25,7 @@ export const balancesTool: Tool = {
   name: "aide_balances",
   description:
     "いま持っているお金を返す。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄（評価額つき）、" +
-    "連携口座ごとのZaim側の最終更新を含む。" +
+    "連携口座ごとのZaim側の最終更新（onlineAccounts）と、そのうち当日でない口座名（staleAccountNames）を含む。" +
     "「いくら持っているか」「どの口座にいくらあるか」「保有銘柄は何か」" +
     "「証券口座の評価額は」を尋ねられたときに呼ぶ。" +
     "**毎月の固定費・サブスクの支払予定は返さない**（それは aide_fixed_costs）。" +
@@ -34,7 +34,12 @@ export const balancesTool: Tool = {
     "鮮度は呼び出し側で判断すること。empty が true ならまだ一度も巡回しておらず、" +
     "**残高がゼロという意味ではない**。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  handler: async () => json(await buildBalances()),
+  handler: async () => {
+    // `staleAccounts` は `onlineAccounts` の部分集合で、当日でない口座が多いと同じ口座を2度返す。
+    // MCPでは名前だけにする（各口座の最終更新は `onlineAccounts` にある。HTTPの `/api/money/summary` は不変）。
+    const { staleAccounts, ...view } = await buildBalances();
+    return json({ ...view, staleAccountNames: staleAccounts.map((account) => account.name) });
+  },
 };
 
 export const fixedCostsTool: Tool = {
@@ -49,7 +54,7 @@ export const fixedCostsTool: Tool = {
     "換算できないものがあれば null になる。呼び出しのたびに取得するため常に最新。" +
     "configured が false なら接続が未設定で、**固定費が無いという意味ではない**。" +
     "取得元は Asset Manager で、asset_manager_subscriptions と同じデータを月額・支払方法別・31日以内の支払予定へ畳んだ要約。" +
-    "契約ごとのプラン・料金改定の履歴・ラベル・契約期間・解約予定の終了日などの詳細が要るときは asset_manager_subscriptions を呼ぶ。",
+    "契約ごとのプラン・ラベル・契約期間・解約予定の終了日などの詳細が要るときは asset_manager_subscriptions を呼ぶ（料金改定・支払方法の履歴は includeHistory: true を付けたときだけ返る）。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => json(await loadFixedCosts()),
 };

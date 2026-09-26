@@ -6,6 +6,7 @@ import {
   assetManagerCreateSubscriptionTool,
   assetManagerImportPaymentTool,
   assetManagerSubscriptionsTool,
+  omitSubscriptionHistory,
 } from "./asset-manager.ts";
 
 const SECRET = "test-asset-manager-secret";
@@ -453,8 +454,11 @@ describe("asset_manager_subscriptions", () => {
     process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
   }
 
-  it("引数は includeEnded だけの任意項目で、必須は無い", () => {
-    assert.deepEqual(Object.keys(assetManagerSubscriptionsTool.inputSchema.properties as object), ["includeEnded"]);
+  it("引数は includeEnded・includeHistory だけの任意項目で、必須は無い", () => {
+    assert.deepEqual(Object.keys(assetManagerSubscriptionsTool.inputSchema.properties as object), [
+      "includeEnded",
+      "includeHistory",
+    ]);
     assert.equal(assetManagerSubscriptionsTool.inputSchema.required, undefined);
     assert.equal(assetManagerSubscriptionsTool.inputSchema.additionalProperties, false);
   });
@@ -477,6 +481,93 @@ describe("asset_manager_subscriptions", () => {
     } finally {
       fetchMock.mock.restore();
     }
+  });
+
+  describe("履歴の絞り込み（#489）", () => {
+    const WITH_HISTORY = {
+      status: "ok",
+      asOf: "2026-09-20",
+      subscriptions: [
+        {
+          id: 1,
+          name: "iPhone",
+          paymentMethod: "カード",
+          priceHistory: [
+            { effectiveFrom: "2024-09-01", amount: 1, isCurrent: false },
+            { effectiveFrom: "2025-09-01", amount: 2, isCurrent: true },
+            { effectiveFrom: "2027-07-01", amount: 3048, isCurrent: false },
+          ],
+          paymentMethodHistory: [{ effectiveFrom: "2025-07-14", paymentMethod: "カード", isCurrent: true }],
+        },
+        { id: 2, name: "Zaim", priceHistory: [{ effectiveFrom: "2019-06-02", amount: 360, isCurrent: true }], paymentMethodHistory: [] },
+      ],
+    };
+
+    it("適用中の行（isCurrent）が無い契約は、履歴を省いたうえで scheduledPriceChanges も付けない", () => {
+      const out = omitSubscriptionHistory({
+        subscriptions: [{ id: 9, priceHistory: [{ effectiveFrom: "2020-01-01", isCurrent: false }] }],
+      });
+      assert.deepEqual(out, { subscriptions: [{ id: 9 }] });
+    });
+
+    it("既定では料金履歴・支払方法の履歴を省き、isCurrent より後ろの改定だけ scheduledPriceChanges に残す", async () => {
+      useEnv();
+      const fetchMock = mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(WITH_HISTORY), { status: 200 }));
+      try {
+        const result = await assetManagerSubscriptionsTool.handler({}, { sessionId: null });
+        assert.equal(result.isError, false);
+        assert.deepEqual(parsed(result), {
+          status: "ok",
+          asOf: "2026-09-20",
+          subscriptions: [
+            {
+              id: 1,
+              name: "iPhone",
+              paymentMethod: "カード",
+              scheduledPriceChanges: [{ effectiveFrom: "2027-07-01", amount: 3048, isCurrent: false }],
+            },
+            { id: 2, name: "Zaim" },
+          ],
+        });
+      } finally {
+        fetchMock.mock.restore();
+      }
+    });
+
+    it("includeHistory: true では本文を加工せず返す", async () => {
+      useEnv();
+      const fetchMock = mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(WITH_HISTORY), { status: 200 }));
+      try {
+        const result = await assetManagerSubscriptionsTool.handler({ includeHistory: true }, { sessionId: null });
+        assert.deepEqual(parsed(result), WITH_HISTORY);
+      } finally {
+        fetchMock.mock.restore();
+      }
+    });
+
+    it("includeHistory が真偽値でなければ、送信せずにエラーにする", async () => {
+      useEnv();
+      const fetchMock = mock.method(globalThis, "fetch");
+      try {
+        const result = await assetManagerSubscriptionsTool.handler({ includeHistory: "yes" }, { sessionId: null });
+        assert.deepEqual(parsed(result), { status: "error", reason: "includeHistory は true / false で指定してください" });
+        assert.equal(fetchMock.mock.callCount(), 0);
+      } finally {
+        fetchMock.mock.restore();
+      }
+    });
+
+    it("Asset Managerの失敗（2xx以外）は加工せず isError のまま返す", async () => {
+      useEnv();
+      const fetchMock = mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ reason: "認証" }), { status: 401 }));
+      try {
+        const result = await assetManagerSubscriptionsTool.handler({}, { sessionId: null });
+        assert.equal(result.isError, true);
+        assert.equal((parsed(result) as { httpStatus?: number }).httpStatus, 401);
+      } finally {
+        fetchMock.mock.restore();
+      }
+    });
   });
 
   it("includeEnded: true のときだけ ?includeEnded=1 を付ける", async () => {

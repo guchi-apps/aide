@@ -12,7 +12,7 @@ const dir = await mkdtemp(join(tmpdir(), "aide-mcp-transport-test-"));
 process.env["AIDE_MCP_ACCESS_LOG_PATH"] = join(dir, "mcp-access.json");
 const { readMcpAccessLog, resetMcpAccessLog } = await import("./access-log.ts");
 const { ToolRegistry } = await import("./registry.ts");
-const { McpTransport } = await import("./transport.ts");
+const { McpTransport, compactToolResult } = await import("./transport.ts");
 
 after(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -226,6 +226,21 @@ describe("initialize が名乗る内容", () => {
       assert.ok(icon.src.startsWith(`${BASE_URL}/icons/`), icon.src);
       assert.equal(icon.mimeType, "image/png");
       assert.match(icon.sizes[0]!, /^\d+x\d+$/);
+    }
+  });
+});
+
+describe("compactToolResult（#489）", () => {
+  it("JSONとして読める text は整形なしにし、値は変えない", () => {
+    const payload = { a: [1, { b: "改行\nあり" }], c: null };
+    const out = compactToolResult({ content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError: false });
+    assert.equal(out.content[0]?.text, JSON.stringify(payload));
+    assert.equal(out.isError, false);
+  });
+
+  it("JSONでない text と、{ [ で始まっても読めない text はそのまま返す", () => {
+    for (const text of ["ツール aide_x が失敗しました: boom", "{壊れた", "[未完"]) {
+      assert.equal(compactToolResult({ content: [{ type: "text", text }] }).content[0]?.text, text);
     }
   });
 });

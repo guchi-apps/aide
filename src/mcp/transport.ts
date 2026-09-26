@@ -21,6 +21,27 @@ import {
  * - `Anthropic/Toolbox` と `Anthropic/ClaudeAI` が別セッションで同時に繋いでくる。
  */
 
+/**
+ * ツールの応答のうち、JSONとして読める text を整形なしへ直す。
+ *
+ * 各ツールは `JSON.stringify(payload, null, 2)` で返しており、インデントと改行だけで応答が
+ * 2〜3割大きくなる（応答はモデルのコンテキストに入る。#489）。ツールごとに直すと足すたびに
+ * 漏れるため、出口のここで揃える。値は変えない。JSONでない text（失敗メッセージなど）はそのまま。
+ */
+export function compactToolResult<T extends { content: { type: string; text: string }[] }>(result: T): T {
+  return {
+    ...result,
+    content: result.content.map((item) => {
+      if (item.type !== "text" || !/^\s*[{[]/.test(item.text)) return item;
+      try {
+        return { ...item, text: JSON.stringify(JSON.parse(item.text)) };
+      } catch {
+        return item;
+      }
+    }),
+  };
+}
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
@@ -240,7 +261,7 @@ export class McpTransport {
 
         const args = (params?.["arguments"] ?? {}) as Record<string, unknown>;
         try {
-          return ok(await tool.handler(args, { sessionId: ctx.sessionId }));
+          return ok(compactToolResult(await tool.handler(args, { sessionId: ctx.sessionId })));
         } catch (cause) {
           // ツールの失敗はプロトコルエラーではなく、isError付きの結果として返す。
           // そうしないとClaudeが復旧できない。
