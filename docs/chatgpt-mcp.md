@@ -159,3 +159,34 @@ Research Desk側で項目が増えてもそのまま届く。
 3. 同じ発表を**別のURL**で、`publisher` と `targetProduct` を揃えて送り、`mergedCount` が増えて
    画面の記事が増えないことを確認する。
 4. 宅配事業とロッカー事業を混ぜて送り、`businessCounts` が分かれて返り、画面でも分かれて見えることを確認する。
+
+---
+
+# ChatGPT・ClaudeからIssueDeckへ画像をアップロードする
+
+ChatGPTで生成した画像などを、IssueDeckの画像置き場へ保存してIssue本文で参照する（#449）。
+
+```
+ChatGPT / Claude → AIDE（issue_deck_upload_image）→ IssueDeck（POST /api/issues/images）
+```
+
+## AIDE側の設定
+
+| 設定 | 内容 |
+| --- | --- |
+| `AIDE_ISSUE_DECK_URL` | IssueDeckの**公開URL（https）**（GitHubのvariable）。返す画像URLの元になるため内部アドレスにしない |
+| `AIDE_ISSUE_DECK_UPLOAD_TOKEN` | IssueDeck側の画像アップロード用シークレットと同じ値（GitHubのsecret。1Password: `op://apps/aide/issue-deck-upload-token`） |
+
+どちらかが未設定なら、ツールは送信せず `not_configured` を返す。
+
+## 使い方
+
+`issue_deck_upload_image` に `dataBase64`（画像のbase64）と `mimeType` を渡すと、`url`（と貼り付け用の
+`markdown`）が返る。そのURLを `aide_create_issue` の本文へ `![説明](URL)` として書けばIssueに画像が載る。
+送る前に確かめたいときは `dryRun: true`（検査だけ行い、アップロードしない）。
+
+## リリース順（重要）
+
+IssueDeck側が、`POST /api/issues/images` でこのシークレットのBearer認証を受け付ける版を `main` へ
+出してから、AIDEを出す。先にAIDEだけ出すと、ツールは `HTTP 401` を返す。
+IssueDeckの画像の配信（GET）は認証が要り、URLだけでは他人に読まれない。

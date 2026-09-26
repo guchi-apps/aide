@@ -71,6 +71,7 @@ describe("MCPツールの登録簿", () => {
     for (const name of [
       "aide_zaim_payment",
       "aide_create_issue",
+      "issue_deck_upload_image",
       "aide_create_event",
       "aide_room_press",
       "aide_aircon_control",
