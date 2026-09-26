@@ -46,6 +46,9 @@ export interface TimeWindow {
 export const MAX_DESCRIPTION_LENGTH = 300;
 
 export interface ScheduleEvent {
+  /** 更新・削除（`aide_update_event` / `aide_delete_event`）で対象を指す値。`calendarId` とセットで使う。 */
+  id: string | null;
+  calendarId: string | null;
   title: string;
   allDay: boolean;
   /** 設定タイムゾーンでの `HH:MM`。終日は null。 */
@@ -284,6 +287,8 @@ export function truncateDescription(
 
 function summarizeEvent(event: DaySpanEvent): ScheduleEvent {
   return {
+    id: text(event.id),
+    calendarId: text(event.calendarId),
     title: text(event.title) ?? "（無題の予定）",
     allDay: event.allDay === true,
     startTime: text(event.startTime),

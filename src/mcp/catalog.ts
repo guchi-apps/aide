@@ -2,6 +2,8 @@ import { ToolRegistry } from "./registry.ts";
 import { airconControlTool } from "./tools/aircon-control.ts";
 import { claudeSessionsTool } from "./tools/claude-sessions.ts";
 import { createEventTool } from "./tools/create-event.ts";
+import { deleteEventTool } from "./tools/delete-event.ts";
+import { updateEventTool } from "./tools/update-event.ts";
 import { devStatusTool, repoLabelsTool, repoStatusTool } from "./tools/dev.ts";
 import { garbageCollectionTool } from "./tools/garbage.ts";
 import { issueDeckUploadImageTool } from "./tools/issue-deck.ts";
@@ -67,6 +69,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(garbageCollectionTool);
   // 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
   registry.register(createEventTool);
+  registry.register(updateEventTool);
+  registry.register(deleteEventTool);
   // 開発状況は俯瞰・1リポジトリの詳細・起票用ラベルで分ける（#373）。
   registry.register(devStatusTool);
   registry.register(repoStatusTool);

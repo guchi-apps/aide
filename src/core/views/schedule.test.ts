@@ -158,6 +158,15 @@ describe("truncateDescription", () => {
 });
 
 describe("summarizeDay", () => {
+  it("予定の id と calendarId を返す（更新・削除で対象を指すのに要る）", () => {
+    const summarized = summarizeDay(
+      day({ events: [{ id: "abc123", calendarId: "primary", title: "歯医者", startTime: "10:00", endTime: "11:00" }] }),
+    );
+
+    assert.equal(summarized.events[0]?.id, "abc123");
+    assert.equal(summarized.events[0]?.calendarId, "primary");
+  });
+
   it("終日の予定は空き時間を塞がない", () => {
     const summarized = summarizeDay(
       day({

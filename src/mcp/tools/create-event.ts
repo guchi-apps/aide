@@ -13,10 +13,10 @@ import type { Tool, ToolResult } from "../types.ts";
  * 無かった。README「書き込みをどこまで持つか」の3条件は
  * `src/core/connectors/dayspan/write.ts` を参照。
  *
- * **作成だけ。編集・削除は持たない。** 一度登録した予定を動かす・消すにはDaySpanの画面から
- * 行う必要がある（`aide_zaim_payment` と同じ理由——取り消せない操作をサーバー間経路へ出さない）。
+ * **このツールは作成だけ。** 変更・削除は `aide_update_event` / `aide_delete_event`（aide#493）が
+ * 別に持つ（読み取り・書き込みを分けるのと同じ理由で、操作ごとに道具を分けている）。
  *
- * **`dryRun` を持つ**（#373）。この経路から取り消せないので、登録前に「何が入るか」だけを
+ * **`dryRun` を持つ**（#373）。登録前に「何が入るか」だけを
  * 確かめられるようにしてある。検査は本番と同じものを通し、DaySpanへは送らない。
  */
 function json(payload: unknown): ToolResult {
@@ -32,11 +32,11 @@ export const createEventTool: Tool = {
   name: "aide_create_event",
   description:
     "予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。" +
-    "**書き込みを伴うツール。この経路から取り消し・修正はできない。**" +
+    "**書き込みを伴うツール。**" +
     "「予定を入れて」「カレンダーに登録して」と明示的に頼まれたときだけ呼ぶ。" +
     "会話に予定の話が出ただけでは呼ばない。" +
     "**登録前にタイトル・日時を復唱し、利用者に確認を取ってから呼ぶこと**" +
-    "（間違えてもこの経路からは取り消せないため）。" +
+    "（間違えたときの修正は aide_update_event・aide_delete_event になり、手数が増えるため）。" +
     "startTime・endTime は両方指定するか両方省略する（省略すると終日の予定になる）。" +
     "作成できたら予定の url を返すので、「入れました」の案内に使うこと。" +
     "**日時があやふやなまま登録したくないときは dryRun: true で呼ぶ**と、" +
