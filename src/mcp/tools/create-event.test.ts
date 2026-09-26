@@ -16,8 +16,9 @@ function parse(result: ToolResult): Record<string, unknown> {
 }
 
 describe("aide_create_event の宣言", () => {
-  it("取り消し・修正はできない旨を説明文に書いている", () => {
-    assert.match(createEventTool.description, /取り消し・修正はできない/);
+  it("修正・取り消しは別のツールである旨を説明文に書いている", () => {
+    assert.match(createEventTool.description, /aide_update_event/);
+    assert.match(createEventTool.description, /aide_delete_event/);
   });
 
   it("知らない引数を受け付けない", () => {
