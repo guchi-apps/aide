@@ -14,6 +14,8 @@
 /** Googleカレンダーの予定1件。 */
 export interface DaySpanEvent {
   id: string;
+  /** 予定のあるカレンダー。更新・削除（`PATCH` / `DELETE /api/internal/events/[id]`）で対象を指すのに要る。 */
+  calendarId?: string;
   title?: string;
   allDay?: boolean;
   /** 開始（ISO8601）。**終日は `YYYY-MM-DD`。** */

@@ -48,6 +48,8 @@
 | `aide_schedule` | 予定・空き時間 | C B | 読 | DaySpan API | DaySpan | 3.9KB | 1日約2.5KB（予定6件） | 維持。定義は大きいが選び分けの記述で、`days` 上限14で応答は有界。予定ごとの `url` は長い（約170B/件）が、開くための実用情報 |
 | `aide_garbage_collection` | ゴミ収集日 | C B | 読 | myroom/DaySpan | DaySpan | 1.6KB | 未実測 | 維持 |
 | `aide_create_event` | 予定を作る | C B | **書** | DaySpan | DaySpan | 2.0KB | 小 | 維持 |
+| `aide_update_event` | 予定を変える | C B | **書** | DaySpan | DaySpan | 未実測 | 小 | 新設（#493）。dryRun・復唱確認を保つ |
+| `aide_delete_event` | 予定を消す | C B | **書** | DaySpan | DaySpan | 未実測 | 小 | 新設（#493）。dryRun・タイトル一致を保つ |
 | `aide_dev_status` | 開発の俯瞰 | C B | 読 | GitHub | GitHub | 1.3KB | 約9KB（20リポジトリ） | 維持。1リポジトリ約0.45KB。`aide_repo_status` と問いを分けてあり、絞り込みは呼び出し側の選択で足りる |
 | `aide_repo_status` | 1リポジトリの詳細 | C B | 読 | GitHub | GitHub | 1.1KB | 約1.8KB | 維持 |
 | `aide_repo_labels` | 起票用ラベル | C B | 読 | GitHub | GitHub | 0.8KB | 未実測 | 維持（`aide_create_issue` の候補） |
@@ -94,7 +96,7 @@
 ## 別Issueで扱うもの
 
 - **aide-bot の書き込み名指しの漏れ**（guchi-apps/aide-bot#367）: `presets.ts` の `writeTools` は
-  `aide_zaim_payment`・`aide_create_issue` の2本だけで、`aide_create_event`・`aide_room_press`・`aide_aircon_control`・
+  `aide_zaim_payment`・`aide_create_issue` の2本だけで、`aide_create_event`・`aide_update_event`・`aide_delete_event`・`aide_room_press`・`aide_aircon_control`・
   `asset_manager_create_subscription`・`asset_manager_add_subscription_price`・`issue_deck_upload_image` は
   「書き込みツールを渡さない」設定でも素通しになる。AIDE側の書き込みツールの一覧はこの表の「書」の行。
   ここでは変更しない。
