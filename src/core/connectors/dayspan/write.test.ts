@@ -118,6 +118,27 @@ describe("normalizeUpdateEventInput", () => {
     assert.deepEqual(result, { input: { ...target, startTime: "14:00", endTime: "15:00" } });
   });
 
+  it("終了日を指定すれば、翌日以降へまたがる時刻予定を受け付ける", () => {
+    assert.deepEqual(
+      normalizeUpdateEventInput({
+        ...target,
+        date: "2026-09-10",
+        endDate: "2026-09-11",
+        startTime: "23:00",
+        endTime: "01:00",
+      }),
+      {
+        input: {
+          ...target,
+          date: "2026-09-10",
+          endDate: "2026-09-11",
+          startTime: "23:00",
+          endTime: "01:00",
+        },
+      },
+    );
+  });
+
   it("eventId・calendarId が無ければ弾く", () => {
     assert.ok("error" in normalizeUpdateEventInput({ calendarId: "primary", title: "x" }));
     assert.ok("error" in normalizeUpdateEventInput({ eventId: "abc123", title: "x" }));
@@ -139,6 +160,27 @@ describe("normalizeUpdateEventInput", () => {
     assert.ok(
       "error" in normalizeUpdateEventInput({ ...target, allDay: true, startTime: "10:00", endTime: "11:00" }),
     );
+    assert.ok(
+      "error" in normalizeUpdateEventInput({ ...target, allDay: true, endDate: "2026-09-11" }),
+    );
+  });
+
+  it("同日の逆転時刻・開始日より前または不正な終了日は弾く", () => {
+    assert.ok(
+      "error" in
+        normalizeUpdateEventInput({
+          ...target,
+          date: "2026-09-10",
+          endDate: "2026-09-10",
+          startTime: "10:00",
+          endTime: "09:00",
+        }),
+    );
+    assert.ok(
+      "error" in normalizeUpdateEventInput({ ...target, date: "2026-09-10", endDate: "2026-09-09" }),
+    );
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, endDate: "2026-02-30" }));
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, endDate: "2026-09-11" }));
   });
 
   it("実在しない日付・空のタイトルは弾く", () => {
