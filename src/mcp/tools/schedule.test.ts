@@ -103,6 +103,13 @@ describe("aide_schedule の宣言", () => {
     assert.match(scheduleTool.description, /offsetDays/);
   });
 
+  it("予定作成時のカレンダー選択に calendarName と calendarId を使うことを説明している", () => {
+    assert.match(scheduleTool.description, /calendarName/);
+    assert.match(scheduleTool.description, /calendarId/);
+    assert.match(scheduleTool.description, /aide_create_event/);
+    assert.match(scheduleTool.description, /既定の保存先/);
+  });
+
   it("知らない引数を受け付けない", () => {
     assert.equal(scheduleTool.inputSchema["additionalProperties"], false);
   });

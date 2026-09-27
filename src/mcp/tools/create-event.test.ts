@@ -32,6 +32,15 @@ describe("aide_create_event の宣言", () => {
   it("dryRun を持つことを説明文に書いている", () => {
     assert.match(createEventTool.description, /dryRun/);
   });
+
+  it("内容に合うカレンダーを予定一覧から選び、候補がなければ既定先へ戻すことを説明している", () => {
+    const properties = createEventTool.inputSchema["properties"] as Record<string, { description?: string }>;
+    assert.match(createEventTool.description, /aide_schedule/);
+    assert.match(createEventTool.description, /calendarName/);
+    assert.match(createEventTool.description, /calendarId/);
+    assert.match(createEventTool.description, /既定の保存先/);
+    assert.match(properties["calendarId"]?.description ?? "", /events\[\]\.calendarId/);
+  });
 });
 
 describe("aide_create_event ハンドラ", () => {
