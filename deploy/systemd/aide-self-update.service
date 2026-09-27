@@ -1,0 +1,16 @@
+[Unit]
+# サブPCの aide を origin/develop に追従させ、巡回コードの反映漏れを防ぐ。
+Description=AIDE: サブPCのチェックアウトを自動更新
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# git fetch・npm ci・unit反映・常駐受け口の再起動までを行う。次の毎時実行に重ならず、
+# 通知処理を含めても余裕がある上限にする。
+TimeoutStartSec=15min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts self-update'

@@ -1,6 +1,7 @@
 import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runClaudeSessionsSync } from "./jobs/claude-sessions-sync.ts";
 import { runPrinterWatch } from "./jobs/printer-watch.ts";
+import { runSelfUpdate } from "./jobs/self-update.ts";
 import { runWeatherSync } from "./jobs/weather-sync.ts";
 import { runZaimKeepAlive } from "./jobs/zaim-keep-alive.ts";
 import { runZaimMoneySync } from "./jobs/zaim-money-sync.ts";
@@ -26,6 +27,12 @@ import { recordJobRun } from "./record.ts";
  * `Record<JobName, ...>` の型でカタログとの取りこぼしを防いでいる。
  */
 const RUNNERS: Record<JobName, () => Promise<string>> = {
+  "self-update": async () => {
+    const result = await runSelfUpdate();
+    return result.updated
+      ? `${result.before.slice(0, 7)} から ${result.after.slice(0, 7)} へ更新${result.dependenciesInstalled ? "し、依存を再導入" : ""}`
+      : "origin/develop は最新です";
+  },
   "zaim-refresh": runZaimRefresh,
   "zaim-sync": runZaimSync,
   "zaim-money-sync": runZaimMoneySync,
