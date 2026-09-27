@@ -37,6 +37,9 @@ export const createEventTool: Tool = {
     "会話に予定の話が出ただけでは呼ばない。" +
     "**登録前にタイトル・日時を復唱し、利用者に確認を取ってから呼ぶこと**" +
     "（間違えたときの修正は aide_update_event・aide_delete_event になり、手数が増えるため）。" +
+    "**登録先も内容から選ぶ。** 仕事・遊びなど予定の性質が分かるときは、先に aide_schedule で既存予定を確認し、" +
+    "events の calendarName と calendarId から対応するカレンダーを選んで calendarId を明示して渡すこと。" +
+    "候補が返らない、または内容から選べないときは calendarId を省き、DaySpan側の既定の保存先を使うこと。" +
     "startTime・endTime は両方指定するか両方省略する（省略すると終日の予定になる）。" +
     "作成できたら予定の url を返すので、「入れました」の案内に使うこと。" +
     "**日時があやふやなまま登録したくないときは dryRun: true で呼ぶ**と、" +
@@ -57,7 +60,9 @@ export const createEventTool: Tool = {
       location: { type: "string", description: "場所。分からなければ省く。" },
       calendarId: {
         type: "string",
-        description: "登録先のカレンダーID。省略するとDaySpan側の既定の保存先へ登録する。",
+        description:
+          "登録先のカレンダーID。内容に合う既存カレンダーを選べるときは、aide_schedule の events[].calendarId を渡す。" +
+          "候補が無い・分類が曖昧なときは省き、DaySpan側の既定の保存先へ登録する。",
       },
       dryRun: {
         type: "boolean",
