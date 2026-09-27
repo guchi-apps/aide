@@ -1,0 +1,13 @@
+[Unit]
+Description=AIDE: サブPCのチェックアウトを自動更新（1時間ごと）
+
+[Timer]
+# 巡回（1日2回）より十分短く、更新漏れの時間を最長でもおよそ1時間に抑える。
+OnCalendar=hourly
+# 停止中に逃した実行は、復帰時に更新を取り直す。
+Persistent=true
+# 他の毎時ジョブと同時にネットワークやnpmを使わないよう、少し散らす。
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

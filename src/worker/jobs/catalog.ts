@@ -23,6 +23,15 @@ export interface JobInfo {
 
 export const JOB_CATALOG = [
   {
+    name: "self-update",
+    description:
+      "サブPCの aide チェックアウトを origin/develop にfast-forwardし、依存変更時だけ再導入する。" +
+      "更新後はsystemd unitを反映し、Zaim Web版の受け口を再起動する。",
+    interval: "1時間ごと",
+    // 毎時なので、3回ぶん飛んだら気づけるように180分。
+    staleAfterMinutes: 180,
+  },
+  {
     name: "zaim-refresh",
     description:
       "Zaimの連携口座を一括更新する（「データを更新する」を押す）。押すまで各金融機関から" +

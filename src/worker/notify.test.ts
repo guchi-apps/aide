@@ -12,6 +12,7 @@ process.env["AIDE_WORKER_STATE_DIR"] = STATE_DIR;
 const {
   buildFailurePayload,
   buildRecoveryPayload,
+  buildSelfUpdateSuccessPayload,
   buildStaleAccountsPayload,
   buildZaimSessionRecoveryPayload,
   decideNotification,
@@ -278,6 +279,22 @@ describe("通知の中身", () => {
     const [embed] = payload.embeds;
     assert.equal(embed.title, "✅ [AIDE] zaim-sync 復旧");
     assert.match(embed.fields.find((f) => f.name === "失敗していた期間")?.value ?? "", /12時間0分/);
+  });
+
+  it("自己更新の通知に更新前後と依存再導入の有無を載せる", () => {
+    const payload = buildSelfUpdateSuccessPayload({
+      before: "1234567890abcdef",
+      after: "abcdef1234567890",
+      dependenciesInstalled: true,
+    });
+    const [embed] = payload.embeds;
+    assert.equal(embed.title, "✅ [AIDE] 自己更新");
+    assert.match(embed.description, /受け口を再起動/);
+    assert.deepEqual(embed.fields, [
+      { name: "更新前", value: "1234567", inline: true },
+      { name: "更新後", value: "abcdef1", inline: true },
+      { name: "依存の再導入", value: "実行済み", inline: true },
+    ]);
   });
 });
 
