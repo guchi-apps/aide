@@ -92,6 +92,32 @@ export interface SignalyPayload {
   embeds: [{ title: string; description: string; color: number; fields: SignalyField[] }];
 }
 
+/** aide の自己更新が実際にあったときだけ送る成功通知。 */
+export function buildSelfUpdateSuccessPayload({
+  before,
+  after,
+  dependenciesInstalled,
+}: {
+  before: string;
+  after: string;
+  dependenciesInstalled: boolean;
+}): SignalyPayload {
+  return {
+    embeds: [
+      {
+        title: "✅ [AIDE] 自己更新",
+        description: "サブPCの aide を origin/develop へ更新し、Zaim Web版の受け口を再起動しました。",
+        color: COLOR_RECOVERY,
+        fields: [
+          { name: "更新前", value: before.slice(0, 7), inline: true },
+          { name: "更新後", value: after.slice(0, 7), inline: true },
+          { name: "依存の再導入", value: dependenciesInstalled ? "実行済み" : "不要", inline: true },
+        ],
+      },
+    ],
+  };
+}
+
 export interface FailureSummary {
   /** 通知に載せる失敗理由（1行・切り詰め済み）。 */
   reason: string;
@@ -380,6 +406,17 @@ export async function send(url: string, payload: SignalyPayload): Promise<boolea
     );
     return false;
   }
+}
+
+/** 更新があったことだけを通知する。更新なしの毎時実行は通知しない。 */
+export async function notifySelfUpdateSuccess(args: {
+  before: string;
+  after: string;
+  dependenciesInstalled: boolean;
+}): Promise<void> {
+  const url = webhookUrl();
+  if (!url) return;
+  await send(url, buildSelfUpdateSuccessPayload(args));
 }
 
 /**

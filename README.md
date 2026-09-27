@@ -2353,7 +2353,10 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 
 ### systemdユニット
 
-ユニットは `deploy/systemd/` にある。**実行場所はサブPCの `~/.config/systemd/user/`** で、リポジトリからは自動反映されない（VPSへの `deploy.yml` が触るのはサーバー側だけ）。間隔を変えたら手で反映する。
+ユニットは `deploy/systemd/` にあり、**実行場所はサブPCの `~/.config/systemd/user/`** である。配置と
+`daemon-reload` は `guchi-apps/subpc` の `setup.sh --only systemd` が一元管理する（VPSへの `deploy.yml`
+が触るのはサーバー側だけ）。通常は `aide-self-update` がコード更新後にこの処理を呼ぶため、手で反映する
+必要はない。
 
 **新しい定期ジョブのタイマーを足すときは、`guchi-apps/subpc` の `setup.sh`（`SYSTEMD_USER_UNITS`）にも足す。** サブPCでは `./setup.sh --only systemd` がここのユニットを配置して `.timer` を enable し、日次のドリフト検知も回している。リストに無いタイマーは `cp` で置いても、次の反映・検知で「管理外」として差分に出る（#378 の `aide-printer-watch.timer` で気づいた）。以下の手動手順は `setup.sh` を使えない環境向け。
 
@@ -2365,6 +2368,7 @@ systemctl --user enable --now aide-claude-sessions-sync.timer  # 初回のみ（
 systemctl --user enable --now aide-printer-watch.timer  # 初回のみ（未導入のユニット。myroom#428 のリリース後）
 systemctl --user enable --now aide-zaim-web.service     # 初回のみ（未導入のユニット）
 systemctl --user enable --now aide-zaim-money-sync.timer  # 初回のみ（未導入のユニット）
+systemctl --user enable --now aide-self-update.timer       # 初回のみ（未導入のユニット）
 systemctl --user restart aide-zaim-keep-alive.timer aide-zaim-refresh.timer aide-zaim-sync.timer aide-zaim-money-sync.timer
 systemctl --user list-timers 'aide-*'
 ```
@@ -2375,14 +2379,15 @@ systemctl --user list-timers 'aide-*'
 
 以前はユニットがリポジトリの外にしか無く、間隔がなぜその値なのかを追えなかったため、実体をこちらへ移している。
 
-**サブPC側のコードも自動では更新されない。** `deploy.yml` が配るのはVPS（サーバー）だけで、
-worker が動く `~/apps/aide` は**人が `git pull` するまで古いまま**。worker まわりの修正は、
-`develop` へマージしただけでは効かない（#89 の時点で17コミットぶん遅れていた）。
+**サブPC側のコードは `aide-self-update.timer` が毎時 `origin/develop` へ自動更新する。** 更新前に
+追跡済みの未コミット変更を確認し、未追跡ファイルは判定から除く。fast-forwardできない・作業ツリーが
+汚れている場合は更新せず失敗としてSignalyへ通知する。`package-lock.json` が変わったときだけ `npm ci`
+を実行し、更新後は `~/apps/subpc/setup.sh --only systemd` でunitを反映してから
+`aide-zaim-web.service` を再起動する。更新なしの定期実行は通知しない。
 
-```bash
-# サブPCで
-cd ~/apps/aide && git pull --ff-only
-```
+このタイマーも `guchi-apps/subpc` の `SYSTEMD_USER_UNITS` に登録して有効化する。unitファイルの配置と
+`daemon-reload` をaide側で重複して行ってはいけない。`setup.sh` が差分検出・未コミット変更の見送り・
+配布元コミットの記録をまとめて担うためである。
 
 ### ジョブ失敗の通知
 
