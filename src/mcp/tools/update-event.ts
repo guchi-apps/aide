@@ -10,7 +10,8 @@ import type { Tool, ToolResult } from "../types.ts";
  *
  * `aide_create_event`（aide#243）の続き。対象は `aide_schedule` が返した予定の `id` と
  * `calendarId` で必ず名指しさせる。**送った項目だけが変わる**（省略は「変えない」）。
- * 繰り返しの親（シリーズ全体）・日をまたぐ予定はDaySpan側が `409` で断る。
+ * 繰り返しの親（シリーズ全体）はDaySpan側が `409` で断る。日をまたぐ時刻予定は
+ * `date` と `endDate` を指定して変更する。
  *
  * **`dryRun` を持つ。** 検査は本番と同じものを通し、DaySpanへは送らない。
  */
@@ -31,9 +32,10 @@ export const updateEventTool: Tool = {
     "（先に aide_schedule で予定を引くこと。IDを推測しない）。" +
     "**変更前に「どの予定を、どう変えるか」を復唱し、利用者に確認を取ってから呼ぶこと。**" +
     "送った項目だけが変わり、省いた項目は今のまま。startTime・endTime は両方指定する。" +
+    "日をまたぐ時刻予定は date に開始日、endDate に終了日を指定する。" +
     "終日にするなら allDay: true（時刻とは同時に指定しない）、終日から時刻ありへ戻すなら startTime・endTime を指定する。" +
     "場所を消すなら location に空文字を渡す。" +
-    "繰り返しの元の予定（シリーズ全体）と日をまたぐ予定は変更できない（1回分の id を指定する）。" +
+    "繰り返しの元の予定（シリーズ全体）は変更できない（1回分の id を指定する）。" +
     "予定を消すのは aide_delete_event。" +
     "**内容があやふやなときは dryRun: true で呼ぶ**と、変更せずに「何を送るか」だけを返す。",
   inputSchema: {
@@ -46,8 +48,12 @@ export const updateEventTool: Tool = {
       },
       title: { type: "string", description: "新しいタイトル。変えないなら省く。" },
       date: { type: "string", description: "新しい日付（YYYY-MM-DD）。変えないなら省く。" },
+      endDate: {
+        type: "string",
+        description: "時刻ありの予定の新しい終了日（YYYY-MM-DD）。日をまたぐときに date とセットで指定する。",
+      },
       startTime: { type: "string", description: "新しい開始時刻（HH:MM）。endTime とセットで指定する。" },
-      endTime: { type: "string", description: "新しい終了時刻（HH:MM）。startTime より後にすること。" },
+      endTime: { type: "string", description: "新しい終了時刻（HH:MM）。同日のときは startTime より後にすること。" },
       allDay: {
         type: "boolean",
         description: "true で終日の予定へ変える（startTime・endTime と同時には指定しない）。",
