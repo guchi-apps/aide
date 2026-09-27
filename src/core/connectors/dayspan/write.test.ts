@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { normalizeCreateEventInput, readDaySpanWriteConfig } from "./write.ts";
+import {
+  normalizeCreateEventInput,
+  normalizeDeleteEventInput,
+  normalizeUpdateEventInput,
+  readDaySpanWriteConfig,
+} from "./write.ts";
 
 describe("normalizeCreateEventInput", () => {
   it("title・dateだけの最小構成を受け付ける（終日の予定になる）", () => {
@@ -102,5 +107,55 @@ describe("readDaySpanWriteConfig", () => {
       else process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = originalToken;
       if (originalUrl !== undefined) process.env["AIDE_DAYSPAN_URL"] = originalUrl;
     }
+  });
+});
+
+describe("normalizeUpdateEventInput", () => {
+  const target = { eventId: "abc123", calendarId: "primary" };
+
+  it("送った項目だけを入力へ含める", () => {
+    const result = normalizeUpdateEventInput({ ...target, startTime: "14:00", endTime: "15:00" });
+    assert.deepEqual(result, { input: { ...target, startTime: "14:00", endTime: "15:00" } });
+  });
+
+  it("eventId・calendarId が無ければ弾く", () => {
+    assert.ok("error" in normalizeUpdateEventInput({ calendarId: "primary", title: "x" }));
+    assert.ok("error" in normalizeUpdateEventInput({ eventId: "abc123", title: "x" }));
+  });
+
+  it("変える項目が1つも無ければ弾く", () => {
+    assert.ok("error" in normalizeUpdateEventInput(target));
+  });
+
+  it("location は空文字で消せる", () => {
+    assert.deepEqual(normalizeUpdateEventInput({ ...target, location: "" }), {
+      input: { ...target, location: "" },
+    });
+  });
+
+  it("時刻が片方だけ・逆転・allDay との同時指定は弾く", () => {
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, startTime: "10:00" }));
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, startTime: "10:00", endTime: "09:00" }));
+    assert.ok(
+      "error" in normalizeUpdateEventInput({ ...target, allDay: true, startTime: "10:00", endTime: "11:00" }),
+    );
+  });
+
+  it("実在しない日付・空のタイトルは弾く", () => {
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, date: "2026-02-30" }));
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, title: "  " }));
+  });
+});
+
+describe("normalizeDeleteEventInput", () => {
+  it("eventId・calendarId・title を要る。title は前後の空白を落とす", () => {
+    assert.deepEqual(
+      normalizeDeleteEventInput({ eventId: "abc123", calendarId: "primary", title: " 歯医者 " }),
+      { input: { eventId: "abc123", calendarId: "primary", title: "歯医者" } },
+    );
+  });
+
+  it("title が無ければ弾く（取り違えの防止をDaySpanへ任せきりにしない）", () => {
+    assert.ok("error" in normalizeDeleteEventInput({ eventId: "abc123", calendarId: "primary" }));
   });
 });

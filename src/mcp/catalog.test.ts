@@ -73,6 +73,8 @@ describe("MCPツールの登録簿", () => {
       "aide_create_issue",
       "issue_deck_upload_image",
       "aide_create_event",
+      "aide_update_event",
+      "aide_delete_event",
       "aide_room_press",
       "aide_aircon_control",
     ]) {

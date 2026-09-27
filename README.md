@@ -51,6 +51,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
+| `aide_update_event` / `aide_delete_event`（aide#493） | DaySpan経由での既存の予定の変更・削除 | 満たす（下記） | 同上（作成と共用） | **例外**（下記。削除は現在のタイトルの一致が要る） |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `aide_aircon_control`（aide#316） | myroom経由でのエアコンの電源・運転モード・設定温度・風量の変更（白くまくんへ運転指示を送る） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（照明の操作と共用。読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
@@ -173,6 +174,19 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 3. **作成だけ。** 編集・削除は持たない。動かす・消すにはDaySpanの画面から行う
 
 詳細は `src/core/connectors/dayspan/write.ts`。
+
+#### 予定の変更・削除（aide#493）
+
+起点は guchi-apps/aide-bot#372（秘書から予定の変更・取り消しを頼みたい）。作成の3条件のうち3つ目を、
+**「対象を名指しさせる」へ置き換えた**（条件1・2は作成と同じ理由で満たす。資格情報も作成と共用）。
+
+- **対象は `aide_schedule` が返す予定の `id`・`calendarId` で指す。** 推測させない
+- **`aide_update_event`** は送った項目だけを変える（タイトル・日付・時刻・終日・場所・仮/確定）。`dryRun` あり
+- **`aide_delete_event`** は予定の**現在のタイトル**を必須にし、DaySpanが一致を確かめて違えば `409`
+  （`kind: conflict`・`currentTitle`）で何も消さない。消せるのは1回分だけで、繰り返しの親は断られる。`dryRun` あり
+- どちらも**復唱して利用者の確認を取ってから呼ぶ**前提（説明文に書いてある）。aide-bot側は `MCP_PRESETS` の
+  `writeTools` へ足して既定で止める
+- **リリース順**: DaySpan側の口（guchi-apps/dayspan#805）は `develop` のみで `main` には未反映。DaySpanを先に本番へ出す
 
 #### IssueDeckへの画像アップロードは3条件を満たす（#449）
 
@@ -486,8 +500,10 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_room_press` | 照明などのボタンを1つ押す。**部屋の機器を操作するツール**（IDと名前を myroom の今の登録と突き合わせてから押す。結果は「送信を依頼できたか」まで。`dryRun` で押さずに確認できる） |
 | `aide_aircon_control` | エアコンの電源・運転モード・設定温度・風量を変更する。**部屋の機器を操作するツール**（`acId` と名前を myroom のいまの状態と突き合わせてから送る。オフラインには送らない。結果は変更前の状態と送信後の読み戻しまで返す。`dryRun` で送らずに確認できる。詳細は[エアコンの操作](#エアコンの操作aide316)） |
 | `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
-| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）。予定には中止・不参加の記録（`outcome`）と本文（300文字まで）が付く（#388） |
-| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |
+| `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）。予定には中止・不参加の記録（`outcome`）と本文（300文字まで）が付く（#388）。更新・削除で指す `id`・`calendarId` も付く（#493） |
+| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる） |
+| `aide_update_event` | 既存の予定を1件変更する（`aide_schedule` の `id`・`calendarId` で指す）。**書き込みツール**（送った項目だけ変わる。`dryRun` で変更せず確認できる） |
+| `aide_delete_event` | 既存の予定を1件削除する。**書き込みツール**（元に戻せない。現在のタイトルの一致が要り、違えば消さない。`dryRun` で削除せず確認できる） |
 | `aide_dev_status` | 各リポジトリの開発状況を**俯瞰で**返す。最新リリース・未リリースの差分・Issue/PRの件数・確認待ち・直近コミット・CIの成否。引数は取らない |
 | `aide_repo_status` | リポジトリ1件の詳細。俯瞰の項目に加えて、直近コミットの一覧・確認待ちのIssue・open な Pull Request |
 | `aide_repo_labels` | リポジトリ1件に定義されているラベル（名前・色・説明）。`aide_create_issue` に渡す候補 |
@@ -495,7 +511,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `issue_deck_upload_image` | 画像を1枚 IssueDeck の画像置き場へアップロードし、Issue本文へ貼れるURLを返す。**書き込みツール**（作成のみ。base64で渡す。png/jpeg/gif/webp/svg・10MBまで。`dryRun` で送らず検査だけできる。`AIDE_ISSUE_DECK_URL` と `AIDE_ISSUE_DECK_UPLOAD_TOKEN` が要る） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 | `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
-| `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。この経路から取り消し・修正はできない。`dryRun` で登録せず確認できる） |
+| `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる） |
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
