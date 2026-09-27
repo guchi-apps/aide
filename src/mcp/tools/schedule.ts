@@ -120,6 +120,9 @@ export const scheduleTool: Tool = {
     "**中止・不参加にした理由は返らない**（DaySpanのAPIが持ち出していない）。" +
     "時刻はすべてDaySpanが設定タイムゾーン（既定 Asia/Tokyo）で描いた HH:MM で、" +
     "こちらで時差を足し引きしないこと。" +
+    "**予定を新規作成するときの登録先選択にも使える。** events の calendarName はカレンダー名、calendarId はそのIDであり、" +
+    "内容に合う既存カレンダーが分かるときは、この calendarId を aide_create_event へ渡すこと。" +
+    "候補が返らない、または分類が曖昧なときは calendarId を推測せず、aide_create_event では省いて既定の保存先を使うこと。" +
     "configured が false なら接続が未設定、complete が false なら取得できなかったものがあり、" +
     "**どちらも「予定が無い」という意味ではない**。" +
     "sources.googleConnected が false のときも events が空になるが、これは未接続を意味する。" +
