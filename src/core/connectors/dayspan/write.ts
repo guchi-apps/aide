@@ -251,6 +251,8 @@ export interface UpdateEventInput {
   calendarId: string;
   title?: string;
   date?: string;
+  /** 時刻ありの予定の終了日。省略時は開始日と同じ。 */
+  endDate?: string;
   startTime?: string;
   endTime?: string;
   allDay?: boolean;
@@ -297,6 +299,18 @@ export function normalizeUpdateEventInput(
     }
     fields.date = raw["date"];
   }
+  if (raw["endDate"] !== undefined) {
+    if (typeof raw["endDate"] !== "string" || !isRealDate(raw["endDate"])) {
+      return { error: "endDate は YYYY-MM-DD 形式の実在する日付で指定してください" };
+    }
+    if (typeof raw["date"] !== "string") {
+      return { error: "endDate を指定するときは date も指定してください" };
+    }
+    if (raw["endDate"] < raw["date"]) {
+      return { error: "endDate は date 以降の日付にしてください" };
+    }
+    fields.endDate = raw["endDate"];
+  }
 
   const startTime = typeof raw["startTime"] === "string" ? raw["startTime"] : undefined;
   const endTime = typeof raw["endTime"] === "string" ? raw["endTime"] : undefined;
@@ -307,15 +321,17 @@ export function normalizeUpdateEventInput(
     if (!TIME_KEY.test(startTime) || !TIME_KEY.test(endTime)) {
       return { error: "startTime・endTime は HH:MM 形式で指定してください" };
     }
-    if (endTime <= startTime) return { error: "endTime は startTime より後にしてください" };
+    if (fields.endDate === undefined || fields.endDate === fields.date) {
+      if (endTime <= startTime) return { error: "同日の endTime は startTime より後にしてください" };
+    }
     fields.startTime = startTime;
     fields.endTime = endTime;
   }
 
   if (raw["allDay"] !== undefined) {
     if (typeof raw["allDay"] !== "boolean") return { error: "allDay は true / false で指定してください" };
-    if (raw["allDay"] && startTime !== undefined) {
-      return { error: "allDay: true のときは startTime・endTime を同時に指定できません" };
+    if (raw["allDay"] && (startTime !== undefined || fields.endDate !== undefined)) {
+      return { error: "allDay: true のときは startTime・endTime・endDate を同時に指定できません" };
     }
     fields.allDay = raw["allDay"];
   }
@@ -329,7 +345,7 @@ export function normalizeUpdateEventInput(
   }
 
   if (Object.keys(fields).length === 0) {
-    return { error: "変える項目（title・date・startTime と endTime・allDay・location・tentative）を1つ以上指定してください" };
+    return { error: "変える項目（title・date・endDate・startTime と endTime・allDay・location・tentative）を1つ以上指定してください" };
   }
   return { input: { ...target, ...fields } };
 }
