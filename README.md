@@ -854,10 +854,15 @@ curl -s -H "Authorization: Bearer $AIDE_STATUS_SECRET" http://127.0.0.1:3114/api
 | 認証 | `Authorization: Bearer $AIDE_STATUS_SECRET`（`/api/status` と同じ値） |
 
 **`AIDE_READ_SECRET` とは別の値にする。** 読み取りAPIのシークレットを流用すると、動作状況を
-見たいだけの ops-dashboard に残高（`/api/money/*`）を読む権限まで渡すことになる。値の正は
-ops-dashboard側にあり、`AIDE_OPS_DASHBOARD_TOKEN` と同じ扱いで複製せずそちらの `op://` を
-そのまま参照する（`.github/secrets-manifest.tsv`）。未設定なら503、シークレット不一致なら401
-（`src/api/read.ts` の `authorize()` と同じ分け方）。
+見たいだけの ops-dashboard に残高（`/api/money/*`）を読む権限まで渡すことになる。未設定なら503、
+シークレット不一致なら401（`src/api/read.ts` の `authorize()` と同じ分け方）。
+
+**値は issue-deck の共有トークンAPI（トークン名 `AIDE_STATUS_TOKEN`。aide#509）から実行時に取得する
+（`src/core/connectors/issue-deck/shared-tokens.ts`）。** 取得した値はメモリに10分キャッシュし、
+取得に失敗しても直前の値を使い続ける。取得できなければ環境変数 `AIDE_STATUS_SECRET` へフォール
+バックする（issue-deckへの移行が完了するまでの試行中の措置）。共有トークンの取得処理自体は
+トークン名を引数に取る形にしてあり、他のトークン（`AIDE_OPS_DASHBOARD_TOKEN` 等）の移行にも
+使い回せる。値の正はissue-deckの設定画面にあり、1Passwordには複製しない。
 
 **`health.server.baseUrl` / `mcpUrl` はリクエストのHostからではなく `AIDE_BASE_URL` だけから
 組み立てる。** ops-dashboard は `http://127.0.0.1:3114` で直接叩くため、リクエストのHostを使うと
