@@ -14,6 +14,7 @@ import type { StatusApiOptions } from "./status.ts";
 const cacheDir = await mkdtemp(join(tmpdir(), "aide-status-api-test-"));
 process.env["AIDE_CACHE_DIR"] = cacheDir;
 const { handleStatusApi, handleStatusApiChecks, statusSecret } = await import("./status.ts");
+const { resetSharedTokenCacheForTest } = await import("../core/connectors/issue-deck/shared-tokens.ts");
 
 const SECRET = "test-only-status-secret";
 
@@ -62,19 +63,41 @@ async function call(
   return captured;
 }
 
+const originalFetch = globalThis.fetch;
+
 afterEach(() => {
   delete process.env["AIDE_STATUS_SECRET"];
   delete process.env["AIDE_BASE_URL"];
+  delete process.env["AIDE_ISSUE_DECK_URL"];
+  delete process.env["SHARED_TOKEN_API_SECRET"];
+  globalThis.fetch = originalFetch;
+  resetSharedTokenCacheForTest();
 });
 
 describe("statusSecret", () => {
-  it("未設定なら null", () => {
-    assert.equal(statusSecret(), null);
+  it("未設定なら null", async () => {
+    assert.equal(await statusSecret(), null);
   });
 
-  it("設定されていればその値", () => {
+  it("共有トークンAPIが未設定なら環境変数 AIDE_STATUS_SECRET にフォールバックする", async () => {
     process.env["AIDE_STATUS_SECRET"] = SECRET;
-    assert.equal(statusSecret(), SECRET);
+    assert.equal(await statusSecret(), SECRET);
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先する", async () => {
+    process.env["AIDE_STATUS_SECRET"] = SECRET;
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    const SHARED_VALUE = "value-from-shared-token-api";
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      assert.equal(String(url), "https://deck.example.test/api/shared-tokens?name=AIDE_STATUS_TOKEN");
+      const headers = init?.headers as Record<string, string>;
+      assert.equal(headers["Authorization"], "Bearer shared-token-api-secret");
+      assert.equal(headers["X-Shared-Token-Consumer"], "aide");
+      return new Response(JSON.stringify({ name: "AIDE_STATUS_TOKEN", value: SHARED_VALUE }), { status: 200 });
+    }) as typeof fetch;
+
+    assert.equal(await statusSecret(), SHARED_VALUE);
   });
 });
 
