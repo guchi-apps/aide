@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
+import { resetSharedTokenCacheForTest } from "../issue-deck/shared-tokens.ts";
 import { createAideBotNotice, normalizeNoticeInput, readAideBotConfig } from "./index.ts";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  resetSharedTokenCacheForTest();
+});
 
 const validArgs = {
   title: "歯科の予約",
@@ -15,9 +23,34 @@ const validArgs = {
 };
 
 describe("aide-bot notice connector", () => {
-  it("設定値が揃わなければ未設定として扱う", () => {
-    assert.equal(readAideBotConfig({}), null);
-    assert.equal(readAideBotConfig({ AIDE_BOT_URL: "ftp://bot.test", AIDE_BOT_TOKEN: "secret", AIDE_BOT_EMAIL: "a@example.test" }), null);
+  it("設定値が揃わなければ未設定として扱う", async () => {
+    assert.equal(await readAideBotConfig({}), null);
+    assert.equal(
+      await readAideBotConfig({ AIDE_BOT_URL: "ftp://bot.test", AIDE_BOT_TOKEN: "secret", AIDE_BOT_EMAIL: "a@example.test" }),
+      null,
+    );
+  });
+
+  it("共有トークンAPIが未設定なら環境変数 AIDE_BOT_TOKEN にフォールバックする", async () => {
+    const config = await readAideBotConfig({
+      AIDE_BOT_URL: "https://bot.example.test",
+      AIDE_BOT_TOKEN: "env-token",
+      AIDE_BOT_EMAIL: "a@example.test",
+    });
+    assert.deepEqual(config, { url: "https://bot.example.test", token: "env-token", email: "a@example.test" });
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先する", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ name: "AIDE_BOT_NOTICE_INGEST_TOKEN", value: "shared-token" }), { status: 200 })) as typeof fetch;
+    const config = await readAideBotConfig({
+      AIDE_BOT_URL: "https://bot.example.test",
+      AIDE_BOT_TOKEN: "env-token",
+      AIDE_BOT_EMAIL: "a@example.test",
+      AIDE_ISSUE_DECK_URL: "https://deck.example.test",
+      SHARED_TOKEN_API_SECRET: "shared-token-api-secret",
+    });
+    assert.deepEqual(config, { url: "https://bot.example.test", token: "shared-token", email: "a@example.test" });
   });
 
   it("入力を正規化し、メールアドレスを含めない", () => {

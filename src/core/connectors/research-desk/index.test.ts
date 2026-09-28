@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
+import { resetSharedTokenCacheForTest } from "../issue-deck/shared-tokens.ts";
 import { RESEARCH_DESK_BUSINESSES } from "./businesses.ts";
 import {
   importWeeklyReport,
@@ -7,6 +8,13 @@ import {
   readResearchDeskConfig,
   type ResearchDeskWeeklyReportInput,
 } from "./index.ts";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  resetSharedTokenCacheForTest();
+});
 
 const config = { url: "https://research.example.test", token: "service-secret" };
 
@@ -51,21 +59,33 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("research-desk config", () => {
-  it("URLとトークンが揃わなければ未設定として扱う", () => {
-    assert.equal(readResearchDeskConfig({}), null);
-    assert.equal(readResearchDeskConfig({ AIDE_RESEARCH_DESK_URL: "https://research.example.test" }), null);
+  it("URLとトークンが揃わなければ未設定として扱う", async () => {
+    assert.equal(await readResearchDeskConfig({}), null);
+    assert.equal(await readResearchDeskConfig({ AIDE_RESEARCH_DESK_URL: "https://research.example.test" }), null);
     assert.equal(
-      readResearchDeskConfig({ AIDE_RESEARCH_DESK_URL: "ftp://research.example.test", AIDE_RESEARCH_DESK_TOKEN: "x" }),
+      await readResearchDeskConfig({ AIDE_RESEARCH_DESK_URL: "ftp://research.example.test", AIDE_RESEARCH_DESK_TOKEN: "x" }),
       null,
     );
   });
 
-  it("末尾のスラッシュを落とす", () => {
-    const result = readResearchDeskConfig({
+  it("末尾のスラッシュを落とす", async () => {
+    const result = await readResearchDeskConfig({
       AIDE_RESEARCH_DESK_URL: "https://research.example.test/",
       AIDE_RESEARCH_DESK_TOKEN: " service-secret ",
     });
     assert.deepEqual(result, { url: "https://research.example.test", token: "service-secret" });
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先する", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ name: "RESEARCH_DESK_INTERNAL_API_KEY", value: "shared-token" }), { status: 200 })) as typeof fetch;
+    const result = await readResearchDeskConfig({
+      AIDE_RESEARCH_DESK_URL: "https://research.example.test",
+      AIDE_RESEARCH_DESK_TOKEN: "env-token",
+      AIDE_ISSUE_DECK_URL: "https://deck.example.test",
+      SHARED_TOKEN_API_SECRET: "shared-token-api-secret",
+    });
+    assert.deepEqual(result, { url: "https://research.example.test", token: "shared-token" });
   });
 });
 

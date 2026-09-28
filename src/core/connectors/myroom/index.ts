@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import type { MyRoomPrinterSnapshot, MyRoomSnapshot } from "./types.ts";
 
 /**
@@ -38,9 +39,13 @@ export interface MyRoomConfig {
  * 設定を読む。トークンが無ければ null（＝401を叩きに行かない）。
  *
  * **トークンは認証情報として扱う。** 戻り値をログ・レスポンスへ出さないこと。
+ *
+ * 値は issue-deck の共有トークンAPI（`MYROOM_INTERNAL_API_KEY`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_MYROOM_TOKEN` へフォールバックする。
  */
-export function readMyRoomConfig(): MyRoomConfig | null {
-  const token = process.env["AIDE_MYROOM_TOKEN"];
+export async function readMyRoomConfig(): Promise<MyRoomConfig | null> {
+  const shared = await getSharedToken("MYROOM_INTERNAL_API_KEY", "aide");
+  const token = shared || process.env["AIDE_MYROOM_TOKEN"];
   if (!token) return null;
 
   const baseUrl = process.env["AIDE_MYROOM_URL"] ?? DEFAULT_BASE_URL;

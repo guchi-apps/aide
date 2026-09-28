@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import { RESEARCH_DESK_BUSINESSES, businessIds, type ResearchDeskBusinessDefinition } from "./businesses.ts";
 
 /**
@@ -136,9 +137,14 @@ const IMPORT_PATH = "/api/internal/weekly-report";
 /** Research Desk が返す説明文をそのまま返すときの上限。あちら側でも200文字に切っている。 */
 const MAX_DETAIL_LENGTH = 200;
 
-export function readResearchDeskConfig(env: NodeJS.ProcessEnv = process.env): ResearchDeskConfig | null {
+/**
+ * 値は issue-deck の共有トークンAPI（`RESEARCH_DESK_INTERNAL_API_KEY`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_RESEARCH_DESK_TOKEN` へフォールバックする。
+ */
+export async function readResearchDeskConfig(env: NodeJS.ProcessEnv = process.env): Promise<ResearchDeskConfig | null> {
   const url = (env["AIDE_RESEARCH_DESK_URL"] ?? "").trim().replace(/\/$/, "");
-  const token = (env["AIDE_RESEARCH_DESK_TOKEN"] ?? "").trim();
+  const shared = await getSharedToken("RESEARCH_DESK_INTERNAL_API_KEY", "aide", { env });
+  const token = shared || (env["AIDE_RESEARCH_DESK_TOKEN"] ?? "").trim();
   if (!url || !token) return null;
 
   try {
@@ -374,20 +380,21 @@ function toImportResult(payload: unknown): ResearchDeskImportResult | null {
  */
 export async function importWeeklyReport(
   input: ResearchDeskWeeklyReportInput,
-  config = readResearchDeskConfig(),
+  config?: ResearchDeskConfig | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ResearchDeskImportOutcome> {
-  if (!config) {
+  const resolvedConfig = config === undefined ? await readResearchDeskConfig() : config;
+  if (!resolvedConfig) {
     return { ok: false, reason: "未設定（AIDE_RESEARCH_DESK_URL、AIDE_RESEARCH_DESK_TOKEN が揃っていません）" };
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(`${config.url}${IMPORT_PATH}`, {
+    const response = await fetchImpl(`${resolvedConfig.url}${IMPORT_PATH}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.token}`,
+        Authorization: `Bearer ${resolvedConfig.token}`,
         "Content-Type": "application/json",
         Accept: "application/json",
       },

@@ -472,7 +472,7 @@ export interface BuildScheduleOptions extends DaySpanScheduleQuery {
 export async function buildSchedule(options: BuildScheduleOptions = {}): Promise<ScheduleSummary> {
   const now = new Date();
   const { freeWindow = DEFAULT_FREE_WINDOW, ...query } = options;
-  const config = readDaySpanConfig();
+  const config = await readDaySpanConfig();
   if (!config) {
     return blankSummary(
       now,

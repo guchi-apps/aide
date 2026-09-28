@@ -251,7 +251,7 @@ export function summarizeCache(
  * 本番の `.env` はデプロイのたびに丸ごと上書きされるため、配線を1か所落とすと
  * 静かに「未設定」へ戻る（#55）。それに気づける場所がこれまで無かった。
  */
-export function readConnectors(options: { supabase?: SupabaseAuthConfig | null } = {}): HealthConnector[] {
+export async function readConnectors(options: { supabase?: SupabaseAuthConfig | null } = {}): Promise<HealthConnector[]> {
   return [
     // Googleログインを使っていないときは行ごと出さない。他の接続先と違って
     // 「未設定」が正常な状態（パスワードでのログイン）にあたり、警告にすると常時鳴り続ける。
@@ -271,7 +271,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       key: "ops-dashboard",
       label: "ops-dashboard",
       side: "server",
-      configured: readOpsDashboardConfig() !== null,
+      configured: (await readOpsDashboardConfig()) !== null,
       probeable: true,
       note: "VPS・サブPCの稼働状況の取得元（aide_host_status / aide_uptime_monitors / aide_service_quotas）。",
     },
@@ -297,7 +297,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       key: "myroom",
       label: "myroom",
       side: "server",
-      configured: readMyRoomConfig() !== null,
+      configured: (await readMyRoomConfig()) !== null,
       probeable: true,
       note: "部屋の状態（室温・湿度・CO2・エアコン）の取得元（aide_room_sensors / aide_aircon_status）。",
     },
@@ -306,7 +306,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       label: "myroom（操作）",
       side: "server",
       // 読み取り用とは別のトークン（#317）。読み取りだけ設定されていても、ここは未設定になる。
-      configured: readMyRoomControlConfig() !== null,
+      configured: (await readMyRoomControlConfig()) !== null,
       probeable: false,
       note: "照明・エアコンの操作用トークン（aide_room_buttons / aide_room_press / aide_aircon_control）。部屋の機器を動かす経路のため、ここからは確認しない。",
     },
@@ -314,7 +314,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       key: "dayspan",
       label: "DaySpan",
       side: "server",
-      configured: readDaySpanConfig() !== null,
+      configured: (await readDaySpanConfig()) !== null,
       probeable: true,
       note: "予定・タスク・日付リマインド・移動の取得元（aide_schedule）。",
     },
@@ -322,7 +322,7 @@ export function readConnectors(options: { supabase?: SupabaseAuthConfig | null }
       key: "asset-manager",
       label: "Asset Manager",
       side: "server",
-      configured: readAssetManagerConfig() !== null,
+      configured: (await readAssetManagerConfig()) !== null,
       probeable: true,
       note: "月額固定費の取得元（aide_fixed_costs）と、サブスクの読み書き・請求メールの取り込み先（asset_manager_*）。",
     },
@@ -409,7 +409,7 @@ export async function buildHealth(input: HealthInput): Promise<Health> {
     summarizeJob(job, jobRecords[index] ?? null, jobRuns[index] ?? []),
   );
   const cache = summarizeCache(zaimCache, now);
-  const connectors = readConnectors({ supabase: input.supabase ?? null });
+  const connectors = await readConnectors({ supabase: input.supabase ?? null });
 
   const attention: HealthAttention[] = [
     ...jobs.flatMap(jobAttention),

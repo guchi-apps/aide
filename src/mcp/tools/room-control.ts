@@ -53,7 +53,7 @@ export const roomButtonsTool: Tool = {
     "エアコンの運転状態は aide_aircon_status、エアコンの操作は aide_aircon_control（このボタンでは操作できない）。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
-    const config = readMyRoomControlConfig();
+    const config = await readMyRoomControlConfig();
     if (!config) return json({ ok: false, reason: NOT_CONFIGURED });
 
     const result = await fetchRoomButtons(config);
@@ -117,7 +117,7 @@ export const roomPressTool: Tool = {
       return json({ ok: false, kind: "invalid", reason: "id と expectedName が必要です（aide_room_buttons で確かめてください）" });
     }
 
-    const config = readMyRoomControlConfig();
+    const config = await readMyRoomControlConfig();
     if (!config) return json({ ok: false, reason: NOT_CONFIGURED });
 
     // myroom の今の登録と突き合わせる。一覧はNature Remoを叩かないので、押すたびに引いてよい。

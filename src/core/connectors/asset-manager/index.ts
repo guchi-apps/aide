@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import type { AssetManagerSubscriptionsSnapshot } from "./types.ts";
 
 /**
@@ -36,9 +37,13 @@ export interface AssetManagerConfig {
  * 設定を読む。シークレットが無ければ null（＝401を叩きに行かない）。
  *
  * **シークレットは認証情報として扱う。** 戻り値をログ・レスポンスへ出さないこと。
+ *
+ * 値は issue-deck の共有トークンAPI（`ASSET_MANAGER_ZAIM_SYNC_SECRET`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET` へフォールバックする。
  */
-export function readAssetManagerConfig(): AssetManagerConfig | null {
-  const secret = process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
+export async function readAssetManagerConfig(): Promise<AssetManagerConfig | null> {
+  const shared = await getSharedToken("ASSET_MANAGER_ZAIM_SYNC_SECRET", "aide");
+  const secret = shared || process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
   if (!secret) return null;
 
   const baseUrl = process.env["AIDE_ASSET_MANAGER_URL"] || DEFAULT_ASSET_MANAGER_URL;

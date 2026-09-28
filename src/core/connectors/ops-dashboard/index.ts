@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import type {
   OpsAiUsage,
   OpsDashboardRaw,
@@ -47,9 +48,13 @@ export interface OpsDashboardConfig {
  * 設定を読む。トークンが無ければ null（＝401を叩きに行かない）。
  *
  * **トークンは認証情報として扱う。** 戻り値をログ・レスポンスへ出さないこと。
+ *
+ * 値は issue-deck の共有トークンAPI（`OPS_API_TOKEN`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_OPS_DASHBOARD_TOKEN` へフォールバックする。
  */
-export function readOpsDashboardConfig(): OpsDashboardConfig | null {
-  const token = process.env["AIDE_OPS_DASHBOARD_TOKEN"];
+export async function readOpsDashboardConfig(): Promise<OpsDashboardConfig | null> {
+  const shared = await getSharedToken("OPS_API_TOKEN", "aide");
+  const token = shared || process.env["AIDE_OPS_DASHBOARD_TOKEN"];
   if (!token) return null;
 
   const baseUrl = process.env["AIDE_OPS_DASHBOARD_URL"] ?? DEFAULT_BASE_URL;
