@@ -3,6 +3,7 @@ import type { AuthConfig } from "../auth/config.ts";
 import { resolveBaseUrl } from "../auth/config.ts";
 import { checkRedirectAllowed } from "../auth/redirect-check.ts";
 import type { SupabaseAuthConfig } from "../auth/supabase.ts";
+import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { probeZaimWebUpstream } from "../core/connectors/zaim/web-payment-forward.ts";
 import { buildDevStatus } from "../core/views/dev.ts";
 import { buildHealth } from "../core/views/health.ts";
@@ -20,21 +21,31 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * ops-dashboard はこれを「AIDE」タブへ表示する。**動作状況を人が見る場所はそこだけ**で、
  * 以前AIDE自身が持っていたブラウザ向けの画面（`GET /status`）は #328 で外した。
  *
- * 認証は共有シークレット1本（`AIDE_STATUS_SECRET`）。**`/api/money/*` の `AIDE_READ_SECRET` とは
- * 別の値にする。** 同じ値にすると、動作状況を見たいだけの ops-dashboard に残高を読む権限まで
- * 渡すことになる。未設定は503、不一致は401（`src/api/read.ts` の `authorize()` と同じ分け方）。
+ * 認証は共有シークレット1本。**`/api/money/*` の `AIDE_READ_SECRET` とは別の値にする。**
+ * 同じ値にすると、動作状況を見たいだけの ops-dashboard に残高を読む権限まで渡すことになる。
+ * 未設定は503、不一致は401（`src/api/read.ts` の `authorize()` と同じ分け方）。
+ *
+ * 値は issue-deck の共有トークンAPI（`AIDE_STATUS_TOKEN`。aide#509）から取得する。
+ * 取得できなければ環境変数 `AIDE_STATUS_SECRET` へフォールバックする（issue-deckへの
+ * 移行が完了するまでの試行中の措置。落ち着いたらこのフォールバックと環境変数は外す）。
  */
 
-export function statusSecret(): string | null {
+export async function statusSecret(): Promise<string | null> {
+  const shared = await getSharedToken("AIDE_STATUS_TOKEN", "aide");
+  if (shared) return shared;
   return process.env["AIDE_STATUS_SECRET"] || null;
 }
 
-function authorize(req: IncomingMessage, res: ServerResponse, label: string): boolean {
-  const expected = statusSecret();
+async function authorize(req: IncomingMessage, res: ServerResponse, label: string): Promise<boolean> {
+  const expected = await statusSecret();
   if (!expected) {
     res
       .writeHead(503, { "Content-Type": "application/json; charset=utf-8" })
-      .end(JSON.stringify({ error: "AIDE_STATUS_SECRET が未設定のため利用できません" }));
+      .end(
+        JSON.stringify({
+          error: "認証情報（共有トークン AIDE_STATUS_TOKEN、または環境変数 AIDE_STATUS_SECRET）が未設定のため利用できません",
+        }),
+      );
     return false;
   }
 
@@ -87,7 +98,7 @@ export async function handleStatusApi(
     return;
   }
 
-  if (!authorize(req, res, "GET /api/status")) return;
+  if (!(await authorize(req, res, "GET /api/status"))) return;
 
   const health = await buildHealth({
     authEnabled: options.authConfig.enabled,
@@ -118,7 +129,7 @@ export async function handleStatusApiChecks(
     return;
   }
 
-  if (!authorize(req, res, "POST /api/status/checks")) return;
+  if (!(await authorize(req, res, "POST /api/status/checks"))) return;
 
   const results = await runProbes({ supabase: options.supabase, baseUrl: publicBaseUrl() });
   res
