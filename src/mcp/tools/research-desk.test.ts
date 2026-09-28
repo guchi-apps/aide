@@ -50,13 +50,13 @@ const importResult = {
   errors: [],
 };
 
-function withEnv<T>(run: () => T): T {
+async function withEnv<T>(run: () => T | Promise<T>): Promise<T> {
   const previousUrl = process.env[URL_ENV];
   const previousToken = process.env[TOKEN_ENV];
   process.env[URL_ENV] = "https://research.example.test";
   process.env[TOKEN_ENV] = SECRET;
   try {
-    return run();
+    return await run();
   } finally {
     if (previousUrl === undefined) delete process.env[URL_ENV];
     else process.env[URL_ENV] = previousUrl;

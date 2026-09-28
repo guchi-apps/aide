@@ -49,7 +49,7 @@ export const issueDeckUploadImageTool: Tool = {
     additionalProperties: false,
   },
   handler: async (args) => {
-    const config = readIssueDeckUploadConfig();
+    const config = await readIssueDeckUploadConfig();
     if (!config) {
       return result({
         status: "not_configured",

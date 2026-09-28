@@ -149,7 +149,7 @@ export async function buildGarbage(
 ): Promise<GarbageSummary> {
   const now = new Date();
   const category = text(options.category);
-  const config = readDaySpanConfig();
+  const config = await readDaySpanConfig();
   if (!config) {
     const summary = blankGarbageSummary(
       now,

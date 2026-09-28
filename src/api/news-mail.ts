@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
 import { loadGmailCredentials, loadNewsMailAddresses } from "../core/connectors/image-mail/gmail.ts";
+import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { sendNewsMail, type SendNewsMailInput, type SendNewsMailOutcome } from "../core/connectors/news-mail/send.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
@@ -38,13 +39,19 @@ function json(res: ServerResponse, status: number, body: unknown): void {
     .end(JSON.stringify(body));
 }
 
-export function newsMailToken(): string | null {
+/**
+ * 値は issue-deck の共有トークンAPI（`AIDE_NEWS_MAIL_TOKEN`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_NEWS_MAIL_TOKEN` へフォールバックする。
+ */
+export async function newsMailToken(): Promise<string | null> {
+  const shared = await getSharedToken("AIDE_NEWS_MAIL_TOKEN", "aide");
+  if (shared) return shared;
   return process.env["AIDE_NEWS_MAIL_TOKEN"] || null;
 }
 
 /** 認証を通す。通れば true。通らなければ応答を書き終えて false（`image-mail.ts` の `authorize()` と同じ形）。 */
 async function authorize(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const expected = newsMailToken();
+  const expected = await newsMailToken();
   if (!expected) {
     json(res, 503, { ok: false, message: "AIDE_NEWS_MAIL_TOKEN が未設定のため利用できません" });
     return false;

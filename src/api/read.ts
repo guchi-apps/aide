@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { buildMoneySummary } from "../core/views/money.ts";
 import { buildMoneyTransactions } from "../core/views/money-transactions.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
@@ -17,7 +18,13 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * 同じ値を使うと、読み取りたいだけのアプリへ書き込み権限まで渡すことになる。
  */
 
-export function readSecret(): string | null {
+/**
+ * 値は issue-deck の共有トークンAPI（`AIDE_READ_SECRET`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_READ_SECRET` へフォールバックする。
+ */
+export async function readSecret(): Promise<string | null> {
+  const shared = await getSharedToken("AIDE_READ_SECRET", "aide");
+  if (shared) return shared;
   return process.env["AIDE_READ_SECRET"] || null;
 }
 
@@ -27,8 +34,8 @@ export function readSecret(): string | null {
  * シークレット未設定は503で、401とは分ける。「設定していないから開いていない」と
  * 「値が違う」を同じ応答にすると、連携時にどちらなのか切り分けられない。
  */
-function authorize(req: IncomingMessage, res: ServerResponse, label: string): boolean {
-  const expected = readSecret();
+async function authorize(req: IncomingMessage, res: ServerResponse, label: string): Promise<boolean> {
+  const expected = await readSecret();
   if (!expected) {
     res
       .writeHead(503, { "Content-Type": "application/json; charset=utf-8" })
@@ -64,7 +71,7 @@ export async function handleMoneySummary(req: IncomingMessage, res: ServerRespon
     return;
   }
 
-  if (!authorize(req, res, "GET /api/money/summary")) return;
+  if (!(await authorize(req, res, "GET /api/money/summary"))) return;
 
   // キャッシュが空でも200を返す。「まだ一度も取得していない」は状態であってエラーではなく、
   // empty / fetchedAt を見れば呼び出し側で区別できる（MCP側が isError:false にしているのと同じ理由）。
@@ -92,7 +99,7 @@ export async function handleMoneyTransactions(req: IncomingMessage, res: ServerR
     return;
   }
 
-  if (!authorize(req, res, "GET /api/money/transactions")) return;
+  if (!(await authorize(req, res, "GET /api/money/transactions"))) return;
 
   const transactions = await buildMoneyTransactions();
   res

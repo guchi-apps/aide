@@ -451,7 +451,7 @@ function notConfiguredStatus(now: Date): OpsStatus {
 /** MCPツールから呼ばれる入口。設定を読み、取得し、畳む。 */
 export async function buildOpsStatus(): Promise<OpsStatus> {
   const now = new Date();
-  const config = readOpsDashboardConfig();
+  const config = await readOpsDashboardConfig();
   if (!config) return notConfiguredStatus(now);
 
   return summarizeOps(await fetchOpsDashboard(config), now);

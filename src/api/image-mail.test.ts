@@ -8,8 +8,9 @@ import { after, beforeEach, describe, it } from "node:test";
 const dir = await mkdtemp(join(tmpdir(), "aide-image-mail-api-test-"));
 process.env["AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH"] = join(dir, "image-mail-idempotency.json");
 process.env["AIDE_IMAGE_MAIL_LOG_PATH"] = join(dir, "image-mail-log.json");
-const { handleImageMailSend } = await import("./image-mail.ts");
+const { handleImageMailSend, imageMailToken } = await import("./image-mail.ts");
 const { resetRateLimits } = await import("../auth/ratelimit.ts");
+const { resetSharedTokenCacheForTest } = await import("../core/connectors/issue-deck/shared-tokens.ts");
 
 /**
  * **Gmailへ実際にリクエストが飛ぶ経路はここでは扱わない。**
@@ -28,6 +29,34 @@ const originalFetch = globalThis.fetch;
 
 after(() => {
   globalThis.fetch = originalFetch;
+});
+
+after(() => {
+  delete process.env["AIDE_ISSUE_DECK_URL"];
+  delete process.env["SHARED_TOKEN_API_SECRET"];
+  resetSharedTokenCacheForTest();
+});
+
+describe("imageMailToken", () => {
+  it("共有トークンAPIが未設定なら環境変数 AIDE_IMAGE_MAIL_TOKEN にフォールバックする", async () => {
+    process.env["AIDE_IMAGE_MAIL_TOKEN"] = TOKEN;
+    assert.equal(await imageMailToken(), TOKEN);
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先する", async () => {
+    process.env["AIDE_IMAGE_MAIL_TOKEN"] = TOKEN;
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    globalThis.fetch = (async (url: string | URL) => {
+      assert.equal(String(url), "https://deck.example.test/api/shared-tokens?name=AIDE_IMAGE_MAIL_TOKEN");
+      return new Response(JSON.stringify({ name: "AIDE_IMAGE_MAIL_TOKEN", value: "shared-token" }), { status: 200 });
+    }) as typeof fetch;
+
+    assert.equal(await imageMailToken(), "shared-token");
+    delete process.env["AIDE_ISSUE_DECK_URL"];
+    delete process.env["SHARED_TOKEN_API_SECRET"];
+    resetSharedTokenCacheForTest();
+  });
 });
 
 beforeEach(() => {

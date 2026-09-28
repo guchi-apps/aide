@@ -10,10 +10,11 @@ import { secretMatches } from "./secret.ts";
 // CACHE_DIR はモジュール読み込み時に確定するため、import より前に設定する必要がある。
 const cacheDir = await mkdtemp(join(tmpdir(), "aide-read-test-"));
 process.env["AIDE_CACHE_DIR"] = cacheDir;
-const { handleMoneySummary, handleMoneyTransactions } = await import("./read.ts");
+const { handleMoneySummary, handleMoneyTransactions, readSecret } = await import("./read.ts");
 const { writeCache } = await import("../core/cache/store.ts");
 const { ZAIM_CACHE_KEY } = await import("../worker/jobs/zaim-sync.ts");
 const { ZAIM_MONEY_CACHE_KEY } = await import("../worker/jobs/zaim-money-sync.ts");
+const { resetSharedTokenCacheForTest } = await import("../core/connectors/issue-deck/shared-tokens.ts");
 
 const SECRET = "test-only-read-secret";
 
@@ -58,8 +59,37 @@ async function call(
   return captured;
 }
 
+const originalFetch = globalThis.fetch;
+
 afterEach(() => {
   delete process.env["AIDE_READ_SECRET"];
+  delete process.env["AIDE_ISSUE_DECK_URL"];
+  delete process.env["SHARED_TOKEN_API_SECRET"];
+  globalThis.fetch = originalFetch;
+  resetSharedTokenCacheForTest();
+});
+
+describe("readSecret", () => {
+  it("未設定なら null", async () => {
+    assert.equal(await readSecret(), null);
+  });
+
+  it("共有トークンAPIが未設定なら環境変数 AIDE_READ_SECRET にフォールバックする", async () => {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    assert.equal(await readSecret(), SECRET);
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先する", async () => {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    globalThis.fetch = (async (url: string | URL) => {
+      assert.equal(String(url), "https://deck.example.test/api/shared-tokens?name=AIDE_READ_SECRET");
+      return new Response(JSON.stringify({ name: "AIDE_READ_SECRET", value: "shared-value" }), { status: 200 });
+    }) as typeof fetch;
+
+    assert.equal(await readSecret(), "shared-value");
+  });
 });
 
 describe("シークレット照合", () => {

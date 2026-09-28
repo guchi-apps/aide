@@ -278,7 +278,7 @@ async function responseBody(response: Response): Promise<unknown> {
  * 2xx以外だけ `httpFailure` で `isError: true` にする。
  */
 async function callAssetManager(path: string, request: { method: "GET" | "POST"; body?: unknown }): Promise<ToolResult> {
-  const config = readAssetManagerConfig();
+  const config = await readAssetManagerConfig();
   if (!config) return invalid("未設定（Asset Manager連携用の認証情報がありません）");
 
   const endpoint = `${config.baseUrl}${path}`;

@@ -76,7 +76,7 @@ export const createEventTool: Tool = {
     additionalProperties: false,
   },
   handler: async (args) => {
-    const config = readDaySpanWriteConfig();
+    const config = await readDaySpanWriteConfig();
     if (!config) {
       return json({
         ok: false,
