@@ -371,7 +371,7 @@ export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot)
  * `buildMoneySummary()` を通すとZaimのキャッシュまで読むことになり、問いと関係ない。
  */
 export async function loadFixedCosts(): Promise<FixedCostsView> {
-  const config = readAssetManagerConfig();
+  const config = await readAssetManagerConfig();
   if (!config) return fixedCostsNotConfigured();
 
   try {

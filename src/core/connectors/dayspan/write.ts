@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import { DEFAULT_BASE_URL, TIMEOUT_MS } from "./index.ts";
 
 /**
@@ -33,9 +34,13 @@ export interface DaySpanWriteConfig {
  *
  * `AIDE_DAYSPAN_URL` は読み取り（`index.ts`）と共有する。同じDaySpanを指すため、
  * URLまで別の環境変数に分ける理由が無い。
+ *
+ * 値は issue-deck の共有トークンAPI（`DAYSPAN_INTERNAL_EVENTS_API_KEY`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_DAYSPAN_WRITE_TOKEN` へフォールバックする。
  */
-export function readDaySpanWriteConfig(): DaySpanWriteConfig | null {
-  const token = process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+export async function readDaySpanWriteConfig(): Promise<DaySpanWriteConfig | null> {
+  const shared = await getSharedToken("DAYSPAN_INTERNAL_EVENTS_API_KEY", "aide");
+  const token = shared || process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
   if (!token) return null;
 
   const baseUrl = process.env["AIDE_DAYSPAN_URL"] ?? DEFAULT_BASE_URL;

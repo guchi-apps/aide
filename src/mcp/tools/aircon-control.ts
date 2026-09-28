@@ -139,7 +139,7 @@ export const airconControlTool: Tool = {
     if (!parsed.ok) return json({ ok: false, kind: "invalid", reason: `${parsed.reason}。何も送っていません。` });
     const command = parsed.command;
 
-    const config = readMyRoomControlConfig();
+    const config = await readMyRoomControlConfig();
     if (!config) return json({ ok: false, reason: NOT_CONFIGURED });
 
     // いまの状態を白くまくんから直接読む。名前の突き合わせにも、変更前の記録にも使う。

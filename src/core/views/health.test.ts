@@ -149,14 +149,14 @@ describe("接続先の設定状況", () => {
   ];
 
   /** 環境変数を退避して差し替え、必ず戻す。 */
-  function withEnv(values: Record<string, string | undefined>, body: () => void): void {
+  async function withEnv(values: Record<string, string | undefined>, body: () => void | Promise<void>): Promise<void> {
     const saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
     try {
       for (const key of KEYS) delete process.env[key];
       for (const [key, value] of Object.entries(values)) {
         if (value !== undefined) process.env[key] = value;
       }
-      body();
+      await body();
     } finally {
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[key];
@@ -165,9 +165,9 @@ describe("接続先の設定状況", () => {
     }
   }
 
-  it("サーバー側の環境変数が無ければ未設定として出す", () => {
-    withEnv({}, () => {
-      const server = readConnectors().filter((connector) => connector.side === "server");
+  it("サーバー側の環境変数が無ければ未設定として出す", async () => {
+    await withEnv({}, async () => {
+      const server = (await readConnectors()).filter((connector) => connector.side === "server");
       assert.ok(server.length > 0);
       assert.equal(
         server.every((connector) => connector.configured === false),
@@ -176,9 +176,9 @@ describe("接続先の設定状況", () => {
     });
   });
 
-  it("worker側の設定は判定しない（本番では別マシンの .env にある）", () => {
-    withEnv({}, () => {
-      const worker = readConnectors().filter((connector) => connector.side === "worker");
+  it("worker側の設定は判定しない（本番では別マシンの .env にある）", async () => {
+    await withEnv({}, async () => {
+      const worker = (await readConnectors()).filter((connector) => connector.side === "worker");
       assert.deepEqual(
         worker.map((connector) => connector.key),
         ["zaim", "signaly"],
@@ -190,51 +190,51 @@ describe("接続先の設定状況", () => {
     });
   });
 
-  it("設定済みでも、トークンの値そのものは含めない", () => {
-    withEnv({ AIDE_OPS_DASHBOARD_TOKEN: "s3cret-value" }, () => {
-      const connectors = readConnectors();
+  it("設定済みでも、トークンの値そのものは含めない", async () => {
+    await withEnv({ AIDE_OPS_DASHBOARD_TOKEN: "s3cret-value" }, async () => {
+      const connectors = await readConnectors();
       assert.equal(JSON.stringify(connectors).includes("s3cret-value"), false);
       assert.equal(connectors.find((connector) => connector.key === "ops-dashboard")?.configured, true);
     });
   });
 
-  it("Zaimは画面から疎通確認しない（巡回が重く、外部への実アクセスになる）", () => {
-    assert.equal(readConnectors().find((connector) => connector.key === "zaim")?.probeable, false);
+  it("Zaimは画面から疎通確認しない（巡回が重く、外部への実アクセスになる）", async () => {
+    assert.equal((await readConnectors()).find((connector) => connector.key === "zaim")?.probeable, false);
   });
 
-  it("GitHubは取得用と起票用を別々に出す（片方だけ設定が落ちても気づけるように）", () => {
+  it("GitHubは取得用と起票用を別々に出す（片方だけ設定が落ちても気づけるように）", async () => {
     // 本番の .env はデプロイのたびに丸ごと上書きされる（#55）。取得用だけを見ていると、
     // 起票用の配線が落ちても「設定済み」に見えてしまう。
-    withEnv({ AIDE_GITHUB_TOKEN: "read-only" }, () => {
-      const connectors = readConnectors();
+    await withEnv({ AIDE_GITHUB_TOKEN: "read-only" }, async () => {
+      const connectors = await readConnectors();
       assert.equal(connectors.find((connector) => connector.key === "github")?.configured, true);
       assert.equal(connectors.find((connector) => connector.key === "github-write")?.configured, false);
     });
 
-    withEnv({ AIDE_GITHUB_ISSUE_TOKEN: "write" }, () => {
-      const connectors = readConnectors();
+    await withEnv({ AIDE_GITHUB_ISSUE_TOKEN: "write" }, async () => {
+      const connectors = await readConnectors();
       assert.equal(connectors.find((connector) => connector.key === "github")?.configured, false);
       assert.equal(connectors.find((connector) => connector.key === "github-write")?.configured, true);
     });
   });
 
-  it("Googleログインを使うときだけ戻り先の行を出す（未設定が正常な状態のため）", () => {
+  it("Googleログインを使うときだけ戻り先の行を出す（未設定が正常な状態のため）", async () => {
     // 他の接続先と違い、Googleログインを使わない構成（パスワードでのログイン）が正常にありうる。
     // 常に行を出すと「未設定」の警告が鳴りっぱなしになる。
     assert.equal(
-      readConnectors().find((connector) => connector.key === "supabase-redirect"),
+      (await readConnectors()).find((connector) => connector.key === "supabase-redirect"),
       undefined,
     );
 
-    const connector = readConnectors({
+    const connector = (await readConnectors({
       supabase: { url: "https://project.supabase.co", publishableKey: "k", allowedEmails: ["a@b.c"] },
-    }).find((item) => item.key === "supabase-redirect");
+    })).find((item) => item.key === "supabase-redirect");
     assert.equal(connector?.configured, true);
     assert.equal(connector?.probeable, true);
   });
 
-  it("起票の疎通は画面から確認しない（確認そのものがIssueを1件立ててしまう）", () => {
-    assert.equal(readConnectors().find((connector) => connector.key === "github-write")?.probeable, false);
+  it("起票の疎通は画面から確認しない（確認そのものがIssueを1件立ててしまう）", async () => {
+    assert.equal((await readConnectors()).find((connector) => connector.key === "github-write")?.probeable, false);
   });
 });
 

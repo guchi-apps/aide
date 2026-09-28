@@ -99,7 +99,7 @@ export async function evaluatePrinterStatus(status: PrinterStatus, now: Date): P
 }
 
 export async function runPrinterWatch(): Promise<string> {
-  const config = readMyRoomConfig();
+  const config = await readMyRoomConfig();
   // 通知の設定と違い、これは設定漏れそのもの。黙って成功させると、見張られていないことに気づけない。
   if (!config) throw new Error("AIDE_MYROOM_TOKEN が設定されていないため、プリンターの状態を取得できない");
 

@@ -11,6 +11,8 @@
  * MIMEを名乗るだけの別の中身（HTMLなど）を送らない。
  */
 
+import { getSharedToken } from "./shared-tokens.ts";
+
 /** IssueDeck の `MAX_FILE_SIZE` と同じ。 */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -32,10 +34,16 @@ export interface IssueDeckUploadConfig {
   token: string;
 }
 
-/** どちらかが無ければ null（＝送信しない）。戻り値はログ・応答へ出さない。 */
-export function readIssueDeckUploadConfig(): IssueDeckUploadConfig | null {
+/**
+ * どちらかが無ければ null（＝送信しない）。戻り値はログ・応答へ出さない。
+ *
+ * トークンの値は issue-deck の共有トークンAPI（`ISSUE_DECK_IMAGE_UPLOAD_SECRET`。aide#513）から
+ * 取得する。取得できなければ環境変数 `AIDE_ISSUE_DECK_UPLOAD_TOKEN` へフォールバックする。
+ */
+export async function readIssueDeckUploadConfig(): Promise<IssueDeckUploadConfig | null> {
   const baseUrl = process.env["AIDE_ISSUE_DECK_URL"];
-  const token = process.env["AIDE_ISSUE_DECK_UPLOAD_TOKEN"];
+  const shared = await getSharedToken("ISSUE_DECK_IMAGE_UPLOAD_SECRET", "aide");
+  const token = shared || process.env["AIDE_ISSUE_DECK_UPLOAD_TOKEN"];
   if (!baseUrl || !token) return null;
   return { baseUrl: baseUrl.replace(/\/+$/, ""), token };
 }

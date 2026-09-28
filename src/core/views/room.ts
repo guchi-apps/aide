@@ -307,7 +307,7 @@ function blankStatus(now: Date, reason: string, note: string): RoomStatus {
 /** MCPツールから呼ばれる入口。設定を読み、取得し、畳む。 */
 export async function buildRoomStatus(): Promise<RoomStatus> {
   const now = new Date();
-  const config = readMyRoomConfig();
+  const config = await readMyRoomConfig();
   if (!config) {
     return blankStatus(
       now,

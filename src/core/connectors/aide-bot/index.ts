@@ -1,3 +1,5 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
+
 /**
  * aide-bot のお知らせ登録コネクタ。
  *
@@ -42,10 +44,15 @@ const LIMITS = {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
-export function readAideBotConfig(env: NodeJS.ProcessEnv = process.env): AideBotConfig | null {
+/**
+ * 値は issue-deck の共有トークンAPI（`AIDE_BOT_NOTICE_INGEST_TOKEN`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_BOT_TOKEN` へフォールバックする。
+ */
+export async function readAideBotConfig(env: NodeJS.ProcessEnv = process.env): Promise<AideBotConfig | null> {
   const url = (env["AIDE_BOT_URL"] ?? "").trim().replace(/\/$/, "");
-  const token = (env["AIDE_BOT_TOKEN"] ?? "").trim();
   const email = (env["AIDE_BOT_EMAIL"] ?? "").trim();
+  const shared = await getSharedToken("AIDE_BOT_NOTICE_INGEST_TOKEN", "aide", { env });
+  const token = shared || (env["AIDE_BOT_TOKEN"] ?? "").trim();
   if (!url || !token || !email) return null;
 
   try {
@@ -144,24 +151,25 @@ export function normalizeNoticeInput(args: Record<string, unknown>, kind: AideBo
 
 export async function createAideBotNotice(
   input: AideBotNoticeInput,
-  config = readAideBotConfig(),
+  config?: AideBotConfig | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<AideBotNoticeOutcome> {
-  if (!config) return { ok: false, reason: "未設定（AIDE_BOT_URL、AIDE_BOT_TOKEN、AIDE_BOT_EMAIL が揃っていません）" };
+  const resolvedConfig = config === undefined ? await readAideBotConfig() : config;
+  if (!resolvedConfig) return { ok: false, reason: "未設定（AIDE_BOT_URL、AIDE_BOT_TOKEN、AIDE_BOT_EMAIL が揃っていません）" };
   const validationError = validateNoticeInput(input);
   if (validationError) return { ok: false, reason: validationError };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(`${config.url}/api/notices`, {
+    const response = await fetchImpl(`${resolvedConfig.url}/api/notices`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.token}`,
+        Authorization: `Bearer ${resolvedConfig.token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        email: config.email,
+        email: resolvedConfig.email,
         source: input.source,
         kind: input.kind,
         dedupeKey: input.dedupeKey,

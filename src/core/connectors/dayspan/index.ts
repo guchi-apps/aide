@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import type { DaySpanSchedule } from "./types.ts";
 
 /**
@@ -57,9 +58,13 @@ export interface DaySpanScheduleQuery {
  *
  * **トークンは認証情報として扱う。** 戻り値をログ・レスポンスへ出さないこと。
  * 値は DaySpan 側の `INTERNAL_API_KEY` と同じで、片方だけ変えると連携が止まる。
+ *
+ * 値は issue-deck の共有トークンAPI（`DAYSPAN_INTERNAL_API_KEY`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_DAYSPAN_TOKEN` へフォールバックする。
  */
-export function readDaySpanConfig(): DaySpanConfig | null {
-  const token = process.env["AIDE_DAYSPAN_TOKEN"];
+export async function readDaySpanConfig(): Promise<DaySpanConfig | null> {
+  const shared = await getSharedToken("DAYSPAN_INTERNAL_API_KEY", "aide");
+  const token = shared || process.env["AIDE_DAYSPAN_TOKEN"];
   if (!token) return null;
 
   const baseUrl = process.env["AIDE_DAYSPAN_URL"] ?? DEFAULT_BASE_URL;

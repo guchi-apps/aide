@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
+import { resetSharedTokenCacheForTest } from "../issue-deck/shared-tokens.ts";
 import {
   normalizeCreateEventInput,
   normalizeDeleteEventInput,
   normalizeUpdateEventInput,
   readDaySpanWriteConfig,
 } from "./write.ts";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  resetSharedTokenCacheForTest();
+});
 
 describe("normalizeCreateEventInput", () => {
   it("title・dateだけの最小構成を受け付ける（終日の予定になる）", () => {
@@ -85,27 +93,48 @@ describe("normalizeCreateEventInput", () => {
 });
 
 describe("readDaySpanWriteConfig", () => {
-  it("AIDE_DAYSPAN_WRITE_TOKEN が無ければ null（＝叩きに行かない）", () => {
+  it("AIDE_DAYSPAN_WRITE_TOKEN が無ければ null（＝叩きに行かない）", async () => {
     const original = process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
     delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
     try {
-      assert.equal(readDaySpanWriteConfig(), null);
+      assert.equal(await readDaySpanWriteConfig(), null);
     } finally {
       if (original !== undefined) process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = original;
     }
   });
 
-  it("トークンがあれば既定のURLを補う", () => {
+  it("トークンがあれば既定のURLを補う", async () => {
     const originalToken = process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
     const originalUrl = process.env["AIDE_DAYSPAN_URL"];
     process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "secret";
     delete process.env["AIDE_DAYSPAN_URL"];
     try {
-      assert.deepEqual(readDaySpanWriteConfig(), { baseUrl: "http://127.0.0.1:3113", token: "secret" });
+      assert.deepEqual(await readDaySpanWriteConfig(), { baseUrl: "http://127.0.0.1:3113", token: "secret" });
     } finally {
       if (originalToken === undefined) delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
       else process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = originalToken;
       if (originalUrl !== undefined) process.env["AIDE_DAYSPAN_URL"] = originalUrl;
+    }
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先する", async () => {
+    const originalToken = process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    const originalDeckUrl = process.env["AIDE_ISSUE_DECK_URL"];
+    const originalSecret = process.env["SHARED_TOKEN_API_SECRET"];
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "env-token";
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ name: "DAYSPAN_INTERNAL_EVENTS_API_KEY", value: "shared-token" }), { status: 200 })) as typeof fetch;
+    try {
+      assert.deepEqual(await readDaySpanWriteConfig(), { baseUrl: "http://127.0.0.1:3113", token: "shared-token" });
+    } finally {
+      if (originalToken === undefined) delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+      else process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = originalToken;
+      if (originalDeckUrl === undefined) delete process.env["AIDE_ISSUE_DECK_URL"];
+      else process.env["AIDE_ISSUE_DECK_URL"] = originalDeckUrl;
+      if (originalSecret === undefined) delete process.env["SHARED_TOKEN_API_SECRET"];
+      else process.env["SHARED_TOKEN_API_SECRET"] = originalSecret;
     }
   });
 });

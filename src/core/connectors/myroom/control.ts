@@ -1,3 +1,4 @@
+import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import { DEFAULT_BASE_URL, TIMEOUT_MS } from "./index.ts";
 
 /**
@@ -38,9 +39,13 @@ export interface MyRoomControlConfig {
  *
  * `AIDE_MYROOM_URL` は読み取り（`index.ts`）と共有する。同じ myroom を指すため。
  * **トークンは認証情報として扱う。** 戻り値をログ・レスポンスへ出さないこと。
+ *
+ * 値は issue-deck の共有トークンAPI（`MYROOM_INTERNAL_CONTROL_API_KEY`。aide#513）から取得する。
+ * 取得できなければ環境変数 `AIDE_MYROOM_CONTROL_TOKEN` へフォールバックする。
  */
-export function readMyRoomControlConfig(): MyRoomControlConfig | null {
-  const token = process.env["AIDE_MYROOM_CONTROL_TOKEN"];
+export async function readMyRoomControlConfig(): Promise<MyRoomControlConfig | null> {
+  const shared = await getSharedToken("MYROOM_INTERNAL_CONTROL_API_KEY", "aide");
+  const token = shared || process.env["AIDE_MYROOM_CONTROL_TOKEN"];
   if (!token) return null;
 
   const baseUrl = process.env["AIDE_MYROOM_URL"] ?? DEFAULT_BASE_URL;
