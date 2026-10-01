@@ -445,6 +445,9 @@ src/
     zaim-web-server.ts Zaim Web版登録の受け口（VPSからの中継先。常駐）
 ```
 
+`ios/` は iOS アプリ（AIDE を `WKWebView` で開く殻・SwiftUI の Xcode プロジェクト）。旧 `guchi-apps/aide-ios` を #525 で統合した。
+Node の `npm test`・`npm run typecheck` の対象外で、ビルド・入れ直しの手順は [ios/README.md](./ios/README.md)。
+
 プロセスを1本に絞っているのはメモリ制約のため。パッケージ分割（monorepo化）は規模が育ってから検討する。
 
 ## 開発
@@ -685,7 +688,7 @@ IssueDeck で見られる。古いブックマークから来た人は `/map` �
 
 ### iOSアプリ向けの室温API（aide#454）
 
-iOSアプリ（`guchi-apps/aide-ios`）のApp Intent（ショートカット・Siri）が、現在の室温をHTTPSで読む
+iOSアプリ（このリポジトリの `ios/`）のApp Intent（ショートカット・Siri）が、現在の室温をHTTPSで読む
 ための口。**アプリからmyroomへは直接繋がず、AIDEが窓口になる。読み取り専用で、操作系は置かない。**
 
 | 口 | 内容 |

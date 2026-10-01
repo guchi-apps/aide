@@ -26,6 +26,17 @@ jobs:
           node-version: "24"
           cache: npm
 
+      # iOSアプリ（ios/）とAIDE本体で揃えておく値の照合（#525）。依存もビルドも要らないので
+      # npm ci の前に実行する。ios/ を触らないPRでもバージョンのずれは起きるため毎回走らせる。
+      - name: Check iOS consistency
+        run: node ios/scripts/check-consistency.mjs
+
+      - name: Check Swift imports
+        run: bash ios/scripts/check-swift-imports.sh
+
+      - name: Test iOS scripts
+        run: node --test ios/scripts/*.test.mjs
+
       - name: Install dependencies
         run: npm ci
 
