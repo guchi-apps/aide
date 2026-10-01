@@ -19,10 +19,14 @@ final class PushNotificationManager: NSObject, UNUserNotificationCenterDelegate 
 
     private static let deviceTokenKey = "push.deviceToken"
     private static let uploadedKey = "push.uploadedSignature"
+    private static let pendingRevocationKey = "push.pendingRevocation"
 
     private let logger = Logger(subsystem: "com.gucchii.AIDEios", category: "push")
     private let registrar = PushRegistrar()
     private let defaults = UserDefaults.standard
+
+    /// 直近の`prepare()`・`didRegister()`で分かった、現在ログイン中かどうか。未確定の間は再試行しない。
+    private var isLoggedIn = false
 
     private var deviceToken: String? {
         get { defaults.string(forKey: Self.deviceTokenKey) }
@@ -35,14 +39,26 @@ final class PushNotificationManager: NSObject, UNUserNotificationCenterDelegate 
         set { defaults.set(newValue, forKey: Self.uploadedKey) }
     }
 
+    /// 失効に失敗し、控えを残したまま終えたか。次に未ログインと分かったタイミングで再試行する。
+    private var pendingRevocation: Bool {
+        get { defaults.bool(forKey: Self.pendingRevocationKey) }
+        set { defaults.set(newValue, forKey: Self.pendingRevocationKey) }
+    }
+
     func configure() {
         UNUserNotificationCenter.current().delegate = self
     }
 
     /// 本人確認後に呼ぶ。未決定なら許可を求め、許可済みならAPNsへ登録する（トークンは変わり得るので毎回）。
     /// 拒否されている場合は、登録済みトークンをAIDEから失効させる。
+    /// 失効待ちの控えが残っていて未ログインなら、ここで失効を再試行する。
     @MainActor
-    func prepare() async {
+    func prepare(isLoggedIn: Bool) async {
+        self.isLoggedIn = isLoggedIn
+        if pendingRevocation, !isLoggedIn {
+            await revokeStoredToken()
+        }
+
         let center = UNUserNotificationCenter.current()
         var settings = await center.notificationSettings()
 
@@ -62,7 +78,12 @@ final class PushNotificationManager: NSObject, UNUserNotificationCenterDelegate 
 
     func didRegister(deviceToken data: Data) {
         deviceToken = data.map { String(format: "%02x", $0) }.joined()
-        Task { await uploadIfNeeded() }
+        Task {
+            if pendingRevocation, !isLoggedIn {
+                await revokeStoredToken()
+            }
+            await uploadIfNeeded()
+        }
     }
 
     func didFailToRegister(_ error: Error) {
@@ -71,16 +92,23 @@ final class PushNotificationManager: NSObject, UNUserNotificationCenterDelegate 
     }
 
     /// ログアウト・失効時。AIDEへの登録を消し、端末側の控えも捨てる。
+    /// 失敗した場合（認証情報が無い・トークン期限切れ・通信エラーなど）は控えを残し、
+    /// 「失効待ち」のフラグを立てる。再試行は`prepare()`・`didRegister()`が未ログインを確認できたときに行う。
     func revokeStoredToken() async {
-        guard let token = deviceToken else { return }
+        guard let token = deviceToken else {
+            pendingRevocation = false
+            return
+        }
         do {
             try await registrar.unregister(deviceToken: token)
             deviceToken = nil
             uploadedSignature = nil
+            pendingRevocation = false
         } catch PushRegistrationError.notConfigured {
-            // 認証情報が無く失効できない。控えは残し、次に認証できたとき再試行する。
+            pendingRevocation = true
             logger.notice("認証情報が無いため、通知トークンを失効できませんでした")
         } catch {
+            pendingRevocation = true
             logger.notice("通知トークンの失効に失敗しました")
         }
     }

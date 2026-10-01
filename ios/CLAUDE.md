@@ -8,6 +8,8 @@ AIDE（`https://aide.gucchii.com/map`）を表示する iOS アプリのラッ�
 
 ## 構成
 
+**pbxproj未接続（2026-09時点、#66）**: `AIDEios`ターゲットのビルド設定に`CODE_SIGN_ENTITLEMENTS`が無く、`AIDEios.entitlements`（`aps-environment`・`applinks:aide.gucchii.com`・`group.com.gucchii.AIDEios`）が署名に入っていない。Widget Extensionのターゲットも無い。このため、下記のプッシュ通知・Universal Links・App Group共有・ウィジェットは、実装済みのSwiftソースがあっても実機では動かない。Mac の Xcode で Signing & Capabilities（Push Notifications・Associated Domains・App Groups）と Widget Extension ターゲットの追加、Run Script build phase の登録を行い、`project.pbxproj`をコミットするまでこの状態が続く。
+
 - `README.md` — 人向けの Xcode 操作手順（セットアップ・入れ直し・実機確認）。手順を変えるときは CLAUDE.md の該当節と食い違わせない
 - `AIDEios/` — Swift ソース（`AIDEiosApp.swift`・`ContentView.swift`）とアセット
   - 認証情報の保護: `AppLock.swift`（起動・復帰時のロック状態）・`BiometricGate.swift`（Face ID／パスコードによる本人確認）・`SessionVault.swift`（ログインCookieのKeychain保存・復元・ログアウト時の全消去）・`KeychainStore.swift`（Keychainの薄いラッパー）・`LockView.swift`（ロック画面）。Cookie値・トークンは**ログへ出さない**（`Logger`にはOSStatusと固定文言だけ）
@@ -15,8 +17,10 @@ AIDE（`https://aide.gucchii.com/map`）を表示する iOS アプリのラッ�
   - ビルドSHAの表示: `BuildInfo.swift`（Info.plistの`AIDEGitSHA`を読む）を`LockView.swift`の隅に出す。値は Run Script build phase が`scripts/write-git-sha.sh`でビルド成果物のInfo.plistへ書く（build phaseの登録はpbxprojの変更なのでMac側で行う。未登録なら「不明」と出る）
   - AIDEリンクの受け口: `DeepLink.swift`（`AIDERoute`が`https://aide.gucchii.com`配下のURLか`com.gucchii.aide://open?path=/...`だけを検証して通し、`/status/auth`・`/auth`・`..`などは捨てる。`DeepLinkRouter`が開く画面を保持し、ロック中・未ログイン中は解除後にWebViewが読む。未ログインはAIDEが認証へ誘導するので`next`経由で元の画面へ戻る）。Universal Links・ウィジェット（`widgetURL`）・通知（`userInfo["url"]`）・App Intentsはいずれも`AIDERoute`を経由する。Universal Linksには`AIDEios.entitlements`の`applinks:aide.gucchii.com`と、AIDE側の`/.well-known/apple-app-site-association`配信が要る
   - ショートカット／Siri（App Intents）: `RoomTemperatureIntent.swift`（室温を確認するIntentと`AppShortcutsProvider`）・`AIDEClient.swift`（AIDEの`/api/mobile/room-temperature`をBearerで呼ぶ。myroomへは直接接続しない）・`IntentTokenStore.swift`（Intent用トークンのKeychain保存。バックグラウンドで動くためFace ID不要の項目。ASCII表示可能文字だけ保存できる）・`IntentTokenSettingsView.swift`（トークンを貼り付けて保存・削除する設定画面。ロック解除後の歯車ボタンから開く。値は再表示しない。iCloudキーチェーンの保存提案が出ないよう`textContentType`は付けない。「ログインして取得」ボタンが`MobileTokenIssuer.swift`（`scope=mobile`のPKCEログイン→`POST /api/mobile/token`）でトークンを自動発行して保存する。貼り付けは手動の代替。値・code・verifierは**ログへ出さない**）。AIDE側のAPIは`guchi-apps/aide#454`で用意する
+  - 認証コールバックの検証: `AuthCallback.swift`（`code(from:scheme:path:)`。認証コールバックURL〔`com.gucchii.aide:/auth/callback?code=...`〕のスキーム・ホスト（無し）・パス・`error`の有無・`code`の形式〔43文字のbase64url〕を確認する純粋関数。通常ログイン〔`ContentView.swift`のCoordinator〕とショートカット用トークン発行〔`MobileTokenIssuer.swift`〕の両方が共有する。Keychain・WebKitに依存しないため`AIDEiosTests`で直接テストできる）
   - プッシュ通知（APNs）: `PushNotifications.swift`（通知許可の取得・デバイストークンの登録／更新／失効・通知タップの受け取り・`AppDelegate`）・`PushRegistrar.swift`（AIDEの`/api/mobile/push/devices`へBearerで登録・失効。トークンはIntentと共通の`IntentTokenStore`）・`NotificationKind.swift`（通知種別ごとのオン・オフ設定の保存。設定UIは未実装）。通知payloadの`path`（AIDE配下の相対パス）は`DeepLinkRouter.handle(path:)`経由で`AIDERoute`の検証を通し、本人確認後にWebViewで開く（`AppDelegate`から触るため`DeepLinkRouter.shared`を使う）。デバイストークン・通知本文は**ログへ出さない**。AIDE側のAPI・送信経路は`guchi-apps/aide#463`
 - `AIDEiosWidget/` — Widget Extension のソース（`RoomWidget.swift`）と entitlements。Target は Xcode で追加する（`project.pbxproj` は手編集しない）
+- `AIDEiosTests/` — Unit Testのソース（`AIDERouteTests.swift`・`IntentTokenStoreTests.swift`・`AuthCallbackTests.swift`）。いずれもKeychain・WebKitに依存しない純粋関数の受理・拒否ケースを表形式で確認する。Unit Testing BundleのTargetはXcodeで追加する（`project.pbxproj`は手編集しない。#68時点では未追加）
 - `scripts/install-to-iphone.sh`・`scripts/remote-install.sh` — Mac mini で `main` を取り込み実機へ入れ直す／subpc から SSH で呼ぶ
 - `scripts/check-consistency.mjs`・`scripts/sync-version.mjs`・`scripts/ios-changes.mjs` — バージョン・ログイン戻り先の照合／MARKETING_VERSION の同期／入れ直し要否の判定
 - `scripts/write-git-sha.sh` — Run Script build phase用。ビルドSHAを成果物のInfo.plistへ書く

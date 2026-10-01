@@ -31,7 +31,8 @@ final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
     private var isObserving = false
 
     /// このプロセス中に有効なセッションCookieを見たか。見た後に消えたらログアウト／失効とみなす。
-    private var hasSeenSession = false
+    /// 現在ログイン中かどうかの判定にも使う（`AppLock.isLoggedIn`）。
+    private(set) var hasSeenSession = false
     private var lastSavedValue: String?
 
     override init() {
@@ -78,8 +79,15 @@ final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
         hasSeenSession = false
         lastSavedValue = nil
 
-        // ログアウトした端末へ通知を送り続けない。
+        // ログアウトした端末へ通知を送り続けない（ショートカット用トークンを使うため、そのトークン自身の失効より先に行う）。
         await PushNotificationManager.shared.revokeStoredToken()
+
+        // ショートカット用トークンもAIDE側で失効させ、この端末からも消す。
+        let intentTokenStore = IntentTokenStore()
+        if let token = try? intentTokenStore.load() {
+            await IntentTokenRevoker().revoke(token: token)
+        }
+        try? intentTokenStore.delete()
 
         // ウィジェットに前の室温を残さない。
         RoomSnapshotStore.save(.loggedOut)
@@ -134,12 +142,13 @@ final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
         }
     }
 
-    /// iOSのKeychainはアプリを削除しても残る。再インストール直後に前のログインを復元しないよう、
-    /// 初回起動（UserDefaultsは削除で消える）ではKeychainの控えを捨てる。フラグに秘密は含まない。
+    /// iOSのKeychainはアプリを削除しても残る。再インストール直後に前のログイン・ショートカット用トークンを
+    /// 復元しないよう、初回起動（UserDefaultsは削除で消える）ではKeychainの控えを捨てる。フラグに秘密は含まない。
     private func discardStaleItemAfterReinstall() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.launchedKey) else { return }
         removeStoredSession()
+        try? IntentTokenStore().delete()
         defaults.set(true, forKey: Self.launchedKey)
     }
 

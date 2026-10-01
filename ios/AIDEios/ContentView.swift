@@ -87,7 +87,9 @@ struct ContentView: View {
         }
         .onChange(of: lock.isUnlocked) { _, unlocked in
             // 本人確認後に通知許可を求め、デバイストークンをAIDEへ登録する。
-            if unlocked { Task { await PushNotificationManager.shared.prepare() } }
+            if unlocked {
+                Task { await PushNotificationManager.shared.prepare(isLoggedIn: lock.isLoggedIn) }
+            }
         }
     }
 }
@@ -244,13 +246,11 @@ struct WebView: UIViewRepresentable {
 
             guard
                 let callbackURL,
-                callbackURL.scheme == AIDEConfiguration.callbackScheme,
-                callbackURL.host == nil,
-                callbackURL.path == AIDEConfiguration.callbackPath,
-                let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems,
-                items.first(where: { $0.name == "error" }) == nil,
-                let code = items.first(where: { $0.name == "code" })?.value,
-                code.range(of: #"^[A-Za-z0-9_-]{43}$"#, options: .regularExpression) != nil,
+                let code = AuthCallback.code(
+                    from: callbackURL,
+                    scheme: AIDEConfiguration.callbackScheme,
+                    path: AIDEConfiguration.callbackPath
+                ),
                 let verifier
             else {
                 showAuthenticationError("ログインを完了できませんでした。もう一度お試しください。")

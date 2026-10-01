@@ -3,7 +3,7 @@
 //
 //   node ios/scripts/ios-changes.mjs --base <ref> [--head <ref>] [--json]
 //
-// 配布物に入るのは AIDEios/・AIDEiosWidget/・AIDEios.xcodeproj/・AIDEios-Info.plist だけ。
+// 配布物に入るのは AIDEios/・AIDEiosWidget/・AIDEiosTests/・AIDEios.xcodeproj/・AIDEios-Info.plist だけ。
 // README・scripts は入らないので除外し、pbxproj の版番号の行（MARKETING_VERSION・
 // CURRENT_PROJECT_VERSION）だけの差分も数えない（リリースのバンプで毎回書き換わるため）。
 
@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 export const DISTRIBUTED_PATHSPEC = [
   "ios/AIDEios",
   "ios/AIDEiosWidget",
+  "ios/AIDEiosTests",
   "ios/AIDEios.xcodeproj",
   "ios/AIDEios-Info.plist",
   ":(exclude,glob)**/*.md",

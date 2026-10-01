@@ -118,13 +118,11 @@ final class MobileTokenIssuer: NSObject, ASWebAuthenticationPresentationContextP
 
     private static func extractCode(from callbackURL: URL) throws -> String {
         guard
-            callbackURL.scheme == AIDEConfiguration.callbackScheme,
-            callbackURL.host == nil,
-            callbackURL.path == AIDEConfiguration.callbackPath,
-            let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems,
-            items.first(where: { $0.name == "error" }) == nil,
-            let code = items.first(where: { $0.name == "code" })?.value,
-            code.range(of: #"^[A-Za-z0-9_-]{43}$"#, options: .regularExpression) != nil
+            let code = AuthCallback.code(
+                from: callbackURL,
+                scheme: AIDEConfiguration.callbackScheme,
+                path: AIDEConfiguration.callbackPath
+            )
         else { throw MobileTokenIssuerError.loginFailed }
         return code
     }

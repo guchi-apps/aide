@@ -18,6 +18,7 @@ final class IntentTokenSettingsModel: ObservableObject {
 
     private let store = IntentTokenStore()
     private let issuer = MobileTokenIssuer()
+    private let revoker = IntentTokenRevoker()
 
     var canSave: Bool { IntentTokenStore.normalized(input) != nil }
 
@@ -52,6 +53,10 @@ final class IntentTokenSettingsModel: ObservableObject {
         defer { isIssuing = false }
         do {
             let token = try await issuer.issue()
+            // 新しいトークンを確保できてから、古いトークンをAIDE側で失効させる（キャンセル・失敗時に前のトークンを壊さない）。
+            if let previous = try? store.load(), previous != token {
+                await revoker.revoke(token: previous)
+            }
             try store.save(token)
             input = ""
             isSaved = true
@@ -70,7 +75,10 @@ final class IntentTokenSettingsModel: ObservableObject {
         }
     }
 
-    func delete() {
+    func delete() async {
+        if let token = try? store.load() {
+            await revoker.revoke(token: token)
+        }
         do {
             try store.delete()
             isSaved = false
@@ -92,7 +100,7 @@ struct IntentTokenSettingsView: View {
                 Section {
                     LabeledContent("状態", value: model.isSaved ? "保存済み" : "未設定")
                 } footer: {
-                    Text("ショートカット／Siriで室温を確認するための、AIDE専用の読み取りトークンです（室温の取得にしか使えません）。「ログインして取得」で自動的に発行・保存されます。この端末のKeychainにだけ保存され、バックアップや他の端末には移りません。")
+                    Text("ショートカット／Siriでの室温確認と、プッシュ通知の登録に使う、AIDE専用のトークンです。「ログインして取得」で自動的に発行・保存されます。この端末のKeychainにだけ保存され、バックアップや他の端末には移りません。")
                 }
 
                 Section {
@@ -134,10 +142,10 @@ struct IntentTokenSettingsView: View {
                 }
             }
             .confirmationDialog("保存済みのトークンを削除しますか？", isPresented: $confirmsDelete, titleVisibility: .visible) {
-                Button("削除", role: .destructive) { model.delete() }
+                Button("削除", role: .destructive) { Task { await model.delete() } }
                 Button("キャンセル", role: .cancel) {}
             } message: {
-                Text("削除するとショートカットから室温を確認できなくなります。")
+                Text("削除するとショートカットから室温を確認できなくなり、プッシュ通知も届かなくなります。")
             }
             .onAppear { model.refresh() }
         }

@@ -37,6 +37,9 @@ final class AppLock: ObservableObject {
 
     var isUnlocked: Bool { state == .unlocked }
 
+    /// 現在ログイン中か（有効なセッションCookieを見ているか）。
+    var isLoggedIn: Bool { vault.hasSeenSession }
+
     /// 認証画面を出さずに結果が決まる状態（未設定・利用不可）は、設定から戻った時に自動で再判定する。
     /// キャンセル・失敗は自動で再試行しない。
     func authenticateIfRequired() {
