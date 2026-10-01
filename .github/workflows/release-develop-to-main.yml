@@ -41,11 +41,15 @@ concurrency:
 
 jobs:
   release:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-release-develop-to-main.yml@workflows/v41
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-release-develop-to-main.yml@workflows/v42
     with:
       # pushトリガー（バンプPRのマージ）で起動したときは`inputs`自体が無いため空文字を渡す。
       # そちらの実行はdevelop→mainのPR作成だけを行い、上げ幅を使わない。
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
+      # 既定の `npm version` に加えて、iOSアプリ（ios/）のXcodeプロジェクトが持つ
+      # MARKETING_VERSION も同時に package.json の値へ揃える（#525）。バンプ時点で揃えないと
+      # 次のリリースごとにずれ、ci.yml の ios/scripts/check-consistency.mjs が赤くなる。
+      bump-command: npm version "$NEW_VERSION" --no-git-tag-version && node ios/scripts/sync-version.mjs
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** issues が write なのは、
     # 呼ばれる側の notify-failure ジョブがリリース対象issueへ失敗を通知するため。
