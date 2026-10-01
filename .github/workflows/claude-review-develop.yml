@@ -57,6 +57,10 @@ jobs:
         ^\.github/secrets-manifest\.tsv$ :: シークレット定義の変更 (.github/secrets-manifest.tsv)
         (^|/)requirements[^/]*\.txt$|(^|/)pyproject\.toml$|(^|/)Pipfile$ :: 依存関係の変更 (requirements*.txt, pyproject.toml, Pipfile)
         /package\.json$ :: ルート以外の依存関係の変更 (frontend/package.json など。dependency-checkはルートしか見ない)
+        ^src/core/connectors/zaim/(oauth|session|refresh)\.ts$ :: Zaimの認証情報を扱う経路の変更 (src/core/connectors/zaim/{oauth,session,refresh}.ts)
+      # claude-reviewを実行する規模の閾値（既定は10ファイル / 500行。#520で引き下げ）。
+      review-file-threshold: "5"
+      review-line-threshold: "200"
       # 上の uses: と同じタグを指定する。片方だけ上げると新しいワークフローで
       # 古いプロンプトが使われる。
       prompts-ref: workflows/v41
