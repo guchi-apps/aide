@@ -55,6 +55,19 @@ AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
 `dependencies` は空で、`devDependencies` は `typescript` と `@types/node` の2つだけ。**実行時依存を
 増やさない方針**なので、依存を足す判断は下記「依存関係の追加」に従う。
 
+## iOSアプリ（`ios/`）とのつなぎ目
+
+**`ios/` は AIDE を `WKWebView` で開く殻**（旧 `guchi-apps/aide-ios`。#525 で統合）。subpc には Xcode が無いので、
+Swift の変更はビルドを確かめられないまま渡る。作業ルール・Xcodeで確認が要る項目は `ios/CLAUDE.md`、
+入れ直し手順は `ios/README.md` が正。
+
+- **`npm run typecheck`・`npm test` は `ios/` を見ない。** iOS の照合は `node ios/scripts/check-consistency.mjs`・
+  `bash ios/scripts/check-swift-imports.sh`・`node --test ios/scripts/*.test.mjs`（CIの `ci.yml` が毎回実行）
+- **`MARKETING_VERSION` は package.json の version と常に一致させる。** 手で書き換えず、リリースのバンプPRが
+  `ios/scripts/sync-version.mjs` で同期する（`release-develop-to-main.yml` の `bump-command`。消さない）
+- ログインの戻り先（`src/web/app-auth.ts` の `APP_CALLBACK_URL`）を変えるときは、Swift の `callbackScheme`・
+  `AIDEios-Info.plist` も同時に直す（`check-consistency.mjs` が照合する）
+
 ## マルチエージェント運用（GitHub Actions 無人実行）
 
 `@claude` コメントを起点に、計画提示〜実装〜develop向けPR作成までを GitHub Actions 上で無人実行する。
