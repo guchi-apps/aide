@@ -1,15 +1,23 @@
 #!/usr/bin/env node
-// iOSアプリ本体の入れ直しが要る変更（ios/ の配布物への実質的な差分）があるかを判定する（#525）。
+// iOSアプリ本体（TestFlightへ配るバイナリ）の更新が要るかを判定する（#530）。
 //
-//   node ios/scripts/ios-changes.mjs --base <ref> [--head <ref>] [--json]
+//   node ios/scripts/ios-changes.mjs [--base <ref>] [--head <ref>] [--json]
 //
-// 配布物に入るのは AIDEios/・AIDEiosWidget/・AIDEiosTests/・AIDEios.xcodeproj/・AIDEios-Info.plist だけ。
-// README・scripts は入らないので除外し、pbxproj の版番号の行（MARKETING_VERSION・
-// CURRENT_PROJECT_VERSION）だけの差分も数えない（リリースのバンプで毎回書き換わるため）。
+// 比べる相手（--base）の既定は「最後にTestFlightへ配布し終えたコミット」＝タグ
+// `ios-testflight/<ビルド番号>` のうち最新のもの。ここに印が無い（初回）ときは要配布とする。
+// 印は処理済み・内部グループへの割当てが済んだあとにだけ付けるので、途中で失敗した配布の
+// 変更も、次のリリースの判定に残る（リリースごとの差分ではなく、配布済みとの差分で見る）。
+//
+// 配布物に入るのは AIDEios/・AIDEiosWidget/・AIDEiosTests/・AIDEios.xcodeproj/・AIDEios-Info.plist だけ。README・scripts は
+// 入らないので除外し、pbxproj の版番号の行（MARKETING_VERSION・CURRENT_PROJECT_VERSION）だけの
+// 差分も数えない（リリースのバンプで毎回書き換わる）。
+// ios-rebuild-notice.yml も同じ判定を呼ぶ（食い違わせない）。
 
 import { execFileSync } from "node:child_process";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+export const TAG_PREFIX = "ios-testflight/";
 
 // pathspec（git diff に渡す）。配布物側だけを含め、Markdown は外す。
 export const DISTRIBUTED_PATHSPEC = [
@@ -21,7 +29,8 @@ export const DISTRIBUTED_PATHSPEC = [
   ":(exclude,glob)**/*.md",
 ];
 
-const VERSION_LINE = /^[+-][\t ]*(MARKETING_VERSION|CURRENT_PROJECT_VERSION) = [^;]+;[\t ]*$/;
+const VERSION_LINE =
+  /^[+-][\t ]*(MARKETING_VERSION|CURRENT_PROJECT_VERSION) = [^;]+;[\t ]*$/;
 
 /** `git diff -U0` の出力から、配布物に影響する変更行だけを返す（純関数）。 */
 export function meaningfulChangeLines(diffText) {
@@ -41,15 +50,55 @@ export function changedFilesOf(diffText) {
   return files;
 }
 
-/** 判定する。戻り値: { needed, base, changedFiles } */
+function git(args, cwd) {
+  return execFileSync("git", args, { cwd, encoding: "utf8" });
+}
+
+/** 最後に配布し終えたコミットの印（タグ名）。無ければ null。 */
+export function latestDistributedTag(cwd) {
+  const tags = git(
+    ["tag", "--list", `${TAG_PREFIX}*`, "--sort=-version:refname"],
+    cwd
+  )
+    .split("\n")
+    .filter(Boolean);
+  return tags[0] ?? null;
+}
+
+/**
+ * 判定する。戻り値: { needed, reason, base, changedFiles }
+ * base 未指定なら最新の配布済みタグ。タグが無ければ初回として要配布。
+ */
 export function decide({ cwd, base, head = "HEAD" }) {
-  const diff = execFileSync(
-    "git",
-    ["diff", "-U0", `${base}...${head}`, "--", ...DISTRIBUTED_PATHSPEC],
-    { cwd, encoding: "utf8" },
+  const baseRef = base ?? latestDistributedTag(cwd);
+  if (!baseRef) {
+    return {
+      needed: true,
+      reason: "TestFlightへの配布実績が無い（初回）",
+      base: null,
+      changedFiles: [],
+    };
+  }
+  const diff = git(
+    ["diff", "-U0", `${baseRef}...${head}`, "--", ...DISTRIBUTED_PATHSPEC],
+    cwd
   );
+  const lines = meaningfulChangeLines(diff);
+  if (lines.length === 0) {
+    return {
+      needed: false,
+      reason: `${baseRef} 以降、配布物（Swift・Widget・Xcode設定・アセット）に変更なし`,
+      base: baseRef,
+      changedFiles: [],
+    };
+  }
   const changedFiles = changedFilesOf(diff);
-  return { needed: changedFiles.length > 0, base, changedFiles };
+  return {
+    needed: true,
+    reason: `${baseRef} 以降、配布物に${lines.length}行の変更あり`,
+    base: baseRef,
+    changedFiles,
+  };
 }
 
 function parseArgs(argv) {
@@ -65,13 +114,12 @@ function parseArgs(argv) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { base, head, json } = parseArgs(process.argv.slice(2));
-  if (!base) throw new Error("--base が必要です");
   const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const result = decide({ cwd: root, base, head });
   if (json) {
     console.log(JSON.stringify(result));
   } else {
-    console.log(`${result.needed ? "入れ直しが必要" : "入れ直し不要"}`);
+    console.log(`${result.needed ? "要配布" : "配布不要"}: ${result.reason}`);
     for (const f of result.changedFiles) console.log(`  ${f}`);
   }
 }

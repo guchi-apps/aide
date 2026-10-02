@@ -91,6 +91,42 @@ bash ios/scripts/check-swift-imports.sh  # 明示importの漏れ
 
 どれもビルドの代わりにはなりません（CI でも毎回実行されます）。
 
+## TestFlight への自動配布（#530）
+
+**リリースで `ios/` の配布物が変わったときだけ、Web の本番反映のあとに TestFlight の内部テストグループへ自動で配る。**
+自動では入らないので、iPhone の TestFlight アプリで更新する。Mac mini からの入れ直し（上記）は開発ビルド用に残す。
+
+```
+Deploy to Production 成功（main）
+  → ios-testflight-trigger.yml（薄い起動役）
+    → ios-testflight.yml: 判定 → 署名・ビルド・アップロード → ビルド処理待ち・内部グループ配布 → 印（タグ）→ Signaly通知
+```
+
+- 判定は `node ios/scripts/ios-changes.mjs`（基準は最新のタグ `ios-testflight/<ビルド番号>`。印が無ければ初回として要配布）。
+  対象は `AIDEios/`・`AIDEiosWidget/`・`AIDEiosTests/`・`AIDEios.xcodeproj/`・`AIDEios-Info.plist`。README・`scripts/`・版番号の行だけの差分は不要
+- ビルド番号は `run_number * 100 + run_attempt`（`CURRENT_PROJECT_VERSION` は `xcodebuild` の引数で上書き）。表示バージョンは `package.json` と同期済みの `MARKETING_VERSION`
+- 署名は App Store Connect API キーによるクラウド署名。**Web と iOS は別の run**で、iOS だけ失敗することがある
+- 判定だけ確かめる: Actions → iOS TestFlight → Run workflow で `dry_run` にチェック
+- 失敗したら、run のサマリーで段階を確かめ、原因を直して「Re-run failed jobs」（または同じ `sha` で再実行）。印は配布し終えたときだけ進むので何度やり直してもよい
+
+| 症状 | 原因と対処 |
+|---|---|
+| `ASC_KEY_ID が未登録です` | 下の初期設定をしていない |
+| `App Store Connect APIの認証に失敗しました（HTTP 401/403）` | キーの失効、または権限不足（「App管理」以上） |
+| `Communication with Apple failed` / プロファイル作成失敗 | App ID・配布証明書が未作成。Xcode で一度 Archive して作る |
+| `内部グループを1つに決められません` | repository variable `TESTFLIGHT_GROUP` に内部グループ名を入れる |
+| `MISSING_EXPORT_COMPLIANCE` | `AIDEios-Info.plist` の `ITSAppUsesNonExemptEncryption` を確認 |
+| `MARKETING_VERSION がずれています` | `node ios/scripts/sync-version.mjs` を実行して develop へ反映 |
+
+### 初期設定（初回だけ・本人の操作）
+
+1. `sync-secrets.yml` を `only=ASC_KEY_ID,ASC_ISSUER_ID,ASC_KEY_P8` で実行する（キーは kurashio と共通の `op://apps/AppStoreConnect/*`）
+2. App Store Connect に Bundle ID `com.gucchii.AIDEios` の App を作り、内部テストグループを用意する（複数なら `TESTFLIGHT_GROUP` を設定）
+3. Mac の Xcode で一度 Archive し、App ID・配布証明書を作っておく
+4. Widget Extension ターゲットを追加したら、`ios-testflight.yml` のビルド番号・署名の扱いを見直す（現状は本体のみ）
+
+**このワークフローは subpc では実行できず、実際の配布は未確認。** 初回は `dry_run` の後、実際の run で各段階を確かめる。
+
 ## ビルド SHA の表示（初回のみ Xcode で設定）
 
 アプリの隅（ロック画面）に `build <短いSHA>` を出します。値は Run Script build phase が書くため、次の設定を **Mac の Xcode で 1 回だけ** 行い、`project.pbxproj` の変更をコミットします（未設定のビルドでは「不明」と出ます）。

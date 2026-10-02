@@ -77,5 +77,5 @@ Issue Deck からサブPC（Ubuntu・Linux）の Codex／Claude Code に渡さ�
 - CI（ubuntu）は毎回 `ios/scripts/check-consistency.mjs`・`check-swift-imports.sh`・`ios/scripts/*.test.mjs` を実行する。**macOS runner での `xcodebuild` は無い**（ビルドの確認は Mac mini での入れ直し）
 - バージョン（`MARKETING_VERSION`）は package.json の version に同期する。リリースのバンプPRが `scripts/sync-version.mjs` を呼ぶので手で書き換えない
 - iOS の配布物（`AIDEios/`・`AIDEiosWidget/`・`AIDEios.xcodeproj/`・`AIDEios-Info.plist`）が変わる develop→main のPRには、`ios-rebuild-notice.yml` が「入れ直しが必要」とコメントする。入れ直しは `main` から `scripts/remote-install.sh`（手順は README）
-- TestFlight への自動配布は未整備（kurashio には有る。別Issue）
+- TestFlight へは main の `Deploy to Production` 成功後に `ios-testflight-trigger.yml` → `ios-testflight.yml` が自動配布する（配布物が変わったリリースだけ・#530）。**subpc では動作を確かめられない**（Xcode・App Store Connect の実キーが要る）。配布済みの印はタグ `ios-testflight/<ビルド番号>`。手順・失敗時の対処は README「TestFlight への自動配布」
 
