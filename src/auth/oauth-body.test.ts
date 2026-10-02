@@ -124,6 +124,23 @@ describe("認証前のOAuthエンドポイント", () => {
     assert.equal(((await res.json()) as { error: string }).error, "invalid_request");
   });
 
+  it("POST /oauth/register は解釈できない・危険なスキームの redirect_uris を400で断る", async () => {
+    for (const uri of ["not a url", "javascript:alert(1)", "data:text/html,x", "file:///etc/passwd"]) {
+      resetRateLimits();
+      const res = await post("/oauth/register", JSON.stringify({ redirect_uris: [uri] }), JSON_TYPE);
+      assert.equal(res.status, 400, `${uri} は断るべき`);
+      assert.equal(((await res.json()) as { error: string }).error, "invalid_redirect_uri");
+    }
+  });
+
+  it("POST /oauth/register は https・localhost・カスタムスキームの redirect_uris を受け付ける", async () => {
+    for (const uri of ["https://claude.ai/api/mcp/auth_callback", "http://localhost:6274/cb", "com.example.app:/cb"]) {
+      resetRateLimits();
+      const res = await post("/oauth/register", JSON.stringify({ redirect_uris: [uri] }), JSON_TYPE);
+      assert.equal(res.status, 201, `${uri} は受け付けるべき`);
+    }
+  });
+
   it("POST /oauth/token は巨大なボディに413を返す", async () => {
     const res = await post("/oauth/token", `grant_type=authorization_code&code=${"x".repeat(MAX_BODY_BYTES)}`, FORM);
     assert.equal(res.status, 413);

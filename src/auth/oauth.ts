@@ -148,6 +148,19 @@ export function authorizationServerMetadata(baseUrl: string): unknown {
 
 // ---- 動的クライアント登録 (RFC 7591) ----
 
+/** ネイティブアプリのカスタムスキームは許す（RFC 8252）。スクリプトやデータとして解釈されるものだけ断る。 */
+const FORBIDDEN_REDIRECT_SCHEMES = new Set(["javascript:", "data:", "vbscript:", "file:", "blob:", "about:"]);
+
+export function isAcceptableRedirectUri(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return !FORBIDDEN_REDIRECT_SCHEMES.has(parsed.protocol);
+}
+
 export async function handleRegister(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // 登録エンドポイントは仕様上未認証で公開される。無制限に受け付けると状態ファイルが膨らむ。
   if (!allowRegistration(clientKey(req))) {
@@ -164,6 +177,16 @@ export async function handleRegister(req: IncomingMessage, res: ServerResponse):
 
   if (uris.length === 0) {
     json(res, 400, { error: "invalid_redirect_uri", error_description: "redirect_uris が必要です" });
+    return;
+  }
+
+  // 登録された値は認可後にそのまま `Location` へ載る。解釈できない値や、ブラウザで
+  // スクリプトとして動きうるスキームを受け付けると、認可のたびに500か踏み台になる。
+  if (!uris.every(isAcceptableRedirectUri)) {
+    json(res, 400, {
+      error: "invalid_redirect_uri",
+      error_description: "redirect_uris は絶対URL（javascript:・data: などは不可）で指定してください",
+    });
     return;
   }
 
