@@ -170,6 +170,13 @@ describe("worker からの取り込み", () => {
     assert.equal(await readCache("unknown-key"), null);
   });
 
+  it("JSONがオブジェクトでない本文（null・配列・文字列）は例外にせず400で弾く", async () => {
+    for (const body of [null, [1], "text"]) {
+      const captured = await post("zaim-snapshot", body);
+      assert.equal(captured.status, 400, `${JSON.stringify(body)} は400になるべき`);
+    }
+  });
+
   it("シークレットが違えば401で弾く", async () => {
     const captured = await post("zaim-snapshot", { source: "zaim", data: { balances: [1] } }, "Bearer wrong");
 

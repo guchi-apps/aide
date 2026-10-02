@@ -99,7 +99,8 @@ export async function handleIngest(
       .end(JSON.stringify({ error: "invalid json" }));
     return;
   }
-  if (payload.data === undefined) {
+  // `null` や配列・文字列も JSON としては正しいが、`payload.data` を引くと TypeError で500になる。
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload) || payload.data === undefined) {
     res.writeHead(400, { "Content-Type": "application/json" })
       .end(JSON.stringify({ error: "data が必要です" }));
     return;
