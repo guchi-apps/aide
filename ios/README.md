@@ -105,7 +105,7 @@ Deploy to Production 成功（main）
 - 判定は `node ios/scripts/ios-changes.mjs`（基準は最新のタグ `ios-testflight/<ビルド番号>`。印が無ければ初回として要配布）。
   対象は `AIDEios/`・`AIDEiosWidget/`・`AIDEiosTests/`・`AIDEios.xcodeproj/`・`AIDEios-Info.plist`。README・`scripts/`・版番号の行だけの差分は不要
 - ビルド番号は `run_number * 100 + run_attempt`（`CURRENT_PROJECT_VERSION` は `xcodebuild` の引数で上書き）。表示バージョンは `package.json` と同期済みの `MARKETING_VERSION`
-- 署名は App Store Connect API キーによるクラウド署名。**Web と iOS は別の run**で、iOS だけ失敗することがある
+- 署名は App Store Connect API キーによるクラウド署名。**アーカイブは署名せず（`CODE_SIGNING_ALLOWED=NO`）、`-exportArchive` の配布用署名だけ**を使う（#549）。**Web と iOS は別の run**で、iOS だけ失敗することがある
 - 判定だけ確かめる: Actions → iOS TestFlight → Run workflow で `dry_run` にチェック
 - 失敗したら、run のサマリーで段階を確かめ、原因を直して「Re-run failed jobs」（または同じ `sha` で再実行）。印は配布し終えたときだけ進むので何度やり直してもよい
 
@@ -115,6 +115,7 @@ Deploy to Production 成功（main）
 | `App Store Connect APIの認証に失敗しました（HTTP 401/403）` | キーの失効、または権限不足（「App管理」以上） |
 | `Communication with Apple failed` / プロファイル作成失敗 | App ID・配布証明書が未作成。Xcode で一度 Archive して作る |
 | `内部グループを1つに決められません` | repository variable `TESTFLIGHT_GROUP` に内部グループ名を入れる |
+| 「Apple Development 証明書の上限」「開発用プロファイルが見つからない」でアーカイブが落ちる | チームの開発用証明書が上限に達している。アーカイブを署名なしにしてあるので run では増えないはず。上限に達した状態が残っていたら、[Apple Developer の証明書一覧](https://developer.apple.com/account/resources/certificates/list)で、`Created by Xcode`・`Apple Development` の使っていないものを revoke する（実機用に使っているものは消さない）。それでも run ごとに増えるなら、アーカイブのステップに `-allowProvisioningUpdates` が戻っていないか確認する |
 | `MISSING_EXPORT_COMPLIANCE` | `AIDEios-Info.plist` の `ITSAppUsesNonExemptEncryption` を確認 |
 | `MARKETING_VERSION がずれています` | `node ios/scripts/sync-version.mjs` を実行して develop へ反映 |
 
