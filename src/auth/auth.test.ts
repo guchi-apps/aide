@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { describe, it } from "node:test";
 import { loadAuthConfig, resolveBaseUrl, verifyPassword } from "./config.ts";
-import { verifyPkce } from "./oauth.ts";
+import { parseSupportedScopes, verifyPkce } from "./oauth.ts";
 import {
   allowRegistration,
   clientKey,
@@ -35,6 +35,15 @@ describe("PKCE", () => {
   it("異なる verifier を拒否する", () => {
     const challenge = createHash("sha256").update("a").digest("base64url");
     assert.equal(verifyPkce("b", challenge), false);
+  });
+});
+
+describe("OAuth scope", () => {
+  it("対応するscopeだけを付与し、未知のscopeは認可要求を失敗させない", () => {
+    assert.deepEqual(
+      parseSupportedScopes("openid tasks:read offline_access tasks:read tasks:write"),
+      ["tasks:read", "tasks:write"],
+    );
   });
 });
 
