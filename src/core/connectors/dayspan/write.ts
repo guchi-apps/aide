@@ -27,10 +27,11 @@ const TIME_KEY = /^([01]\d|2[0-3]):[0-5]\d$/;
 export interface DaySpanWriteConfig {
   baseUrl: string;
   token: string;
+  targetEmail: string;
 }
 
 /**
- * 書き込み用の設定を読む。トークンが無ければ null（＝叩きに行かない）。
+ * 書き込み用の設定を読む。トークンまたは対象メールが無ければ null（＝不完全なリクエストを叩きに行かない）。
  *
  * `AIDE_DAYSPAN_URL` は読み取り（`index.ts`）と共有する。同じDaySpanを指すため、
  * URLまで別の環境変数に分ける理由が無い。
@@ -41,10 +42,12 @@ export interface DaySpanWriteConfig {
 export async function readDaySpanWriteConfig(): Promise<DaySpanWriteConfig | null> {
   const shared = await getSharedToken("DAYSPAN_INTERNAL_EVENTS_API_KEY", "aide");
   const token = shared || process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
-  if (!token) return null;
+  // YoteiFlowは対象ユーザーをこのメールで決める。空のヘッダーを送って互換分岐へ落とさない。
+  const targetEmail = process.env["AIDE_DAYSPAN_TARGET_EMAIL"];
+  if (!token || !targetEmail) return null;
 
   const baseUrl = process.env["AIDE_DAYSPAN_URL"] ?? DEFAULT_BASE_URL;
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), token };
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), token, targetEmail };
 }
 
 export interface CreateEventInput {
@@ -219,6 +222,7 @@ function classifyThrown(cause: unknown): WriteFailure {
 function writeHeaders(config: DaySpanWriteConfig, withBody: boolean): Record<string, string> {
   return {
     authorization: `Bearer ${config.token}`,
+    "x-target-email": config.targetEmail,
     ...(withBody ? { "content-type": "application/json" } : {}),
     accept: "application/json",
   };
