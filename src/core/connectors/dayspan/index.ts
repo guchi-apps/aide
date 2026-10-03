@@ -41,6 +41,7 @@ export const TIMEOUT_MS = 8_000;
 export interface DaySpanConfig {
   baseUrl: string;
   token: string;
+  targetEmail: string;
 }
 
 /** 取得範囲。DaySpan側のクエリパラメータにそのまま対応する。 */
@@ -54,7 +55,7 @@ export interface DaySpanScheduleQuery {
 }
 
 /**
- * 設定を読む。トークンが無ければ null（＝401を叩きに行かない）。
+ * 設定を読む。トークンまたは対象メールが無ければ null（＝不完全なリクエストを叩きに行かない）。
  *
  * **トークンは認証情報として扱う。** 戻り値をログ・レスポンスへ出さないこと。
  * 値は DaySpan 側の `INTERNAL_API_KEY` と同じで、片方だけ変えると連携が止まる。
@@ -65,10 +66,12 @@ export interface DaySpanScheduleQuery {
 export async function readDaySpanConfig(): Promise<DaySpanConfig | null> {
   const shared = await getSharedToken("DAYSPAN_INTERNAL_API_KEY", "aide");
   const token = shared || process.env["AIDE_DAYSPAN_TOKEN"];
-  if (!token) return null;
+  // YoteiFlowは対象ユーザーをこのメールで決める。空のヘッダーを送って互換分岐へ落とさない。
+  const targetEmail = process.env["AIDE_DAYSPAN_TARGET_EMAIL"];
+  if (!token || !targetEmail) return null;
 
   const baseUrl = process.env["AIDE_DAYSPAN_URL"] ?? DEFAULT_BASE_URL;
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), token };
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), token, targetEmail };
 }
 
 /**
@@ -114,7 +117,11 @@ export async function fetchSchedule(
   }
 
   const res = await fetch(url, {
-    headers: { authorization: `Bearer ${config.token}`, accept: "application/json" },
+    headers: {
+      authorization: `Bearer ${config.token}`,
+      "x-target-email": config.targetEmail,
+      accept: "application/json",
+    },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   // ここで Response 自体を throw する。describeFailure がステータスだけを取り出す。
