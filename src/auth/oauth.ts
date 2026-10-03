@@ -25,10 +25,17 @@ export const TASK_READ_SCOPE = "tasks:read";
 export const TASK_WRITE_SCOPE = "tasks:write";
 const SUPPORTED_SCOPES = new Set([TASK_READ_SCOPE, TASK_WRITE_SCOPE]);
 
-function parseScopes(value: string | null): string[] | null {
+/**
+ * 自分が発行できる権限だけを認可コードへ保存する。
+ *
+ * OAuthクライアントは `openid` や `offline_access` など、リソースサーバー固有ではない
+ * scope を同時に求めることがある。未知のscopeで接続全体を失敗させず、AIDEの権限としては
+ * 付与しないことで既存クライアントとの互換性を保つ（#564）。
+ */
+export function parseSupportedScopes(value: string | null): string[] {
   if (!value?.trim()) return [];
   const scopes = [...new Set(value.trim().split(/\s+/))];
-  return scopes.every((scope) => SUPPORTED_SCOPES.has(scope)) ? scopes : null;
+  return scopes.filter((scope) => SUPPORTED_SCOPES.has(scope));
 }
 
 /**
@@ -283,7 +290,7 @@ export async function handleAuthorize(
   const challenge = url.searchParams.get("code_challenge") ?? "";
   const method = url.searchParams.get("code_challenge_method") ?? "";
   const state = url.searchParams.get("state");
-  const scopes = parseScopes(url.searchParams.get("scope"));
+  const scopes = parseSupportedScopes(url.searchParams.get("scope"));
 
   const client = await findClient(clientId);
   // redirect_uri が登録済みでない場合、そこへリダイレクトするとオープンリダイレクトになる。
@@ -300,11 +307,6 @@ export async function handleAuthorize(
       .end("PKCE (code_challenge_method=S256) が必要です");
     return;
   }
-  if (scopes === null) {
-    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" }).end("未対応の scope が指定されました");
-    return;
-  }
-
   if (req.method === "GET") {
     res
       .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })

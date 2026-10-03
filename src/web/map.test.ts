@@ -49,6 +49,11 @@ describe("アプリ連携の宣言", () => {
     for (const name of REGISTERED_TOOLS) assert.ok(used.has(name), `使う側が無いツール: ${name}`);
   });
 
+  it("DaySpanはゴミ収集日を読むツールも使う", () => {
+    const dayspan = GROUPS.flatMap((group) => group.apps).find((app) => app.id === "dayspan");
+    assert.ok(dayspan?.uses.includes("aide_garbage_collection"));
+  });
+
   it("一覧のページ内リンク先（id）が重ならない", () => {
     const ids = [
       ...CALLERS.map((caller) => `from-${caller.id}`),
