@@ -21,6 +21,7 @@ describe("aide_update_event の宣言", () => {
 describe("aide_update_event ハンドラ", () => {
   beforeEach(() => {
     delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
   });
 
   it("dryRun で日またぎ変更の正規化後の内容を返し、DaySpanへは送らない", async () => {

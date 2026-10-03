@@ -46,6 +46,7 @@ describe("aide_create_event の宣言", () => {
 describe("aide_create_event ハンドラ", () => {
   beforeEach(() => {
     delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
   });
 
   it("AIDE_DAYSPAN_WRITE_TOKEN が無ければ未設定として返し、DaySpanへは送らない", async () => {

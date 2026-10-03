@@ -3,15 +3,19 @@ import { afterEach, describe, it } from "node:test";
 
 import { resetSharedTokenCacheForTest } from "../issue-deck/shared-tokens.ts";
 import {
+  createDaySpanEvent,
+  deleteDaySpanEvent,
   normalizeCreateEventInput,
   normalizeDeleteEventInput,
   normalizeUpdateEventInput,
   readDaySpanWriteConfig,
+  updateDaySpanEvent,
 } from "./write.ts";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
+  delete process.env["AIDE_DAYSPAN_TARGET_EMAIL"];
   globalThis.fetch = originalFetch;
   resetSharedTokenCacheForTest();
 });
@@ -103,13 +107,29 @@ describe("readDaySpanWriteConfig", () => {
     }
   });
 
+  it("対象メールが無ければ null（＝互換分岐を使わない）", async () => {
+    const original = process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "secret";
+    try {
+      assert.equal(await readDaySpanWriteConfig(), null);
+    } finally {
+      if (original === undefined) delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+      else process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = original;
+    }
+  });
+
   it("トークンがあれば既定のURLを補う", async () => {
     const originalToken = process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
     const originalUrl = process.env["AIDE_DAYSPAN_URL"];
     process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "secret";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
     delete process.env["AIDE_DAYSPAN_URL"];
     try {
-      assert.deepEqual(await readDaySpanWriteConfig(), { baseUrl: "http://127.0.0.1:3113", token: "secret" });
+      assert.deepEqual(await readDaySpanWriteConfig(), {
+        baseUrl: "http://127.0.0.1:3113",
+        token: "secret",
+        targetEmail: "me@example.com",
+      });
     } finally {
       if (originalToken === undefined) delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
       else process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = originalToken;
@@ -122,12 +142,17 @@ describe("readDaySpanWriteConfig", () => {
     const originalDeckUrl = process.env["AIDE_ISSUE_DECK_URL"];
     const originalSecret = process.env["SHARED_TOKEN_API_SECRET"];
     process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "env-token";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
     process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
     process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ name: "DAYSPAN_INTERNAL_EVENTS_API_KEY", value: "shared-token" }), { status: 200 })) as typeof fetch;
     try {
-      assert.deepEqual(await readDaySpanWriteConfig(), { baseUrl: "http://127.0.0.1:3113", token: "shared-token" });
+      assert.deepEqual(await readDaySpanWriteConfig(), {
+        baseUrl: "http://127.0.0.1:3113",
+        token: "shared-token",
+        targetEmail: "me@example.com",
+      });
     } finally {
       if (originalToken === undefined) delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
       else process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = originalToken;
@@ -135,6 +160,28 @@ describe("readDaySpanWriteConfig", () => {
       else process.env["AIDE_ISSUE_DECK_URL"] = originalDeckUrl;
       if (originalSecret === undefined) delete process.env["SHARED_TOKEN_API_SECRET"];
       else process.env["SHARED_TOKEN_API_SECRET"] = originalSecret;
+    }
+  });
+});
+
+describe("DaySpanへの書き込み", () => {
+  it("作成・更新・削除のすべてで対象メールを送る", async () => {
+    const sentHeaders: Headers[] = [];
+    globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+      sentHeaders.push(new Headers(init?.headers));
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      return new Response(JSON.stringify({ id: "abc123" }), { status: 200 });
+    }) as typeof fetch;
+
+    const config = { baseUrl: "https://dayspan.example.test", token: "token", targetEmail: "me@example.com" };
+    await createDaySpanEvent(config, { title: "歯医者", date: "2026-09-10" });
+    await updateDaySpanEvent(config, { eventId: "abc123", calendarId: "primary", title: "歯医者" });
+    await deleteDaySpanEvent(config, { eventId: "abc123", calendarId: "primary", title: "歯医者" });
+
+    assert.equal(sentHeaders.length, 3);
+    for (const headers of sentHeaders) {
+      assert.equal(headers.get("authorization"), "Bearer token");
+      assert.equal(headers.get("x-target-email"), "me@example.com");
     }
   });
 });
