@@ -212,11 +212,36 @@ export async function handleRegister(req: IncomingMessage, res: ServerResponse):
 // ---- 認可エンドポイント ----
 
 /**
+ * 戻り先として警告なしで見せるホスト。動的登録は未認証で `client_name` も自己申告のため、
+ * 「Claude」を名乗って自分の `redirect_uri` を登録し、認可コードを受け取る手口を防ぐには、
+ * 利用者が戻り先を見て気づけることが要る。ここに無いホストは警告を出す（拒否はしない）。
+ */
+const KNOWN_REDIRECT_HOSTS = ["claude.ai", "claude.com", "chatgpt.com", "openai.com"];
+
+/** 戻り先の表示用の要約。ホスト（スキームのみのURIはスキーム）と、既知のホストかどうか。 */
+export function describeRedirect(redirectUri: string): { label: string; known: boolean } {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return { label: redirectUri, known: false };
+  }
+  if (parsed.protocol !== "https:") return { label: `${parsed.protocol}//${parsed.host}`, known: false };
+  const host = parsed.hostname;
+  const known = KNOWN_REDIRECT_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  return { label: parsed.host, known };
+}
+
+/**
  * 認可画面。見た目は他のページと共通の部品（`src/web/layout.ts`）に載せている。
  * **`clientName` は登録時にクライアントが名乗った値**なので、必ずエスケープして出す。
  */
-const LOGIN_PAGE = (params: string, clientName: string, error: string): string =>
-  renderPage({
+const LOGIN_PAGE = (params: string, clientName: string, redirectUri: string, error: string): string => {
+  const redirect = describeRedirect(redirectUri);
+  const warning = redirect.known
+    ? ""
+    : `<p class="err">この接続先は見覚えのあるものではありません。心当たりが無い場合は許可しないでください。</p>`;
+  return renderPage({
     title: "AIDE への接続を許可",
     centered: true,
     // 接続を許可するだけの画面をホーム画面へ追加させない（マニフェストは機能一覧側だけ）。
@@ -225,11 +250,14 @@ const LOGIN_PAGE = (params: string, clientName: string, error: string): string =
 <span class="brand">AIDE</span>
 <h1>接続を許可する</h1>
 <p>${escapeHtml(clientName)} が AIDE のデータへのアクセスを求めています。許可する場合はパスワードを入力してください。</p>
+<p>許可後の戻り先: <strong>${escapeHtml(redirect.label)}</strong></p>
+${warning}
 <label>パスワード<input type="password" name="password" autofocus required autocomplete="current-password"></label>
 ${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
 <button type="submit">許可する</button>
 </form>`,
   });
+};
 
 export async function handleAuthorize(
   req: IncomingMessage,
@@ -262,7 +290,7 @@ export async function handleAuthorize(
   if (req.method === "GET") {
     res
       .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, ""));
+      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, redirectUri, ""));
     return;
   }
 
@@ -275,6 +303,7 @@ export async function handleAuthorize(
         LOGIN_PAGE(
           url.searchParams.toString(),
           client.clientName,
+          redirectUri,
           `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に再試行してください。`,
         ),
       );
@@ -290,7 +319,7 @@ export async function handleAuthorize(
     await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
     res
       .writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, "パスワードが違います"));
+      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, redirectUri, "パスワードが違います"));
     return;
   }
   recordSuccess(key);

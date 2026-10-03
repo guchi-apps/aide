@@ -130,3 +130,32 @@ describe("OAuth状態の保存", () => {
     assert.ok(await store.findToken("access-1"));
   });
 });
+
+describe("使われていないクライアントの掃除（#539）", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const client = (id: string, ageMs: number) => ({
+    clientId: id,
+    clientName: id,
+    redirectUris: ["https://example.com/cb"],
+    createdAt: new Date(Date.now() - ageMs).toISOString(),
+  });
+
+  beforeEach(async () => {
+    await rm(statePath, { force: true });
+    store.resetCache();
+  });
+
+  it("トークンの無い古いクライアントは保存のときに落ち、新しいもの・使用中のものは残る", async () => {
+    // 保存のたびに掃除が走るので、使用中にするトークンを先に入れておく。
+    await store.addToken({ ...token(0), clientId: "old-in-use" });
+    await store.addClient(client("old-unused", store.UNUSED_CLIENT_TTL_MS + DAY));
+    await store.addClient(client("old-in-use", store.UNUSED_CLIENT_TTL_MS + DAY));
+    await store.addClient(client("fresh", DAY));
+
+    assert.equal(await store.findClient("old-unused"), null);
+    assert.ok(await store.findClient("old-in-use"));
+    assert.ok(await store.findClient("fresh"));
+    const saved = await readState();
+    assert.equal(saved.clients.length, 2);
+  });
+});

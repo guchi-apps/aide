@@ -96,17 +96,31 @@ function refreshExpiryOf(token: AccessToken): number {
 }
 
 /**
- * 期限切れの認可コード・トークンを落とす。保存のたびに呼ぶ。
+ * 登録だけして一度も使われなかったクライアントを残す期間。登録は未認証で1時間20件まで
+ * 受け付けるため、落とさないと状態ファイルが（保存のたびに全体を書き直すのに）膨らみ続ける。
+ * 認可の途中（数分）で消えない長さがあればよい。
+ */
+export const UNUSED_CLIENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 期限切れの認可コード・トークンと、使われていないクライアントを落とす。保存のたびに呼ぶ。
  * トークンのレコードはアクセストークンとリフレッシュトークンの両方を持つため、
  * 後者の期限（アクセストークンより長い）が切れるまで残す。
  */
 function prune(state: AuthState): AuthState {
   const now = Date.now();
-  return {
-    clients: state.clients,
-    codes: state.codes.filter((c) => c.expiresAt > now),
-    tokens: state.tokens.filter((t) => refreshExpiryOf(t) > now),
-  };
+  const codes = state.codes.filter((c) => c.expiresAt > now);
+  const tokens = state.tokens.filter((t) => refreshExpiryOf(t) > now);
+  // クライアントは、有効なトークンか認可コードを持つ間は残す。それが無くなり、
+  // 登録から一定期間が過ぎたものは落とす（リフレッシュトークンが切れた後に再接続するなら再登録になる）。
+  const inUse = new Set([...codes.map((c) => c.clientId), ...tokens.map((t) => t.clientId)]);
+  const clients = state.clients.filter((c) => {
+    if (inUse.has(c.clientId)) return true;
+    const created = Date.parse(c.createdAt);
+    // 読めない日付は判断できないので残す。
+    return Number.isNaN(created) || now - created < UNUSED_CLIENT_TTL_MS;
+  });
+  return { clients, codes, tokens };
 }
 
 export function addClient(client: OAuthClient): Promise<void> {

@@ -147,3 +147,19 @@ describe("起動時のログ", () => {
     }
   });
 });
+
+describe("認可画面の戻り先の表示（#539）", async () => {
+  const { describeRedirect } = await import("./oauth.ts");
+
+  it("既知のホストは警告しない", () => {
+    assert.deepEqual(describeRedirect("https://claude.ai/api/mcp/auth_callback"), { label: "claude.ai", known: true });
+    assert.equal(describeRedirect("https://www.chatgpt.com/cb").known, true);
+  });
+
+  it("名前が似ているだけのホストや未知のホスト・スキームは警告する", () => {
+    assert.equal(describeRedirect("https://claude.ai.evil.example/cb").known, false);
+    assert.equal(describeRedirect("https://evilclaude.ai/cb").known, false);
+    assert.equal(describeRedirect("http://claude.ai/cb").known, false);
+    assert.equal(describeRedirect("myapp://callback").known, false);
+  });
+});
