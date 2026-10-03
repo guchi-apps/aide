@@ -56,11 +56,15 @@ export interface ToolDefinition {
 }
 
 export interface Tool extends ToolDefinition {
+  /** このツールの実行に必要なOAuth scope。未指定の既存ツールは従来どおり。 */
+  requiredScopes?: readonly string[];
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult> | ToolResult;
 }
 
 export interface ToolContext {
   sessionId: string | null;
+  /** MCPアクセストークンが持つ権限。認証無効の開発時は全権限として扱う。 */
+  scopes?: readonly string[];
 }
 
 /** JSON-RPC の標準エラーコード。 */

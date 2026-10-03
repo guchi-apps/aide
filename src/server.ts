@@ -293,7 +293,8 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   if (path === "/mcp") {
     // プリフライトは認証前に通す。ここで401を返すとブラウザ経由の接続が始まらない。
     const startedAt = Date.now();
-    if (req.method !== "OPTIONS" && !(await requireBearer(req, res, baseUrl))) {
+    const access = req.method === "OPTIONS" ? "disabled" : await requireBearer(req, res, baseUrl);
+    if (access === null) {
       // **弾いたアクセスもここで記録する。** 401はこの行で終わり、transport まで届かない。
       // 記録しないと、Claudeのトークンが切れて呼び出しが全部落ちている状態と、
       // 誰も繋いでいない状態が動作状況（ops-dashboard）で区別できない（#116）。
@@ -303,7 +304,12 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       });
       return;
     }
-    await mcp.handle(req, res, baseUrl);
+    await mcp.handle(
+      req,
+      res,
+      baseUrl,
+      access === "disabled" ? ["tasks:read", "tasks:write"] : (access.scopes ?? []),
+    );
     return;
   }
 

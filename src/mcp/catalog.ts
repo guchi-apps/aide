@@ -20,6 +20,16 @@ import { printerStatusTool } from "./tools/printer.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
 import { airconStatusTool, roomSensorsTool } from "./tools/room.ts";
 import { scheduleTool } from "./tools/schedule.ts";
+import {
+  completeTaskTool,
+  createTaskTool,
+  getTaskTool,
+  listTasksTool,
+  reopenTaskTool,
+  skipTaskTool,
+  unskipTaskTool,
+  updateTaskTool,
+} from "./tools/tasks.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
 import { weatherTool } from "./tools/weather.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
@@ -66,6 +76,15 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(airconControlTool);
   registry.register(weatherTool);
   registry.register(scheduleTool);
+  // 正式なNotionタスクはYoteiFlowの専用APIだけを通す。読み取りと書き込みはOAuth scopeも別。
+  registry.register(listTasksTool);
+  registry.register(getTaskTool);
+  registry.register(createTaskTool);
+  registry.register(updateTaskTool);
+  registry.register(completeTaskTool);
+  registry.register(reopenTaskTool);
+  registry.register(skipTaskTool);
+  registry.register(unskipTaskTool);
   registry.register(garbageCollectionTool);
   // 予定の新規作成（#243）。読み取り（aide_schedule）と書き込みを分けている（Zaimと同じ理由）。
   registry.register(createEventTool);

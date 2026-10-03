@@ -35,6 +35,8 @@ describe("MCPツールの登録簿", () => {
       "aide_dev_status",
       "aide_repo_status",
       "aide_repo_labels",
+      "aide_tasks",
+      "aide_get_task",
     ]) {
       assert.ok(NAMES.includes(name), `登録されていない: ${name}`);
     }
@@ -81,6 +83,14 @@ describe("MCPツールの登録簿", () => {
       const properties = tool(name).inputSchema["properties"] as Record<string, unknown>;
       assert.ok(properties["dryRun"], `dryRun が無い: ${name}`);
       assert.match(tool(name).description, /dryRun/, `dryRun の案内が説明に無い: ${name}`);
+    }
+  });
+
+  it("正式タスクの読み取りと書き込みはOAuth scopeでも分離する", () => {
+    const registry = buildToolRegistry();
+    assert.deepEqual(registry.get("aide_tasks")?.requiredScopes, ["tasks:read"]);
+    for (const name of ["aide_create_task", "aide_update_task", "aide_complete_task", "aide_reopen_task", "aide_skip_task", "aide_unskip_task"]) {
+      assert.deepEqual(registry.get(name)?.requiredScopes, ["tasks:write"], name);
     }
   });
 
