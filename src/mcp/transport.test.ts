@@ -74,6 +74,13 @@ function transport(): InstanceType<typeof McpTransport> {
     handler: () => ({ content: [{ type: "text" as const, text: "ok" }] }),
   });
   registry.register({
+    name: "aide_write",
+    description: "認可が要る書き込みツール",
+    inputSchema: { type: "object" },
+    requiredScopes: ["tasks:write"],
+    handler: () => ({ content: [{ type: "text" as const, text: "written" }] }),
+  });
+  registry.register({
     name: "aide_boom",
     description: "失敗するツール",
     inputSchema: { type: "object" },
@@ -95,6 +102,29 @@ async function waitForEntries(count: number): Promise<McpAccessEntry[]> {
 }
 
 describe("MCPのやり取りの記録", () => {
+  it("read-onlyのscopeではタスク書き込みを実行しない", async () => {
+    const res = response();
+    await transport().handle(
+      request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "aide_write" } }),
+      res,
+      BASE_URL,
+      ["tasks:read"],
+    );
+    assert.match(res.body, /tasks:write/);
+    assert.match(res.body, /"isError":true/);
+  });
+
+  it("write scopeがあればタスク書き込みを実行する", async () => {
+    const res = response();
+    await transport().handle(
+      request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "aide_write" } }),
+      res,
+      BASE_URL,
+      ["tasks:write"],
+    );
+    assert.match(res.body, /written/);
+  });
+
   it("ツールの呼び出しを、ツール名つきで残す", async () => {
     await transport().handle(
       request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "aide_ok" } }),

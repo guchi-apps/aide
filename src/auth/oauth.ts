@@ -20,6 +20,17 @@ import {
 } from "./store.ts";
 import { escapeHtml, renderPage } from "../web/layout.ts";
 
+/** タスク専用の読み取り・書き込みを別承認単位にする。 */
+export const TASK_READ_SCOPE = "tasks:read";
+export const TASK_WRITE_SCOPE = "tasks:write";
+const SUPPORTED_SCOPES = new Set([TASK_READ_SCOPE, TASK_WRITE_SCOPE]);
+
+function parseScopes(value: string | null): string[] | null {
+  if (!value?.trim()) return [];
+  const scopes = [...new Set(value.trim().split(/\s+/))];
+  return scopes.every((scope) => SUPPORTED_SCOPES.has(scope)) ? scopes : null;
+}
+
 /**
  * MCP向けの OAuth 2.1 認可サーバー兼リソースサーバー。
  *
@@ -143,6 +154,7 @@ export function authorizationServerMetadata(baseUrl: string): unknown {
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
+    scopes_supported: [...SUPPORTED_SCOPES],
   };
 }
 
@@ -236,7 +248,7 @@ export function describeRedirect(redirectUri: string): { label: string; known: b
  * 認可画面。見た目は他のページと共通の部品（`src/web/layout.ts`）に載せている。
  * **`clientName` は登録時にクライアントが名乗った値**なので、必ずエスケープして出す。
  */
-const LOGIN_PAGE = (params: string, clientName: string, redirectUri: string, error: string): string => {
+const LOGIN_PAGE = (params: string, clientName: string, redirectUri: string, error: string, scopes: readonly string[] = []): string => {
   const redirect = describeRedirect(redirectUri);
   const warning = redirect.known
     ? ""
@@ -251,6 +263,7 @@ const LOGIN_PAGE = (params: string, clientName: string, redirectUri: string, err
 <h1>接続を許可する</h1>
 <p>${escapeHtml(clientName)} が AIDE のデータへのアクセスを求めています。許可する場合はパスワードを入力してください。</p>
 <p>許可後の戻り先: <strong>${escapeHtml(redirect.label)}</strong></p>
+${scopes.length ? `<p>要求された権限: <strong>${escapeHtml(scopes.join(" "))}</strong></p>` : ""}
 ${warning}
 <label>パスワード<input type="password" name="password" autofocus required autocomplete="current-password"></label>
 ${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
@@ -270,6 +283,7 @@ export async function handleAuthorize(
   const challenge = url.searchParams.get("code_challenge") ?? "";
   const method = url.searchParams.get("code_challenge_method") ?? "";
   const state = url.searchParams.get("state");
+  const scopes = parseScopes(url.searchParams.get("scope"));
 
   const client = await findClient(clientId);
   // redirect_uri が登録済みでない場合、そこへリダイレクトするとオープンリダイレクトになる。
@@ -286,11 +300,15 @@ export async function handleAuthorize(
       .end("PKCE (code_challenge_method=S256) が必要です");
     return;
   }
+  if (scopes === null) {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" }).end("未対応の scope が指定されました");
+    return;
+  }
 
   if (req.method === "GET") {
     res
       .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, redirectUri, ""));
+      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, redirectUri, "", scopes));
     return;
   }
 
@@ -304,7 +322,7 @@ export async function handleAuthorize(
           url.searchParams.toString(),
           client.clientName,
           redirectUri,
-          `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に再試行してください。`,
+          `試行回数が多すぎます。${Math.ceil(locked / 60)}分後に再試行してください。`, scopes,
         ),
       );
     return;
@@ -319,7 +337,7 @@ export async function handleAuthorize(
     await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS));
     res
       .writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
-      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, redirectUri, "パスワードが違います"));
+      .end(LOGIN_PAGE(url.searchParams.toString(), client.clientName, redirectUri, "パスワードが違います", scopes));
     return;
   }
   recordSuccess(key);
@@ -331,6 +349,7 @@ export async function handleAuthorize(
     redirectUri,
     codeChallenge: challenge,
     resource: url.searchParams.get("resource"),
+    scopes,
     expiresAt: Date.now() + AUTH_CODE_TTL_MS,
   });
 
@@ -354,7 +373,7 @@ export async function handleToken(req: IncomingMessage, res: ServerResponse): Pr
       json(res, 400, { error: "invalid_grant", error_description: "リフレッシュトークンが無効です" });
       return;
     }
-    await issueTokens(res, previous.clientId);
+    await issueTokens(res, previous.clientId, previous.scopes ?? []);
     return;
   }
 
@@ -377,10 +396,10 @@ export async function handleToken(req: IncomingMessage, res: ServerResponse): Pr
     return;
   }
 
-  await issueTokens(res, authCode.clientId);
+  await issueTokens(res, authCode.clientId, authCode.scopes ?? []);
 }
 
-async function issueTokens(res: ServerResponse, clientId: string): Promise<void> {
+async function issueTokens(res: ServerResponse, clientId: string, scopes: string[]): Promise<void> {
   const accessToken = token();
   const refreshToken = token();
   const now = Date.now();
@@ -390,6 +409,7 @@ async function issueTokens(res: ServerResponse, clientId: string): Promise<void>
     refreshToken,
     expiresAt: now + ACCESS_TOKEN_TTL_MS,
     refreshExpiresAt: now + REFRESH_TOKEN_TTL_MS,
+    scopes,
     createdAt: new Date(now).toISOString(),
   });
   json(res, 200, {
@@ -398,6 +418,7 @@ async function issueTokens(res: ServerResponse, clientId: string): Promise<void>
     expires_in: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
     refresh_token: refreshToken,
     refresh_expires_in: Math.floor(REFRESH_TOKEN_TTL_MS / 1000),
+    scope: scopes.join(" "),
   });
 }
 
@@ -411,12 +432,13 @@ export async function requireBearer(
   req: IncomingMessage,
   res: ServerResponse,
   baseUrl: string,
-): Promise<boolean> {
-  if (!loadAuthConfig().enabled) return true;
+): Promise<import("./types.ts").AccessToken | "disabled" | null> {
+  if (!loadAuthConfig().enabled) return "disabled";
 
   const header = String(req.headers["authorization"] ?? "");
   const presented = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (presented && (await findToken(presented))) return true;
+  const found = presented ? await findToken(presented) : null;
+  if (found) return found;
 
   res
     .writeHead(401, {
@@ -425,7 +447,7 @@ export async function requireBearer(
       "Access-Control-Allow-Origin": "*",
     })
     .end(JSON.stringify({ error: "invalid_token", error_description: "認証が必要です" }));
-  return false;
+  return null;
 }
 
 export { resolveBaseUrl };
