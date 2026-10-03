@@ -107,6 +107,7 @@ Deploy to Production 成功（main）
 - ビルド番号は `run_number * 100 + run_attempt`（`CURRENT_PROJECT_VERSION` は `xcodebuild` の引数で上書き）。表示バージョンは `package.json` と同期済みの `MARKETING_VERSION`
 - 署名は App Store Connect API キーによるクラウド署名。**アーカイブは署名せず（`CODE_SIGNING_ALLOWED=NO`）、`-exportArchive` の配布用署名だけ**を使う（#549）。**Web と iOS は別の run**で、iOS だけ失敗することがある
 - 判定だけ確かめる: Actions → iOS TestFlight → Run workflow で `dry_run` にチェック
+- 更新不要と判定された版を手動で配布する: 同じく Run workflow で `force` にチェック（issue-deck の「手動で配布」ボタンもこれを使う。`dry_run` が真ならビルドしない）
 - 失敗したら、run のサマリーで段階を確かめ、原因を直して「Re-run failed jobs」（または同じ `sha` で再実行）。印は配布し終えたときだけ進むので何度やり直してもよい
 
 | 症状 | 原因と対処 |
