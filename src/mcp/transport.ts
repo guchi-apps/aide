@@ -105,7 +105,7 @@ export class McpTransport {
    * `baseUrl` は `initialize` で名乗るアイコンのURLに使う（`src/auth/config.ts` の
    * `resolveBaseUrl()` が返すもの）。
    */
-  async handle(req: IncomingMessage, res: ServerResponse, baseUrl: string): Promise<void> {
+  async handle(req: IncomingMessage, res: ServerResponse, baseUrl: string, scopes: readonly string[] = []): Promise<void> {
     switch (req.method) {
       case "OPTIONS":
         res.writeHead(204, CORS_HEADERS).end();
@@ -120,7 +120,7 @@ export class McpTransport {
         return;
       }
       case "POST":
-        await this.#handlePost(req, res, baseUrl);
+        await this.#handlePost(req, res, baseUrl, scopes);
         return;
       default:
         res.writeHead(405, { Allow: "GET, POST, DELETE, OPTIONS", ...CORS_HEADERS }).end();
@@ -143,7 +143,7 @@ export class McpTransport {
     req.on("close", () => clearInterval(keepalive));
   }
 
-  async #handlePost(req: IncomingMessage, res: ServerResponse, baseUrl: string): Promise<void> {
+  async #handlePost(req: IncomingMessage, res: ServerResponse, baseUrl: string, scopes: readonly string[]): Promise<void> {
     let payload: unknown;
     try {
       const body = await readBody(req);
@@ -184,7 +184,7 @@ export class McpTransport {
     const responses: JsonRpcResponse[] = [];
     for (const message of messages) {
       const startedAt = Date.now();
-      const response = await this.#dispatch(message, ctx);
+      const response = await this.#dispatch(message, ctx, scopes);
       // 記録は待たない。ディスクへの書き込みでMCPの応答を遅らせる理由が無く、
       // 失敗しても応答は変わらない（src/mcp/access-log.ts）。
       void recordMcpAccess({
@@ -215,6 +215,7 @@ export class McpTransport {
   async #dispatch(
     message: JsonRpcRequest,
     ctx: RpcContext,
+    scopes: readonly string[],
   ): Promise<JsonRpcResponse | null> {
     const { method, params, id } = message;
     const isNotification = id === undefined || id === null;
@@ -285,10 +286,17 @@ export class McpTransport {
         }
         const tool = this.#registry.get(name);
         if (!tool) return fail(RpcError.InvalidParams, `未知のツール: ${name}`);
+        const missing = tool.requiredScopes?.filter((scope) => !scopes.includes(scope)) ?? [];
+        if (missing.length > 0) {
+          return ok({
+            content: [{ type: "text", text: `ツール ${name} には ${missing.join(" ")} の認可が必要です。再接続して明示的に許可してください。` }],
+            isError: true,
+          });
+        }
 
         const args = (params?.["arguments"] ?? {}) as Record<string, unknown>;
         try {
-          return ok(compactToolResult(await tool.handler(args, { sessionId: ctx.sessionId })));
+          return ok(compactToolResult(await tool.handler(args, { sessionId: ctx.sessionId, scopes })));
         } catch (cause) {
           // ツールの失敗はプロトコルエラーではなく、isError付きの結果として返す。
           // そうしないとClaudeが復旧できない。

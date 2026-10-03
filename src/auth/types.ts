@@ -14,6 +14,8 @@ export interface AuthCode {
   /** PKCE の code_challenge（S256のみ受け付ける）。 */
   codeChallenge: string;
   resource: string | null;
+  /** クライアントが明示的に要求し、利用者が認可したMCPの権限。 */
+  scopes?: string[];
   expiresAt: number;
 }
 
@@ -29,6 +31,8 @@ export interface AccessToken {
    * この項目が無い古いレコードは `expiresAt` と同じ扱い（`refreshExpiryOf`）。
    */
   refreshExpiresAt?: number;
+  /** リフレッシュ後も変えない認可済みの権限。古いトークンは空配列として扱う。 */
+  scopes?: string[];
   createdAt: string;
 }
 

@@ -1,6 +1,6 @@
 # MCP公開ツールの棚卸し（#489）
 
-`src/mcp/catalog.ts` の登録簿33本を、利用者・問い・読み書き・代替経路・大きさで整理した記録。
+`src/mcp/catalog.ts` の登録簿を、利用者・問い・読み書き・代替経路・大きさで整理した記録。
 **登録簿を変えたら、ここへも足す**（ツールの実在は `catalog.test.ts` / `map.test.ts` が止めるが、
 判断の根拠はここにしか残らない）。
 
@@ -46,6 +46,8 @@
 | `aide_aircon_control` | エアコン操作 | C B | **書** | myroom | myroom | 3.5KB | 小 | 維持。dryRun・突き合わせを保つ |
 | `aide_weather` | 今日・明日の天気 | C B | 読 | Open-Meteo | キャッシュ | 1.2KB | 未実測 | 維持 |
 | `aide_schedule` | 予定・空き時間 | C B | 読 | DaySpan API | DaySpan | 3.9KB | 1日約2.5KB（予定6件） | 維持。定義は大きいが選び分けの記述で、`days` 上限14で応答は有界。予定ごとの `url` は長い（約170B/件）が、開くための実用情報 |
+| `aide_tasks` / `aide_get_task` | 正式タスクの一覧・指定取得 | C | 読 | YoteiFlow API | YoteiFlow | 未測定 | 未測定 | `tasks:read`が必要。予定・移動を取得しない。ページングは`hasMore`と`nextCursor`で明示 |
+| `aide_create_task` / `aide_update_task` / 状態変更4本 | 正式タスクの作成・更新・状態変更 | C | **書** | YoteiFlow API | YoteiFlow | 未測定 | 未測定 | `tasks:write`が必要。冪等性キー・version・競合結果をYoteiFlow契約のまま中継 |
 | `aide_garbage_collection` | ゴミ収集日 | C B | 読 | myroom/DaySpan | DaySpan | 1.6KB | 未実測 | 維持 |
 | `aide_create_event` | 予定を作る | C B | **書** | DaySpan | DaySpan | 2.0KB | 小 | 維持 |
 | `aide_update_event` | 予定を変える | C B | **書** | DaySpan | DaySpan | 未実測 | 小 | 新設（#493）。dryRun・復唱確認を保つ |

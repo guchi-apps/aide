@@ -52,6 +52,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_update_event` / `aide_delete_event`（aide#493） | DaySpan経由での既存の予定の変更・削除 | 満たす（下記） | 同上（作成と共用） | **例外**（下記。削除は現在のタイトルの一致が要る） |
+| `aide_create_task` / `aide_update_task` / 状態変更4本（#562） | YoteiFlow経由での固定タスクDBの正式操作 | **狭い例外**（下記） | `AIDE_DAYSPAN_TASKS_WRITE_TOKEN` とOAuth `tasks:write`（読取り双方から分離） | **例外**（下記。YoteiFlowが競合・冪等性・繰り返しを処理） |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `aide_aircon_control`（aide#316） | myroom経由でのエアコンの電源・運転モード・設定温度・風量の変更（白くまくんへ運転指示を送る） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（照明の操作と共用。読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
@@ -187,6 +188,14 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 - どちらも**復唱して利用者の確認を取ってから呼ぶ**前提（説明文に書いてある）。aide-bot側は `MCP_PRESETS` の
   `writeTools` へ足して既定で止める
 - **リリース順**: DaySpan側の口（guchi-apps/dayspan#805）は `develop` のみで `main` には未反映。DaySpanを先に本番へ出す
+
+#### 固定タスクDBの正式操作は狭い例外（#562）
+
+`aide_tasks` / `aide_get_task` はYoteiFlowのタスク専用APIだけを読み、統合予定・移動・汎用Notion操作を行わない。作成・部分更新・完了・未完了・対応しない・解除は個別の書き込みツールで、**OAuthの`tasks:write`を明示的に認可した接続だけ**が実行できる。読取りは`tasks:read`で足り、read-onlyトークンは書き込みへ到達しない。
+
+書き込みはYoteiFlow側の`INTERNAL_TASKS_API_KEY`と同じ`AIDE_DAYSPAN_TASKS_WRITE_TOKEN`を使い、読取り用・予定書込み用の鍵と分離する。対象ユーザーはMCP引数ではなく`AIDE_DAYSPAN_TARGET_EMAIL`から`X-Target-Email`へ送る。作成・状態変更の`idempotencyKey`はタイムアウトや`result_unknown`後も変えずに再送し、更新・状態変更は読取り直後の`version`を必須にする。`409 conflict`では再読取して確認し、古い値を上書きしない。
+
+公式Notion MCPは任意ページ・DBを人が直接扱う用途、AIDEは固定タスクDBの安全な業務操作だけを扱う。YoteiFlowの`main`提供確認を先に行い、その後にAIDEをリリースし、MCPクライアントを再接続してscopeとツール定義を更新する。
 
 #### IssueDeckへの画像アップロードは3条件を満たす（#449）
 
@@ -1842,6 +1851,7 @@ Google Calendar API用のリフレッシュトークンをAES-256-GCMで暗号�
 |---|---|---|
 | `AIDE_DAYSPAN_URL` | `http://127.0.0.1:3113` | そのURLへ問い合わせる |
 | `AIDE_DAYSPAN_TOKEN` | 取得を試みず「未設定」を返す | `Authorization: Bearer` で認証する |
+| `AIDE_DAYSPAN_TASKS_WRITE_TOKEN` | 正式タスクの書込みを試みず「未設定」を返す | YoteiFlowのタスク書込み鍵で認証する |
 
 トークンは相手側の `INTERNAL_API_KEY` と**同じ値**で、**認証情報として扱う**。1Passwordでは値を
 複製せず提供側の `op://` をそのまま参照する（#217）。失敗の理由はHTTPステータスと例外の種別まで
