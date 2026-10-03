@@ -494,7 +494,14 @@ export async function handleStatusLogin(
     return;
   }
 
-  const form = await readForm(req);
+  let form: URLSearchParams;
+  try {
+    form = await readForm(req);
+  } catch {
+    // 上限超過。未処理の例外にすると、本文の無い500になる。
+    html(res, 413, renderLoginPage({ google: false, error: "送信されたデータが大きすぎます。" }));
+    return;
+  }
   const next = safeLanding(form.get("next"));
   if (!verifyPassword(form.get("password") ?? "", config.password!)) {
     recordFailure(key);

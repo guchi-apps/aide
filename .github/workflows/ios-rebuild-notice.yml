@@ -40,8 +40,8 @@ jobs:
               echo '### 📱 iOSアプリの入れ直しが必要です'
               echo
               echo '`ios/` に配布物（Swift・Widget・Xcode設定・アセット）の変更が含まれています。'
-              echo 'AIDE本体が main へデプロイされた後に、`main` から `ios/scripts/remote-install.sh` で入れ直してください。'
-              echo '手順は `ios/README.md` を参照。'
+              echo 'AIDE本体が main へデプロイされた後、TestFlight の内部グループへ自動配布されます（iPhone の TestFlight アプリで更新）。'
+              echo '開発ビルドは `main` から `ios/scripts/remote-install.sh` で入れ直せます。手順は `ios/README.md` を参照。'
               echo
             fi
             if [ -n "$shared" ]; then
