@@ -25,6 +25,10 @@ on:
         description: "判定だけ行い、ビルドしない"
         type: boolean
         default: false
+      force:
+        description: "iOS更新不要と判定された版でも配布する（手動配布。dry_run が真ならビルドしない）"
+        type: boolean
+        default: false
 
 concurrency:
   group: ios-testflight
@@ -69,6 +73,11 @@ jobs:
           RESULT=$(node ios/scripts/ios-changes.mjs --json)
           NEEDED=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).needed")
           REASON=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).reason")
+          FORCED=false
+          if [ "${{ inputs.force }}" = "true" ] && [ "$NEEDED" != "true" ]; then
+            # 手動配布（issue-deck の「手動で配布」）。判定結果にかかわらず配布へ進める
+            NEEDED=true; FORCED=true; REASON="手動配布（force）— 判定は更新不要でした（${REASON}）"
+          fi
           FILES=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.map(f => '- \`' + f + '\`').join('\n')")
           {
             echo "needed=$NEEDED"; echo "sha=$SHA"; echo "version=$VERSION"; echo "build=$BUILD"
@@ -80,6 +89,7 @@ jobs:
             if [ "$NEEDED" = "true" ]; then
               echo "- 結果: **iOS更新が必要** — ${REASON}"
               echo "- ビルド番号: ${BUILD}"
+              if [ "$FORCED" = "true" ]; then echo "- 手動配布（force）のため、判定を上書きして配布します"; fi
               # `[ ... ] && cmd` は偽のとき終了コード1になり、末尾に来るとステップごと失敗する。if で書く
               if [ -n "$FILES" ]; then printf '%s\n' "$FILES"; fi
               if [ "${{ inputs.dry_run }}" = "true" ]; then echo "- dry_run のためビルドしません"; fi
