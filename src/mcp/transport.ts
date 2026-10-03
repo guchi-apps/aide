@@ -51,6 +51,20 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
 };
 
+/**
+ * POSTボディの上限。Bearer認証の後ろだが、本番のヒープは96MBしかなく、上限なしで読むと
+ * 大きなPOST1本で使い切られる。JSON-RPCのツール呼び出しは数KBなので、1MiBあれば足りる。
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * 覚えておくセッションの上限。`initialize` のたびに増え、`DELETE` されない限り消えないため、
+ * ClaudeアプリやChatGPTが接続し直すたびに溜まる。超えたら古いものから忘れる。
+ * セッションに持たせているのは記録に出す名前だけなので、忘れても動作は変わらない
+ * （User-Agentでの代用に戻るだけ）。
+ */
+export const MAX_SESSIONS = 100;
+
 export interface McpServerInfo {
   name: string;
   version: string;
@@ -132,7 +146,16 @@ export class McpTransport {
   async #handlePost(req: IncomingMessage, res: ServerResponse, baseUrl: string): Promise<void> {
     let payload: unknown;
     try {
-      payload = JSON.parse(await readBody(req));
+      const body = await readBody(req);
+      if (body === null) {
+        this.#send(res, 413, { Connection: "close" }, {
+          jsonrpc: "2.0",
+          id: 0,
+          error: { code: RpcError.InvalidRequest, message: `リクエストが大きすぎます（上限 ${MAX_BODY_BYTES} バイト）` },
+        });
+        return;
+      }
+      payload = JSON.parse(body);
     } catch {
       this.#send(res, 400, {}, {
         jsonrpc: "2.0",
@@ -231,6 +254,10 @@ export class McpTransport {
           client: ctx.client,
           clientVersion: ctx.clientVersion,
         });
+        // Map は挿入順を保つので、先頭が最も古い。
+        while (this.#sessions.size > MAX_SESSIONS) {
+          this.#sessions.delete(this.#sessions.keys().next().value!);
+        }
         return ok({
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
@@ -324,8 +351,16 @@ function outcome(
   return { ok: true, detail: "" };
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+/** ボディを読む。上限を超えたら、そこで読むのをやめて `null` を返す。 */
+async function readBody(req: IncomingMessage): Promise<string | null> {
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null;
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
