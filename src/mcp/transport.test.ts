@@ -12,7 +12,7 @@ const dir = await mkdtemp(join(tmpdir(), "aide-mcp-transport-test-"));
 process.env["AIDE_MCP_ACCESS_LOG_PATH"] = join(dir, "mcp-access.json");
 const { readMcpAccessLog, resetMcpAccessLog } = await import("./access-log.ts");
 const { ToolRegistry } = await import("./registry.ts");
-const { McpTransport, compactToolResult } = await import("./transport.ts");
+const { McpTransport, MAX_BODY_BYTES, MAX_SESSIONS, compactToolResult } = await import("./transport.ts");
 
 after(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -242,5 +242,50 @@ describe("compactToolResult（#489）", () => {
     for (const text of ["ツール aide_x が失敗しました: boom", "{壊れた", "[未完"]) {
       assert.equal(compactToolResult({ content: [{ type: "text", text }] }).content[0]?.text, text);
     }
+  });
+});
+
+describe("ボディとセッションの上限（#539）", () => {
+  it("上限を超えるPOSTは413で断り、ツールを呼ばない", async () => {
+    const res = response();
+    await transport().handle(
+      request({ jsonrpc: "2.0", id: 1, method: "ping", params: { pad: "x".repeat(MAX_BODY_BYTES) } }),
+      res,
+      BASE_URL,
+    );
+    assert.equal(res.status, 413);
+  });
+
+  it("Content-Length を偽っても、読みながら数えて断る", async () => {
+    const res = response();
+    await transport().handle(
+      request({ jsonrpc: "2.0", id: 1, method: "ping", params: { pad: "x".repeat(MAX_BODY_BYTES) } }, { "content-length": "10" }),
+      res,
+      BASE_URL,
+    );
+    assert.equal(res.status, 413);
+  });
+
+  it("セッションは上限を超えたら古いものから忘れる", async () => {
+    const t = transport();
+    const issued: string[] = [];
+    for (let i = 0; i < MAX_SESSIONS + 1; i += 1) {
+      const res = response();
+      await t.handle(
+        request({ jsonrpc: "2.0", id: 1, method: "initialize", params: { clientInfo: { name: `c${i}` } } }),
+        res,
+        BASE_URL,
+      );
+      issued.push(res.headers["Mcp-Session-Id"]!);
+    }
+    // 最初のセッションは忘れられ、名前は User-Agent の代用に戻る。最後のものは覚えている。
+    resetMcpAccessLog();
+    for (const id of [issued[0]!, issued.at(-1)!]) {
+      await t.handle(request({ jsonrpc: "2.0", id: 2, method: "ping" }, { "mcp-session-id": id, "user-agent": "UA-fallback" }), response(), BASE_URL);
+    }
+    const entries = await waitForEntries(2);
+    const clients = entries.map((e) => e.client).sort();
+    assert.ok(clients.includes(`c${MAX_SESSIONS}`), JSON.stringify(clients));
+    assert.ok(!clients.includes("c0"), JSON.stringify(clients));
   });
 });
