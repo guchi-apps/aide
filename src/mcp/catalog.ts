@@ -7,6 +7,7 @@ import { updateEventTool } from "./tools/update-event.ts";
 import { devStatusTool, repoLabelsTool, repoStatusTool } from "./tools/dev.ts";
 import { garbageCollectionTool } from "./tools/garbage.ts";
 import { issueDeckUploadImageTool } from "./tools/issue-deck.ts";
+import { issueDeckItemsTool, issueDeckSummaryTool } from "./tools/issue-deck-summary.ts";
 import { createIssueTool } from "./tools/issue.ts";
 import { balancesTool, fixedCostsTool } from "./tools/money.ts";
 import {
@@ -97,6 +98,9 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(createIssueTool);
   // IssueDeckへの画像アップロード（#449）。起票（aide_create_issue）とは別ツールにしている。
   registry.register(issueDeckUploadImageTool);
+  // IssueDeckの進捗・要対応・予約の読み取り（#569）。GitHub由来の aide_dev_status とは別。集計はIssueDeck側。
+  registry.register(issueDeckSummaryTool);
+  registry.register(issueDeckItemsTool);
   registry.register(claudeSessionsTool);
   // Zaimへの支出登録（#135）。**読み取り（候補の一覧）と書き込み（登録）を分けている。**
   // 1本に畳むと、Claude Code側で「常に許可」にしたときに書き込みまで素通しになる。

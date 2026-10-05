@@ -521,6 +521,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_repo_labels` | リポジトリ1件に定義されているラベル（名前・色・説明）。`aide_create_issue` に渡す候補 |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない。`dryRun` で起票せず確認できる） |
 | `issue_deck_upload_image` | 画像を1枚 IssueDeck の画像置き場へアップロードし、Issue本文へ貼れるURLを返す。**書き込みツール**（作成のみ。base64で渡す。png/jpeg/gif/webp/svg・10MBまで。`dryRun` で送らず検査だけできる。`AIDE_ISSUE_DECK_URL` と `AIDE_ISSUE_DECK_UPLOAD_TOKEN` が要る） |
+| `aide_issue_deck_summary` | IssueDeckの全体サマリー（未着手・実行中・予約待ち・確認待ち・手作業待ち・問題・PR・本番反映・指定期間の完了）を、全体合計・リポジトリ別内訳・要対応の上位10件で返す。**読み取り専用**。集計はIssueDeck側（`/api/integrations/aide/development-summary`）で、AIDEは再集計せず中継する。GitHub由来の `aide_dev_status` とは別（#569） |
+| `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`・`repo`・`cursor`・`limit` でページングする。読み取り専用（#569） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 | `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
 | `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる） |
