@@ -9,6 +9,7 @@ import {
   isAllowedEmail,
   loadSupabaseAuthConfig,
   parseAllowedEmails,
+  revokeSession,
   type SupabaseAuthConfig,
 } from "./supabase.ts";
 
@@ -175,5 +176,72 @@ describe("認可コードの交換", () => {
     });
     t.after(() => fetched.mock.restore());
     await assert.rejects(exchangeCode(CONFIG, { code: "c", verifier: "v" }), /確認されていない/);
+  });
+});
+
+describe("Supabaseセッションの失効", () => {
+  function jwt(payload: unknown): string {
+    const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+    return `${part({ alg: "HS256" })}.${part(payload)}.sig`;
+  }
+  const WITH_SESSION = jwt({ session_id: "s1" });
+
+  it("scope=local とこのトークンのBearerだけで呼ぶ", async (t) => {
+    const fetched = mock.method(globalThis, "fetch", async () => new Response(null, { status: 204 }));
+    t.after(() => fetched.mock.restore());
+
+    await revokeSession(CONFIG, WITH_SESSION);
+
+    assert.equal(fetched.mock.calls.length, 1);
+    const [endpoint, init] = fetched.mock.calls[0]!.arguments as [URL, RequestInit];
+    assert.equal(endpoint.pathname, "/auth/v1/logout");
+    assert.equal(endpoint.searchParams.get("scope"), "local");
+    assert.deepEqual([...endpoint.searchParams.keys()], ["scope"]);
+    assert.equal(init.method, "POST");
+    assert.equal((init.headers as Record<string, string>)["Authorization"], `Bearer ${WITH_SESSION}`);
+  });
+
+  it("セッションを特定できないトークンでは呼ばない（globalへ落とさない）", async (t) => {
+    const fetched = mock.method(globalThis, "fetch", async () => new Response(null, { status: 204 }));
+    const warned = mock.method(console, "warn", () => {});
+    t.after(() => {
+      fetched.mock.restore();
+      warned.mock.restore();
+    });
+
+    for (const token of ["", "opaque", jwt({}), jwt({ session_id: "" }), "a.!!!.c"]) {
+      await revokeSession(CONFIG, token);
+    }
+    assert.equal(fetched.mock.calls.length, 0);
+  });
+
+  it("HTTP非成功はログに残し、トークンは出さない", async (t) => {
+    const fetched = mock.method(globalThis, "fetch", async () => new Response("{}", { status: 403 }));
+    const warned = mock.method(console, "warn", () => {});
+    t.after(() => {
+      fetched.mock.restore();
+      warned.mock.restore();
+    });
+
+    await revokeSession(CONFIG, WITH_SESSION);
+    const logged = warned.mock.calls.map((c) => c.arguments.join(" ")).join("\n");
+    assert.match(logged, /HTTP 403/);
+    assert.ok(!logged.includes(WITH_SESSION));
+  });
+
+  it("通信失敗でも例外にせず、再試行でglobalを呼ばない", async (t) => {
+    const fetched = mock.method(globalThis, "fetch", async () => {
+      throw new TypeError("fetch failed " + WITH_SESSION);
+    });
+    const warned = mock.method(console, "warn", () => {});
+    t.after(() => {
+      fetched.mock.restore();
+      warned.mock.restore();
+    });
+
+    await revokeSession(CONFIG, WITH_SESSION);
+    assert.equal(fetched.mock.calls.length, 1);
+    const logged = warned.mock.calls.map((c) => c.arguments.join(" ")).join("\n");
+    assert.ok(!logged.includes(WITH_SESSION));
   });
 });
