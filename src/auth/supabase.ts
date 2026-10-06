@@ -194,19 +194,45 @@ export async function exchangeCode(
   return { email, accessToken: typeof body.access_token === "string" ? body.access_token : "" };
 }
 
+/** アクセストークン（JWT）が現在のセッションを指しているか。署名は検証しない（失効の宛先判定だけに使う）。 */
+function hasSessionId(accessToken: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString("utf8"));
+    return typeof payload?.session_id === "string" && payload.session_id !== "";
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Supabase側のセッションを失効させる。**失敗しても呼び出し側は続行してよい。**
- * こちらの画面の可否は自前のCookieだけで決まるため、失効漏れが権限になることはない。
+ * この認可コードの交換で作ったSupabase側のセッションだけを失効させる。
+ * **失敗しても呼び出し側は続行してよい。** こちらの画面の可否は自前のCookieだけで決まるため、
+ * 失効漏れが権限になることはない。
+ *
+ * **`scope=local` を必ず付ける。** Supabaseの `/auth/v1/logout` はscope省略時に `global`
+ * （同じユーザーの全セッション失効）になり、共有認証を使う他のアプリのrefreshが失敗する。
+ * トークンが現在のセッションを特定できない（`session_id` が無い）ときは、呼ばずに諦める。
+ * 呼べば不正応答を握り潰すだけで、失効の宛先を取り違えるリスクしか残らない。
+ * ログにはトークンも個人情報も出さず、HTTPステータスだけを残す。
  */
 export async function revokeSession(config: SupabaseAuthConfig, accessToken: string): Promise<void> {
   if (!accessToken) return;
+  if (!hasSessionId(accessToken)) {
+    console.warn("[status] Supabaseのセッションを特定できないため失効を見送った");
+    return;
+  }
+  const endpoint = new URL("/auth/v1/logout", config.url);
+  endpoint.searchParams.set("scope", "local");
   try {
-    await fetch(new URL("/auth/v1/logout", config.url), {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { apikey: config.publishableKey, Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
+    if (!response.ok) {
+      console.warn(`[status] Supabaseのセッション失効が成功しなかった (HTTP ${response.status})`);
+    }
   } catch (cause) {
-    console.warn("[status] Supabaseのセッション失効に失敗", cause);
+    console.warn("[status] Supabaseのセッション失効に失敗", cause instanceof Error ? cause.name : "unknown");
   }
 }
