@@ -133,6 +133,42 @@ describe("normalizeWebPaymentInput", () => {
   });
 });
 
+describe("normalizeWebPaymentInput（複数商品 #614）", () => {
+  const item = (name: string, amount: number) => ({ name, amount, categoryName: "食費", genreName: "食料品" });
+  const RECEIPT = {
+    ...VALID,
+    amount: 1543,
+    items: [item("牛乳", 200), item("パン", 843), item("送料", 500)],
+  };
+
+  it("全行の合計が取引合計と一致すれば通し、先頭行を従来の項目へ写す", () => {
+    const result = normalizeWebPaymentInput(RECEIPT);
+    assert.ok("input" in result);
+    assert.equal(result.input.items?.length, 3);
+    assert.equal(result.input.name, "牛乳");
+  });
+
+  it("合計不一致は送信前に理由付きで止める（独立登録へ落とさない）", () => {
+    const result = normalizeWebPaymentInput({ ...RECEIPT, amount: 1542 });
+    assert.ok("error" in result);
+    assert.match(result.error, /合計 1543 円が amount/);
+  });
+
+  it("負の金額（値引き行）・1行だけ・行の不備は断る", () => {
+    const discount = normalizeWebPaymentInput({ ...RECEIPT, amount: 1343, items: [item("牛乳", 1543), item("値引", -200)] });
+    assert.ok("error" in discount);
+    assert.match(discount.error, /値引き.*未対応/);
+    assert.ok("error" in normalizeWebPaymentInput({ ...RECEIPT, items: [item("牛乳", 1543)] }));
+    assert.ok("error" in normalizeWebPaymentInput({ ...RECEIPT, items: [item("牛乳", 1000), { name: "", amount: 543 }] }));
+  });
+
+  it("items を渡さない従来の単一商品は今までどおり通る", () => {
+    const result = normalizeWebPaymentInput(VALID);
+    assert.ok("input" in result);
+    assert.equal(result.input.items, undefined);
+  });
+});
+
 describe("classifyWebFailure", () => {
   it("送信の前に止まった失敗は rejected（Zaimには何も無い）", () => {
     const result = classifyWebFailure("Error: ZAIM_RECEIPT_FORM:金額を確定できませんでした");
@@ -274,5 +310,64 @@ describe("createZaimWebPayment", () => {
 
     const record = (await readRecords()).find((item) => item.requestId === "broken-json");
     assert.equal(record?.state, "sending");
+  });
+});
+
+describe("createZaimWebPayment（複数商品 #614）", () => {
+  const item = (name: string, amount: number) => ({ name, amount, categoryName: "食費", genreName: "食料品" });
+  const RECEIPT = { ...VALID, amount: 700, items: [item("牛乳", 200), item("パン", 500)] };
+  const scriptOut = (verified: unknown) =>
+    JSON.stringify({
+      submitted: true,
+      url: "u",
+      filled: {
+        name: "牛乳",
+        genre: "食料品",
+        amount: 700,
+        comment: "#r",
+        place: VALID.place,
+        date: "2026年8月29日(土)",
+        accountName: "カード",
+        items: [
+          { name: "牛乳", genre: "食料品", amount: 200 },
+          { name: "パン", genre: "食料品", amount: 500 },
+        ],
+      },
+      verified,
+    });
+
+  it("読み返しで親子構造を確認できたときだけ成功にする", async () => {
+    const deps = stubDeps([scriptOut({ moneyId: 9, lineCount: 2 })]);
+    const outcome = await createZaimWebPayment({ ...RECEIPT, requestId: "rcpt-ok" }, deps);
+    assert.ok(outcome.ok);
+    assert.equal(outcome.registered?.items?.length, 2);
+    assert.equal(outcome.registered?.verified?.lineCount, 2);
+    assert.equal((await readRecords()).find((r) => r.requestId === "rcpt-ok")?.state, "done");
+  });
+
+  it("読み返し結果が無いなら成功にせず、記録を残して再送を止める", async () => {
+    const deps = stubDeps([scriptOut(null)]);
+    const outcome = await createZaimWebPayment({ ...RECEIPT, requestId: "rcpt-unverified" }, deps);
+    assert.ok(!outcome.ok && outcome.kind === "failed");
+    assert.equal((await readRecords()).find((r) => r.requestId === "rcpt-unverified")?.state, "sending");
+
+    const retry = stubDeps([]);
+    const again = await createZaimWebPayment({ ...RECEIPT, requestId: "rcpt-unverified" }, retry);
+    assert.deepEqual(retry.calls, []);
+    assert.ok(!again.ok && again.kind === "conflict");
+  });
+
+  it("送信後の読み返しで食い違った（部分登録など）は failed で、再送しない", async () => {
+    const deps = stubDeps([new Error("ZAIM_RECEIPT_SUBMITTED:読み返した内訳が送った内容と一致しません")]);
+    const outcome = await createZaimWebPayment({ ...RECEIPT, requestId: "rcpt-partial" }, deps);
+    assert.ok(!outcome.ok && outcome.kind === "failed");
+    assert.equal((await readRecords()).find((r) => r.requestId === "rcpt-partial")?.state, "sending");
+  });
+
+  it("行数が画面に収まらないなど送信前の失敗は rejected で記録を消す", async () => {
+    const deps = stubDeps([new Error("ZAIM_RECEIPT_FORM:品目の行は 3 行で、7 行ぶんの内訳を入れられません")]);
+    const outcome = await createZaimWebPayment({ ...RECEIPT, requestId: "rcpt-rows" }, deps);
+    assert.ok(!outcome.ok && outcome.kind === "rejected");
+    assert.equal((await readRecords()).some((r) => r.requestId === "rcpt-rows"), false);
   });
 });
