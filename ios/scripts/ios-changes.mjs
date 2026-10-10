@@ -8,7 +8,7 @@
 // 印は処理済み・内部グループへの割当てが済んだあとにだけ付けるので、途中で失敗した配布の
 // 変更も、次のリリースの判定に残る（リリースごとの差分ではなく、配布済みとの差分で見る）。
 //
-// 配布物に入るのは AIDEios/・AIDEiosWidget/・AIDEiosTests/・AIDEios.xcodeproj/・AIDEios-Info.plist だけ。README・scripts は
+// 配布物に入るのは AIDEios/・AIDEiosTests/・AIDEios.xcodeproj/・AIDEios-Info.plist だけ。README・scripts は
 // 入らないので除外し、pbxproj の版番号の行（MARKETING_VERSION・CURRENT_PROJECT_VERSION）だけの
 // 差分も数えない（リリースのバンプで毎回書き換わる）。
 // ios-rebuild-notice.yml も同じ判定を呼ぶ（食い違わせない）。
@@ -22,7 +22,6 @@ export const TAG_PREFIX = "ios-testflight/";
 // pathspec（git diff に渡す）。配布物側だけを含め、Markdown は外す。
 export const DISTRIBUTED_PATHSPEC = [
   "ios/AIDEios",
-  "ios/AIDEiosWidget",
   "ios/AIDEiosTests",
   "ios/AIDEios.xcodeproj",
   "ios/AIDEios-Info.plist",
@@ -87,7 +86,7 @@ export function decide({ cwd, base, head = "HEAD" }) {
   if (lines.length === 0) {
     return {
       needed: false,
-      reason: `${baseRef} 以降、配布物（Swift・Widget・Xcode設定・アセット）に変更なし`,
+      reason: `${baseRef} 以降、配布物（Swift・Xcode設定・アセット）に変更なし`,
       base: baseRef,
       changedFiles: [],
     };

@@ -29,17 +29,17 @@ jobs:
         id: build
         run: |
           base="origin/${{ github.base_ref }}"
-          # 判定は ios/scripts/ios-changes.mjs。配布物（AIDEios/・AIDEiosWidget/・xcodeproj・
+          # 判定は ios/scripts/ios-changes.mjs。配布物（AIDEios/・xcodeproj・
           # Info.plist）の変更だけを数え、README・scripts・版番号の行だけの差分は除く
           shell_changes=$(node ios/scripts/ios-changes.mjs --base "$base" --head HEAD --json \
             | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.length")
-          shared=$(git diff --name-only "$base"...HEAD -- src/web/app-auth.ts src/web/aasa.ts src/api/mobile.ts)
+          shared=$(git diff --name-only "$base"...HEAD -- src/web/app-auth.ts src/web/aasa.ts)
           {
             echo '<!-- ios-rebuild-notice -->'
             if [ "$shell_changes" -gt 0 ]; then
               echo '### 📱 iOSアプリの入れ直しが必要です'
               echo
-              echo '`ios/` に配布物（Swift・Widget・Xcode設定・アセット）の変更が含まれています。'
+              echo '`ios/` に配布物（Swift・Xcode設定・アセット）の変更が含まれています。'
               echo 'AIDE本体が main へデプロイされた後、TestFlight の内部グループへ自動配布されます（iPhone の TestFlight アプリで更新）。'
               echo '開発ビルドは `main` から `ios/scripts/remote-install.sh` で入れ直せます。手順は `ios/README.md` を参照。'
               echo

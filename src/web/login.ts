@@ -245,7 +245,6 @@ async function beginStatusAuth(
   url: URL,
   options: LoginOptions,
   appChallenge?: string,
-  appPurpose?: "mobile",
 ): Promise<void> {
   const config = options.supabase;
   if (!config) {
@@ -267,7 +266,7 @@ async function beginStatusAuth(
       Location: authorizeUrl(config, { redirectUri: redirect, challenge }),
       "Set-Cookie": handshakeCookie(
         await loadSessionKey(),
-        { state, verifier, next, ...(appChallenge ? { appChallenge } : {}), ...(appChallenge && appPurpose ? { appPurpose } : {}) },
+        { state, verifier, next, ...(appChallenge ? { appChallenge } : {}), },
         isSecure(req),
       ),
       "Cache-Control": "no-store",
@@ -311,10 +310,7 @@ export async function handleStatusAppAuthStart(
       .end("invalid request\n");
     return;
   }
-  // `scope=mobile` はネイティブ向けトークン用（`POST /api/mobile/token` で交換する）。
-  // それ以外の値は無視して従来の画面用に落とす。
-  const appPurpose = url.searchParams.get("scope") === "mobile" ? "mobile" : undefined;
-  await beginStatusAuth(req, res, url, options, appChallenge, appPurpose);
+  await beginStatusAuth(req, res, url, options, appChallenge);
 }
 
 /**
@@ -395,7 +391,6 @@ export async function handleStatusAuthCallback(
       email: user.email,
       next,
       challenge: handshake.appChallenge,
-      purpose: handshake.appPurpose ?? "web",
     });
     res
       .writeHead(303, {
