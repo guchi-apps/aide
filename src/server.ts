@@ -27,6 +27,7 @@ import { logRedirectCheck } from "./auth/redirect-check.ts";
 import { startAccessHeartbeat } from "./auth/access.ts";
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { recordMcpAuthFailure } from "./mcp/access-log.ts";
+import { readPackageVersion } from "./core/version.ts";
 import { McpTransport } from "./mcp/transport.ts";
 import { buildToolRegistry } from "./mcp/catalog.ts";
 import { handleAasa } from "./web/aasa.ts";
@@ -70,7 +71,7 @@ const statusApiOptions: StatusApiOptions = {
   registry,
 };
 
-const mcp = new McpTransport(registry, { name: "aide", version: "0.1.0" });
+const mcp = new McpTransport(registry, { name: "aide", version: readPackageVersion() });
 
 const server = createServer((req, res) => {
   void handle(req, res).catch((cause: unknown) => {
