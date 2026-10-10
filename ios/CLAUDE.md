@@ -8,7 +8,7 @@ AIDE（`https://aide.gucchii.com/map`）を表示する iOS アプリのラッ�
 
 ## 構成
 
-**拡張機能は持たない**（#587）。ショートカット／Siri（App Intents）・ホーム画面ウィジェット・プッシュ通知（APNs）は試験導入だけで実機では動いておらず、AIDE側のAPI（`/api/mobile/*`・`/api/room/summary`）ごと削除した。`AIDEios.entitlements`は`applinks:aide.gucchii.com`だけを持つ。**再導入するときは**、pbxprojの`CODE_SIGN_ENTITLEMENTS`・Capabilityの設定をMacのXcodeで行ってから実装する。
+**拡張機能は持たない**（#587）。ショートカット／Siri（App Intents）・ホーム画面ウィジェット・プッシュ通知（APNs）は試験導入だけのもので（Swiftはビルドされていたが、entitlementsが署名に未接続でプッシュ・App Group・ウィジェットは動いていなかった）、AIDE側のAPI（`/api/mobile/*`・`/api/room/summary`）ごと削除した。`AIDEios.entitlements`は`applinks:aide.gucchii.com`だけを持つ。**再導入するときは**、pbxprojの`CODE_SIGN_ENTITLEMENTS`・Capabilityの設定をMacのXcodeで行ってから実装する。
 
 - `README.md` — 人向けの Xcode 操作手順（セットアップ・入れ直し・実機確認）。手順を変えるときは CLAUDE.md の該当節と食い違わせない
 - `AIDEios/` — Swift ソース（`AIDEiosApp.swift`・`ContentView.swift`）とアセット
