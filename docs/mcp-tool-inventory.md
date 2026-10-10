@@ -59,6 +59,7 @@
 | `issue_deck_upload_image` | 画像の置き場へ | C B | **書** | IssueDeck API | IssueDeck | 1.4KB | 小 | 維持 |
 | `aide_issue_deck_summary` | IssueDeckの全体サマリー（進捗・要対応・予約・PR・本番反映） | C B | 読 | IssueDeck API（#569） | IssueDeck | 未実測 | 未実測 | 新設（#569）。集計はIssueDeck側で、AIDEは中継のみ。`aide_dev_status`（GitHub由来）とは別 |
 | `aide_issue_deck_items` | IssueDeckのカテゴリ別詳細一覧 | C B | 読 | IssueDeck API（#569） | IssueDeck | 未実測 | 未実測 | 新設（#569）。cursor/limitでページング |
+| `aide_vps_memory` | 本番issue-deckのVPSメモリ計測結果（最新・区間・履歴） | C B | 読 | IssueDeck API（#608） | IssueDeck | 未実測 | 未実測 | 新設（#608）。計測・集計はIssueDeck側で、AIDEは中継のみ。取得不可・経過秒・区間は加工しない |
 | `aide_claude_sessions` | サブPCのセッション | C B | 読 | ops-dashboard | サブPCのキャッシュ | 2.0KB | 約1.3KB（2件） | 維持 |
 | `aide_zaim_master` | 登録に渡すID候補 | C B | 読 | なし | Zaim（24hキャッシュ） | 0.9KB | 約9KB | 維持。ジャンル約115件はカテゴリと組で選ぶ必要があり、削ると登録が壊れる |
 | `aide_zaim_payment` | 支出を登録 | C B | **書** | Zaim | Zaim | 3.4KB | 小 | 維持。取り消せないので分離・aide-bot名指しを保つ |
