@@ -205,3 +205,64 @@ export function readMenuItems(items) {
         }
     })
 }
+
+/**
+ * 送信後の読み返しで、登録した取引を一覧JSON（`/money/details`）から探す（#614）。
+ *
+ * 一致の条件は日付・合計・店舗・出金元・子明細の件数と、**親の行のメモ末尾の冪等キー**。
+ * 冪等キーを条件に入れるのは、同じ日に同じ店で同額の別取引があっても取り違えないため。
+ * 末尾一致かつ直前が先頭か空白のときだけ採る（`#a:1` が `#a:12` に当たらないように）。
+ *
+ * @param items 一覧JSONの `items`
+ * @param expected `{ date, total, place, accountName, requestId, lineCount }`
+ * @returns 条件に合った一覧の項目すべて（呼び出し側が「ちょうど1件」を確かめる）
+ */
+export function findRegisteredReceipts(items, expected) {
+    const marker = `#${expected.requestId}`
+    return items.filter((item) => {
+        if (String(item?.parsed_date ?? "").slice(0, 10) !== expected.date) return false
+        if (Number(item.amount) !== expected.total) return false
+        if (String(item.place ?? "").trim() !== expected.place) return false
+        if (expected.accountName && String(item.from_account_name ?? "").trim() !== expected.accountName) return false
+        const children = Array.isArray(item.child_ids) ? item.child_ids.length : 0
+        if (children !== expected.lineCount - 1) return false
+        const comment = String(item.comment ?? "").trim()
+        return comment === marker || comment.endsWith(` ${marker}`)
+    })
+}
+
+/**
+ * 読み返した内訳（`buildReceiptDetail` の結果）が、送った行と過不足なく一致するかを見る。
+ * 並びはZaim側で変わりうるので、品名・金額（・読めたジャンル）の組で突き合わせる。
+ *
+ * @param detail `{ status, items }`
+ * @param expectedItems `{ name, amount, genreName }[]`
+ * @returns 一致なら null、食い違いの理由（日本語）なら文字列
+ */
+export function diffReceiptItems(detail, expectedItems) {
+    if (detail?.status !== "complete") {
+        return `内訳を完全には読み返せませんでした（${detail?.status ?? "不明"}${detail?.reason ? `: ${detail.reason}` : ""}）`
+    }
+    const key = (name, amount) => `${name}\u0000${amount}`
+    const remaining = new Map()
+    for (const item of detail.items) {
+        const k = key(item.name, item.amount)
+        remaining.set(k, [...(remaining.get(k) ?? []), item])
+    }
+    const problems = []
+    for (const want of expectedItems) {
+        const k = key(want.name, want.amount)
+        const list = remaining.get(k) ?? []
+        const found = list.shift()
+        if (!found) {
+            problems.push(`「${want.name}」${want.amount}円の行がありません`)
+            continue
+        }
+        if (found.genre && found.genre !== want.genreName) {
+            problems.push(`「${want.name}」のジャンルが「${found.genre}」です（期待は「${want.genreName}」）`)
+        }
+    }
+    const extra = [...remaining.values()].reduce((n, list) => n + list.length, 0)
+    if (extra > 0) problems.push(`送っていない行が ${extra} 行あります`)
+    return problems.length > 0 ? problems.join("・") : null
+}

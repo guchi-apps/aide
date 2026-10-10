@@ -5,6 +5,8 @@ import {
   amountDigits,
   composeComment,
   dateMatches,
+  diffReceiptItems,
+  findRegisteredReceipts,
   monthsBetween,
   parseAmountValue,
   parseMonthHeader,
@@ -222,5 +224,77 @@ describe("pickFilledRowIndex", () => {
 
   it("複数品目の明細はどの行か決められない", () => {
     assert.equal(pickFilledRowIndex([500, 1380, null]), -1);
+  });
+});
+
+describe("findRegisteredReceipts（#614）", () => {
+  const base = {
+    id: 1,
+    parsed_date: "2026-10-10T00:00:00+09:00",
+    amount: 1543,
+    place: "セブン",
+    from_account_name: "反映待ち",
+    child_ids: [2, 3, 4, 5, 6, 7],
+    comment: "レシート #am:r:1",
+  };
+  const expected = {
+    date: "2026-10-10",
+    total: 1543,
+    place: "セブン",
+    accountName: "反映待ち",
+    requestId: "am:r:1",
+    lineCount: 7,
+  };
+
+  it("日付・合計・店舗・出金元・子明細数・冪等キーが揃う1件だけを返す", () => {
+    assert.equal(findRegisteredReceipts([base], expected).length, 1);
+  });
+
+  it("子明細が無い（独立取引になった）ものは候補にしない", () => {
+    assert.equal(findRegisteredReceipts([{ ...base, child_ids: [] }], expected).length, 0);
+  });
+
+  it("冪等キーが前方一致するだけの別取引を拾わない", () => {
+    assert.equal(findRegisteredReceipts([{ ...base, comment: "#am:r:12" }], expected).length, 0);
+    assert.equal(findRegisteredReceipts([{ ...base, comment: "#am:r:1" }], expected).length, 1);
+  });
+
+  it("合計や出金元が違えば外す", () => {
+    assert.equal(findRegisteredReceipts([{ ...base, amount: 1500 }], expected).length, 0);
+    assert.equal(findRegisteredReceipts([{ ...base, from_account_name: "別口座" }], expected).length, 0);
+  });
+});
+
+describe("diffReceiptItems（#614）", () => {
+  const want = [
+    { name: "牛乳", amount: 200, genreName: "食料品" },
+    { name: "送料", amount: 500, genreName: "その他" },
+  ];
+  const row = (name: string, amount: number, genre = "") => ({ id: null, name, amount, genre, category: "" });
+
+  it("並びが違っても全行が一致すれば null", () => {
+    const detail = { status: "complete", items: [row("送料", 500, "その他"), row("牛乳", 200, "食料品")] };
+    assert.equal(diffReceiptItems(detail, want), null);
+  });
+
+  it("欠けた行・余った行・ジャンル違いを理由付きで返す", () => {
+    const missing = diffReceiptItems({ status: "complete", items: [row("牛乳", 200)] }, want);
+    assert.match(missing ?? "", /「送料」500円の行がありません/);
+    const extra = diffReceiptItems(
+      { status: "complete", items: [row("牛乳", 200), row("送料", 500), row("謎", 1)] },
+      want,
+    );
+    assert.match(extra ?? "", /送っていない行が 1 行/);
+    const genre = diffReceiptItems(
+      { status: "complete", items: [row("牛乳", 200, "外食"), row("送料", 500)] },
+      want,
+    );
+    assert.match(genre ?? "", /ジャンルが「外食」/);
+  });
+
+  it("内訳を完全に読めていない（partial/failed/none）なら成功にしない", () => {
+    for (const status of ["partial", "failed", "none"]) {
+      assert.ok(diffReceiptItems({ status, items: [] }, want));
+    }
   });
 });

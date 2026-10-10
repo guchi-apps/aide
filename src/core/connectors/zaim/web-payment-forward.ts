@@ -106,6 +106,27 @@ function normalizeRegistered(raw: unknown): ZaimWebPaymentRegistered | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
   const text = (key: string): string => (typeof value[key] === "string" ? (value[key] as string) : "");
+  const rawItems = value["items"];
+  const items = Array.isArray(rawItems)
+    ? rawItems.flatMap((entry) => {
+        if (typeof entry !== "object" || entry === null) return [];
+        const row = entry as Record<string, unknown>;
+        return typeof row["name"] === "string" && typeof row["amount"] === "number"
+          ? [
+              {
+                name: row["name"],
+                genre: typeof row["genre"] === "string" ? row["genre"] : "",
+                amount: row["amount"],
+              },
+            ]
+          : [];
+      })
+    : null;
+  const verified = value["verified"];
+  const lineCount =
+    typeof verified === "object" && verified !== null
+      ? (verified as Record<string, unknown>)["lineCount"]
+      : undefined;
   return {
     date: text("date"),
     amount: typeof value["amount"] === "number" ? value["amount"] : 0,
@@ -114,6 +135,8 @@ function normalizeRegistered(raw: unknown): ZaimWebPaymentRegistered | null {
     genre: text("genre"),
     accountName: text("accountName"),
     comment: text("comment"),
+    ...(items ? { items } : {}),
+    ...(typeof lineCount === "number" ? { verified: { lineCount } } : {}),
   };
 }
 
