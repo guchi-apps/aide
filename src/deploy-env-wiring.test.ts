@@ -45,6 +45,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH: "画像メール送信の冪等記録の置き場。既定（data/image-mail-idempotency.json）で足りる",
   AIDE_IMAGE_MAIL_LOG_PATH: "画像メール送信の履歴の置き場。既定（data/image-mail-log.json）で足りる",
   AIDE_INGEST_URL: "送信側（サブPCのworker）の設定。受け側のVPSでは読まない",
+  AIDE_WORK_REPORTS_PATH: "dotの作業報告の置き場。既定（data/work-reports.json）で足りる",
   AIDE_MCP_ACCESS_LOG_PATH: "MCPアクセスの記録の置き場。既定（data/mcp-access.json）で足りる",
   AIDE_NEWS_MAIL_IDEMPOTENCY_LOG_PATH: "業界ニュース週報メール送信の冪等記録の置き場。既定（data/news-mail-idempotency.json）で足りる",
   AIDE_NEWS_MAIL_LOG_PATH: "業界ニュース週報メール送信の履歴の置き場。既定（data/news-mail-log.json）で足りる",

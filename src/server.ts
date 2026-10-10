@@ -3,6 +3,7 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
+import { handleWorkReports } from "./api/work-reports.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
   handleZaimMaster,
@@ -216,6 +217,13 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
+  // ---- dotの作業報告の読み取りAPI（#609） ----
+  // StatusHubが保存済みの報告を読む。MCPの aide_work_reports と同じ正本。専用シークレットで認証する。
+  if (path === "/api/work-reports") {
+    await handleWorkReports(req, res);
+    return;
+  }
+
   // ---- 個人アプリ向けのZaim登録API ----
   // Zaimの資格情報をAIDEだけに持たせるための口（#37）。上の2つとはさらに別のシークレットで、
   // 残高を読みたいだけのアプリへZaimへの書き込み権限を渡さない。
@@ -298,7 +306,10 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       req,
       res,
       baseUrl,
-      access === "disabled" ? ["tasks:read", "tasks:write"] : (access.scopes ?? []),
+      access === "disabled"
+        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write"]
+        : (access.scopes ?? []),
+      access === "disabled" ? "dev-auth-disabled" : access.clientId,
     );
     return;
   }
