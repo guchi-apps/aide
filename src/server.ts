@@ -3,6 +3,7 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
+import { DEV_AUTH_DISABLED_CLIENT_ID } from "./mcp/types.ts";
 import { handleWorkReports } from "./api/work-reports.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
@@ -310,7 +311,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       access === "disabled"
         ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write"]
         : (access.scopes ?? []),
-      access === "disabled" ? "dev-auth-disabled" : access.clientId,
+      access === "disabled" ? DEV_AUTH_DISABLED_CLIENT_ID : access.clientId,
     );
     return;
   }

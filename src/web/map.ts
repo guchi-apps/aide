@@ -81,6 +81,7 @@ export const CALLERS: Caller[] = [
     what: "状況を聞く・登録する",
     uses: [
       "aide_ping",
+      "aide_connection_permissions",
       "aide_balances",
       "aide_fixed_costs",
       "aide_utility_bills",

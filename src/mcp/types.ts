@@ -73,6 +73,9 @@ export interface ToolContext {
   clientId?: string | null;
 }
 
+/** 認証無効の開発起動（`AIDE_AUTH_DISABLED=1`）でのみ使うclientId。OAuthで付与された権限とは別物。 */
+export const DEV_AUTH_DISABLED_CLIENT_ID = "dev-auth-disabled";
+
 /** JSON-RPC の標準エラーコード。 */
 export const RpcError = {
   ParseError: -32700,

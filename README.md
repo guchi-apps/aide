@@ -499,6 +499,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | ツール | 内容 |
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻・セッションIDに加え、応答中プロセスの本体バージョン（`serverVersion`。`initialize` の `serverInfo.version` と同じ値）と起動時刻（`startedAt`・UTC）を返す。本番のバージョン確認・再起動の確認にも使う |
+| `aide_connection_permissions` | 現在のMCP接続に付与されたOAuth scopeの診断（読み取り専用・scope不要）。**そのリクエストの認証結果**から `authMode`（`oauth` / `auth-disabled`）・付与済み `scopes`・`work-reports:read`/`write` 等の有無（`checks`）を返す。サーバーの対応scope一覧や要求scope、別接続の権限は返さず、入力も取らない。`authMode=auth-disabled` は開発用の認証無効起動で、全権限を仮置きしているだけでOAuthの付与ではない。scopeを判定できないときは `status=indeterminate` かつ `isError` で返し、未許可とは区別する。ツールが一覧に出ないのにscopeがある場合は、ツール公開・登録情報側の問題と切り分けられる |
 | `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
 | `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
