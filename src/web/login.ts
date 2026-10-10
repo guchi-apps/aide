@@ -8,10 +8,10 @@ import {
   callbackUrl,
   createPkce,
   exchangeCode,
-  isAllowedEmail,
   revokeSession,
   type SupabaseAuthConfig,
 } from "../auth/supabase.ts";
+import { isAllowedSubject } from "../auth/access.ts";
 import type { ToolRegistry } from "../mcp/registry.ts";
 import {
   appCallbackUrl,
@@ -112,11 +112,16 @@ export async function currentSession(
   req: IncomingMessage,
   options: LoginOptions,
 ): Promise<StatusSession | null> {
-  if (!options.authConfig.enabled) return { email: null };
+  if (!options.authConfig.enabled) return { email: null, sub: null };
 
   const session = readSession(readCookie(req, SESSION_COOKIE), await loadSessionKey());
   if (!session) return null;
-  if (options.supabase && !isAllowedEmail(session.email, options.supabase)) return null;
+  if (options.supabase) {
+    // 判定はStatusHubの共通アクセス設定。取り消しは判定の保持時間（30秒）以内に効く。
+    // 旧形式のCookie（利用者IDを持たない）は判定に送れないので、ここで落としてログインし直させる。
+    if (!session.email || !session.sub) return null;
+    if (!(await isAllowedSubject({ sub: session.sub, email: session.email, emailVerified: true }))) return null;
+  }
   return session;
 }
 
@@ -380,7 +385,7 @@ export async function handleStatusAuthCallback(
   // 身元が分かった時点でSupabase側のセッションは用済み。以降は自前のCookieだけで通す。
   await revokeSession(config, user.accessToken);
 
-  if (!isAllowedEmail(user.email, config)) {
+  if (!(await isAllowedSubject({ sub: user.sub, email: user.email, emailVerified: user.emailVerified }))) {
     deny(`許可されていないアカウント: ${user.email}`, "このアカウントでは開けません。", 403);
     return;
   }
@@ -388,6 +393,7 @@ export async function handleStatusAuthCallback(
   console.log(`[login] Googleログイン成功: ${user.email}`);
   if (handshake.appChallenge) {
     const code = issueAppHandoff({
+      sub: user.sub,
       email: user.email,
       next,
       challenge: handshake.appChallenge,
@@ -403,7 +409,7 @@ export async function handleStatusAuthCallback(
     return;
   }
 
-  cookies.push(loginCookie(key, { secure, email: user.email }));
+  cookies.push(loginCookie(key, { secure, email: user.email, sub: user.sub }));
   res.writeHead(303, { Location: next, "Cache-Control": "no-store", "Set-Cookie": cookies }).end();
 }
 
@@ -433,7 +439,10 @@ export async function handleStatusAppAuthConsume(
   }
 
   const handoff = consumeAppHandoff(form.get("code") ?? "", form.get("code_verifier") ?? "");
-  if (!handoff || !isAllowedEmail(handoff.email, config)) {
+  if (
+    !handoff ||
+    !(await isAllowedSubject({ sub: handoff.sub, email: handoff.email, emailVerified: true }))
+  ) {
     console.warn("[login] iOSアプリのログイン引き継ぎに失敗");
     html(res, 401, renderLoginPage({ google: true, error: "ログインをやり直してください。" }), {
       "Referrer-Policy": "no-referrer",
@@ -447,6 +456,7 @@ export async function handleStatusAppAuthConsume(
       "Set-Cookie": loginCookie(await loadSessionKey(), {
         secure: isSecure(req),
         email: handoff.email,
+        sub: handoff.sub,
       }),
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",

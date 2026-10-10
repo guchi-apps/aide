@@ -116,6 +116,11 @@ export async function getSharedToken(
   }
 }
 
+/** 判定APIが401を返したときなど、再発行された値を読み直すために1件だけ捨てる。 */
+export function forgetSharedToken(name: string): void {
+  cache.delete(name);
+}
+
 /** テスト専用。プロセス内キャッシュを空にする。 */
 export function resetSharedTokenCacheForTest(): void {
   cache.clear();

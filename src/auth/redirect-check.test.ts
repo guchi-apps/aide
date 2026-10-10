@@ -6,7 +6,6 @@ import type { SupabaseAuthConfig } from "./supabase.ts";
 const CONFIG: SupabaseAuthConfig = {
   url: "https://project.supabase.co",
   publishableKey: "sb_publishable_test",
-  allowedEmails: ["me@example.com"],
 };
 
 const BASE_URL = "https://aide.example.com";

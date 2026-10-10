@@ -26,13 +26,14 @@ function requestWith(cookie: string | undefined): IncomingMessage {
 
 describe("画面のログイン状態", () => {
   it("発行した値は同じ鍵で通り、誰でログインしたかが読める", () => {
-    assert.deepEqual(readSession(issueSession(KEY, "me@example.com"), KEY), {
+    assert.deepEqual(readSession(issueSession(KEY, "me@example.com", new Date(), "user-1"), KEY), {
       email: "me@example.com",
+      sub: "user-1",
     });
   });
 
   it("パスワードでのログインは身元なしとして通る", () => {
-    assert.deepEqual(readSession(issueSession(KEY, null), KEY), { email: null });
+    assert.deepEqual(readSession(issueSession(KEY, null), KEY), { email: null, sub: null });
   });
 
   it("別の鍵では通らない（鍵を作り直せば全セッションが失効する）", () => {
@@ -55,13 +56,21 @@ describe("画面のログイン状態", () => {
 
   it("メールアドレスだけ差し替えた値は通らない（別人を名乗れない）", () => {
     // 署名の対象にメールアドレスが入っていないと、ここが通ってしまう。
-    const allowed = issueSession(KEY, "me@example.com");
-    const [expiresAt, , signature] = allowed.split(".");
+    const allowed = issueSession(KEY, "me@example.com", new Date(), "user-1");
+    const [expiresAt, , sub, signature] = allowed.split(".");
     const forged = [
       expiresAt,
       Buffer.from("someone-else@example.com", "utf8").toString("base64url"),
+      sub,
       signature,
     ].join(".");
+    assert.equal(readSession(forged, KEY), null);
+  });
+
+  it("利用者IDだけ差し替えた値も通らない", () => {
+    const allowed = issueSession(KEY, "me@example.com", new Date(), "user-1");
+    const [expiresAt, email, , signature] = allowed.split(".");
+    const forged = [expiresAt, email, Buffer.from("user-2", "utf8").toString("base64url"), signature].join(".");
     assert.equal(readSession(forged, KEY), null);
   });
 
