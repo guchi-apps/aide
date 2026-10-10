@@ -128,14 +128,16 @@ Deploy to Production 成功（main）
 
 **このワークフローは subpc では実行できず、実際の配布は未確認。** 初回は `dry_run` の後、実際の run で各段階を確かめる。
 
-## ビルド SHA の表示（初回のみ Xcode で設定）
+## ビルド表示と SHA（SHA は初回のみ Xcode で設定）
 
-アプリの隅（ロック画面）に `build <短いSHA>` を出します。値は Run Script build phase が書くため、次の設定を **Mac の Xcode で 1 回だけ** 行い、`project.pbxproj` の変更をコミットします（未設定のビルドでは「不明」と出ます）。
+アプリの隅（ロック画面）に `v<バージョン> (build <ビルド番号>)` を出します。アプリ自身の Info.plist（`CFBundleShortVersionString`・`CFBundleVersion`）を読むので設定は要りません。TestFlight 配布ビルドのビルド番号は `run_number * 100 + run_attempt`、ローカルビルドは `CURRENT_PROJECT_VERSION` の `1` です。
+
+さらに末尾へ `· <短いSHA>` を足したいときは、値を書く Run Script build phase を、次の設定で **Mac の Xcode で 1 回だけ** 登録し、`project.pbxproj` の変更をコミットします（未設定のビルドでは SHA だけが出ません）。
 
 1. TARGETS の `AIDEios` > **Build Phases** > `+` > **New Run Script Phase**
 2. 次を Shell スクリプトに設定する: `"${SRCROOT}/scripts/write-git-sha.sh"`
 3. 「Based on dependency analysis」のチェックを外す（毎回実行する）
-4. Build Settings の **User Script Sandboxing** を `No` にする（`Yes` のままだと `.git` を読めず、SHA が常に「不明」になる）
+4. Build Settings の **User Script Sandboxing** を `No` にする（`Yes` のままだと `.git` を読めず、SHA が出ない）
 5. `MARKETING_VERSION` は AIDE のバージョンに自動同期される（上記「バージョンの同期」）ので、手で揃えない
 
 `write-git-sha.sh` はビルド成果物の Info.plist にだけ書くので、ソースの plist は汚れません。未コミットの変更があるビルドには `-dirty` が付きます。
