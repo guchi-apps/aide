@@ -2,9 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   handleZaimWebGenreEdit,
   handleZaimWebMemoEdit,
+  handleZaimReceiptRefresh,
   handleZaimWebPayment,
   zaimWriteSecret,
 } from "../api/zaim.ts";
+import {
+  ZAIM_RECEIPT_REFRESH_PATH,
+  receiptRefreshJobId,
+} from "../core/connectors/zaim/receipt-refresh-forward.ts";
 import { zaimWebUpstreamUrl } from "../core/connectors/zaim/web-payment-forward.ts";
 
 /**
@@ -15,14 +20,21 @@ import { zaimWebUpstreamUrl } from "../core/connectors/zaim/web-payment-forward.
  * listen するので同じことができない）。
  */
 
-/** 待ち受けるパス。**この3本以外は開かない。** */
+/** 待ち受けるパス。**ここに挙げたもの以外は開かない。** */
 export const ZAIM_WEB_PAYMENT_PATH = "/api/zaim/payment/web";
 /** 既存明細のカテゴリ・内訳の変更（#273）。新規登録と同じ受け口・同じ画面操作の資格情報を使う。 */
 export const ZAIM_WEB_GENRE_EDIT_PATH = "/api/zaim/payment/web/genre";
 /** 既存明細のメモの書き換え（#354）。同じく新規登録と同じ受け口・同じ資格情報を使う。 */
 export const ZAIM_WEB_MEMO_EDIT_PATH = "/api/zaim/payment/web/memo";
 
-export type ZaimWebRoute = "health" | "payment" | "genre-edit" | "memo-edit" | "not-found";
+export type ZaimWebRoute =
+  | "health"
+  | "payment"
+  | "genre-edit"
+  | "memo-edit"
+  | "receipt-refresh"
+  | "receipt-refresh-job"
+  | "not-found";
 
 /**
  * パスから経路を決める。
@@ -39,6 +51,9 @@ export function routeZaimWeb(path: string): ZaimWebRoute {
   if (path === ZAIM_WEB_PAYMENT_PATH) return "payment";
   if (path === ZAIM_WEB_GENRE_EDIT_PATH) return "genre-edit";
   if (path === ZAIM_WEB_MEMO_EDIT_PATH) return "memo-edit";
+  // 商品内訳の手動再取得（#600）。読むだけの経路だが、同じ画面・同じログイン状態を使うのでこの受け口で受ける。
+  if (path === ZAIM_RECEIPT_REFRESH_PATH) return "receipt-refresh";
+  if (receiptRefreshJobId(path) !== null) return "receipt-refresh-job";
   return "not-found";
 }
 
@@ -96,6 +111,12 @@ export async function handleZaimWebRequest(
       return;
     case "memo-edit":
       await handleZaimWebMemoEdit(req, res);
+      return;
+    case "receipt-refresh":
+      await handleZaimReceiptRefresh(req, res, null);
+      return;
+    case "receipt-refresh-job":
+      await handleZaimReceiptRefresh(req, res, receiptRefreshJobId(path));
       return;
     default:
       res.writeHead(404, { "Content-Type": "text/plain" }).end("not found\n");

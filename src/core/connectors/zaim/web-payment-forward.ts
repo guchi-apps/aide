@@ -65,7 +65,7 @@ export const ZAIM_WEB_MEMO_EDIT_FORWARD_TIMEOUT_MS = WEB_MEMO_EDIT_TIMEOUT_MS + 
  * 相手のプロセスへ届いていないため。それ以外（応答待ちでの切断・打ち切り）は、相手が
  * すでに送信ボタンを押していた可能性が残る。
  */
-const NOT_DELIVERED_CODES = new Set([
+export const NOT_DELIVERED_CODES = new Set([
   "ECONNREFUSED",
   "ENOTFOUND",
   "EAI_AGAIN",
@@ -85,7 +85,7 @@ const NOT_STARTED_STATUSES = new Set([401, 403, 404, 405, 413, 429, 503]);
 /** 相手の応答に載っていた `kind` として信用してよい値。 */
 const KNOWN_KINDS = new Set(["invalid", "conflict", "rejected", "failed"]);
 
-function errorCode(cause: unknown): string | null {
+export function errorCode(cause: unknown): string | null {
   let current: unknown = cause;
   // fetch の失敗は `TypeError: fetch failed` で、実際の理由は cause に入れ子で入る。
   for (let depth = 0; depth < 5 && current !== null && typeof current === "object"; depth += 1) {

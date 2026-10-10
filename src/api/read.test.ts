@@ -236,3 +236,87 @@ describe("GET /api/money/transactions", () => {
     assert.equal(typeof body.stale, "boolean");
   });
 });
+
+/**
+ * 商品内訳の手動再取得（#600）の結果が、定期巡回のキャッシュへ重なるか。
+ * 重ねるのは「同じ取引で、巡回より新しいもの」だけ。
+ */
+describe("GET /api/money/transactions: 手動再取得した商品内訳の重ね合わせ", () => {
+  const item = (name: string, amount: number) => ({
+    id: null,
+    name,
+    amount,
+    quantity: null,
+    unitPrice: null,
+    discount: null,
+    tax: null,
+    category: "食費",
+    genre: "食料品",
+  });
+  const base = {
+    id: 9001,
+    date: "2026-10-09",
+    amount: 1543,
+    category: "食費",
+    genre: "食料品",
+    account: "スマートレシート",
+    toAccount: "",
+    place: "スーパー",
+    name: "牛乳",
+    comment: "",
+  };
+
+  async function read(): Promise<{ entries: Array<Record<string, unknown>> }> {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    const got = await call({ authorization: `Bearer ${SECRET}` }, handleMoneyTransactions);
+    return JSON.parse(got.body);
+  }
+
+  async function seed(snapshotEntry: Record<string, unknown>, override: Record<string, unknown> | null) {
+    await writeCache(ZAIM_MONEY_CACHE_KEY, "test", { entries: [snapshotEntry, { ...base, id: 9002 }], months: ["202610"] });
+    await rm(join(cacheDir, "zaim-money-detail-9001.json"), { force: true });
+    if (override) await writeCache("zaim-money-detail-9001", "test", override);
+  }
+
+  const failedRow = { ...base, itemsStatus: "failed", itemsNote: "取得できませんでした" };
+  const newer = new Date(Date.now() + 60_000).toISOString();
+  const older = new Date(Date.now() - 60 * 60_000).toISOString();
+  const fresh = {
+    entry: {
+      id: 9001,
+      date: "2026-10-09",
+      amount: 1543,
+      itemsStatus: "complete",
+      items: [item("牛乳", 298), item("パン", 1245)],
+    },
+    fetchedAt: newer,
+  };
+
+  it("巡回で failed だった取引に、より新しい complete の内訳を重ね、取得時刻を付ける", async () => {
+    await seed(failedRow, fresh);
+    const row = (await read()).entries[0]!;
+    assert.equal(row["itemsStatus"], "complete");
+    assert.equal((row["items"] as unknown[]).length, 2);
+    assert.equal(row["itemsNote"], undefined, "巡回の失敗理由を引きずらない");
+    assert.equal(row["itemsFetchedAt"], newer);
+  });
+
+  it("巡回のほうが新しければ重ねない（古い手動取得で巡回結果を上書きしない）", async () => {
+    await seed(failedRow, { ...fresh, fetchedAt: older });
+    const row = (await read()).entries[0]!;
+    assert.equal(row["itemsStatus"], "failed");
+    assert.equal(row["itemsFetchedAt"], undefined);
+  });
+
+  it("日付・金額が違う（別の取引になった）結果は重ねない", async () => {
+    await seed(failedRow, { ...fresh, entry: { ...fresh.entry, amount: 1500 } });
+    assert.equal((await read()).entries[0]!["itemsStatus"], "failed");
+  });
+
+  it("手動取得の結果が無い取引・内訳を持たない取引は巡回のまま返す", async () => {
+    await seed(failedRow, null);
+    const { entries } = await read();
+    assert.equal(entries[0]!["itemsStatus"], "failed");
+    assert.deepEqual(entries[1], { ...base, id: 9002 });
+  });
+});

@@ -23,6 +23,9 @@ import {
   createZaimWebMemoEdit,
   normalizeWebMemoEditInput,
 } from "../core/connectors/zaim/web-memo-edit.ts";
+import { normalizeReceiptRefreshInput } from "../core/connectors/zaim/receipt-refresh.ts";
+import { forwardReceiptRefresh } from "../core/connectors/zaim/receipt-refresh-forward.ts";
+import { receiptRefreshJobs } from "../worker/receipt-refresh-jobs.ts";
 import {
   createZaimPayment,
   fetchZaimMaster,
@@ -453,4 +456,92 @@ export async function handleZaimMaster(req: IncomingMessage, res: ServerResponse
     return;
   }
   json(res, 200, { ok: true, ...outcome.master });
+}
+
+/**
+ * `POST /api/zaim/receipt-detail/refresh` / `GET /api/zaim/receipt-detail/refresh/<jobId>`（#600）
+ *
+ * **対象の1取引の商品内訳（スマートレシート・Amazon等）をZaimから最新取得する。** `GET /api/money/transactions`
+ * は定期巡回（11:30 / 23:30）のキャッシュを返すので、最大約12時間古い。こちらは依頼した時点のZaimを読む。
+ * **読むだけで、Zaimの取引の登録・更新・削除はしない。**
+ *
+ * 取得はPlaywrightで数十秒かかるため、**非同期**にしている。
+ *
+ * 1. `POST`（本文 `{ moneyId, date, amount }`。`date`・`amount` は取り違えの検知用）→ **202** と
+ *    `job`（`status: "running"`）。**受付は成功ではない。**
+ * 2. `GET .../<jobId>` を繰り返し読み、`job.status` が `succeeded` / `failed` になるまで待つ
+ *
+ * 成功の判定は `job.status === "succeeded"` かつ `job.fetchedAt`（今回Zaimから読み取れた時刻）。
+ * `job.result.entry` が `GET /api/money/transactions` の `entries[]` と同じ `items` / `itemsStatus` /
+ * `itemsNote` 契約で、`itemsStatus` が `complete` のときだけ商品明細として確定してよい。
+ * 失敗は `job.failure.kind`（`busy`・`session_expired`・`not_found`・`detail_failed`・`fetch_failed`）と
+ * `retryable` で判別する。中継先（サブPC）の問題は `subpc_unreachable`・`subpc_timeout`・
+ * `subpc_rejected`・`subpc_bad_response`（HTTP 502）で、取得を試みていない。
+ *
+ * 認証は他のZaim口と同じ `AIDE_ZAIM_WRITE_SECRET`。実行はサブPCの受け口（`zaim-web-server.ts`）で、
+ * VPSでは `AIDE_ZAIM_WEB_UPSTREAM_URL` へ中継する（ジョブの状態はサブPCのメモリにあり、受け口の
+ * 再起動で消える。そのときの `GET` は `job_not_found`〔404〕で、依頼し直せばよい）。
+ */
+export async function handleZaimReceiptRefresh(
+  req: IncomingMessage,
+  res: ServerResponse,
+  jobId: string | null,
+): Promise<void> {
+  const method = jobId === null ? "POST" : "GET";
+  if (req.method !== method) {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: method })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+  if (!(await authorize(req, res, `${method} /api/zaim/receipt-detail/refresh`))) return;
+
+  let body: unknown = null;
+  if (jobId === null) {
+    body = await readBody(req, res);
+    if (body === null) return;
+    const normalized = normalizeReceiptRefreshInput(body);
+    if ("error" in normalized) {
+      json(res, 400, { ok: false, failure: { kind: "invalid", retryable: false, message: normalized.error } });
+      return;
+    }
+    body = normalized.input;
+  }
+
+  const upstream = zaimWebUpstreamUrl();
+  const secret = zaimWriteSecret();
+  if (upstream && req.headers[ZAIM_WEB_FORWARDED_HEADER] !== "1" && secret) {
+    const forwarded = await forwardReceiptRefresh(
+      jobId === null ? { method: "POST", body } : { method: "GET", jobId },
+      { baseUrl: upstream, secret },
+    );
+    json(res, forwarded.status, forwarded.body);
+    return;
+  }
+
+  if (jobId === null) {
+    const outcome = receiptRefreshJobs.submit(
+      body as Parameters<typeof receiptRefreshJobs.submit>[0],
+    );
+    if (!outcome.ok) {
+      json(res, 429, { ok: false, failure: outcome.failure });
+      return;
+    }
+    json(res, 202, { ok: true, job: outcome.job, deduplicated: outcome.deduplicated });
+    return;
+  }
+
+  const job = receiptRefreshJobs.get(jobId);
+  if (!job) {
+    json(res, 404, {
+      ok: false,
+      failure: {
+        kind: "job_not_found",
+        retryable: true,
+        message: "ジョブが見つかりません（期限切れか、サブPCの受け口が再起動しました）。依頼し直してください。",
+      },
+    });
+    return;
+  }
+  json(res, 200, { ok: true, job });
 }
