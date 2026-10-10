@@ -58,12 +58,31 @@ export const WEB_PAYMENT_TIMEOUT_MS = 180_000;
 
 const WEB_PAYMENT_SCRIPT = zaimScriptPath("web-payment.mjs");
 
+/** レシートの1行（#614）。 */
+export interface ZaimWebPaymentItem {
+  name: string;
+  /** 税・送料などの加算も1行として渡す。**負の金額（値引き行）は未対応**で、行の金額へ反映して渡す。 */
+  amount: number;
+  categoryName: string;
+  genreName: string;
+  comment?: string | undefined;
+}
+
+/** 1レシートの行数の上限。入力画面の行数がこれより少なければスクリプトが送信前に止まる。 */
+export const MAX_RECEIPT_ITEMS = 30;
+
 export interface ZaimWebPaymentInput {
   /** 呼び出し元がレコードごとに一意に決める冪等キー（例: `asset-manager:receipt-item:1234`）。 */
   requestId: string;
   amount: number;
   /** `YYYY-MM-DD`。 */
   date: string;
+  /**
+   * 複数商品の内訳（#614）。**2行以上を渡すと、Zaimの1件のレシート（親子構造）として登録する。**
+   * 渡したときは `name`・`categoryName`・`genreName` は先頭行と同じ値になる。`amount` は
+   * 全行の合計（取引合計）で、一致しなければ送信前に断る。省略時は従来どおり単一商品。
+   */
+  items?: ZaimWebPaymentItem[] | undefined;
   /** 品目名。**置き換えの条件に入るため必須**。 */
   name: string;
   /** 店舗名。 */
@@ -95,6 +114,10 @@ export interface ZaimWebPaymentRegistered {
   accountName: string;
   /** 実際にメモ欄へ入った文字列（冪等キーを含む）。 */
   comment: string;
+  /** 複数商品のとき、読み返して一致を確認した行（#614）。単一商品では省略。 */
+  items?: Array<{ name: string; genre: string; amount: number }>;
+  /** 複数商品のとき、読み返した親子構造の確認結果。 */
+  verified?: { lineCount: number };
 }
 
 export type CreateWebPaymentOutcome =
@@ -157,46 +180,121 @@ export function normalizeWebPaymentInput(
     return { error: "date は YYYY-MM-DD 形式の実在する日付で指定してください" };
   }
 
-  const required: Array<[keyof ZaimWebPaymentInput, string]> = [
-    ["name", "name（品目名）"],
-    ["place", "place（店舗名）"],
-    ["categoryName", "categoryName（カテゴリ名）"],
-    ["genreName", "genreName（ジャンル名）"],
-  ];
-  const texts: Record<string, string> = {};
-  for (const [key, label] of required) {
-    const normalized = normalizeText(body[key], label);
-    if ("error" in normalized) return { error: normalized.error };
-    if (normalized.value === undefined) return { error: `${label} が必要です` };
-    texts[key] = normalized.value;
-  }
+  const normalizeTexts = (
+    source: Record<string, unknown>,
+    prefix: string,
+  ): { texts: Record<string, string> } | { error: string } => {
+    const required: Array<[string, string]> = [
+      ["name", "name（品目名）"],
+      ["categoryName", "categoryName（カテゴリ名）"],
+      ["genreName", "genreName（ジャンル名）"],
+    ];
+    const texts: Record<string, string> = {};
+    for (const [key, label] of required) {
+      const normalized = normalizeText(source[key], `${prefix}${label}`);
+      if ("error" in normalized) return { error: normalized.error };
+      if (normalized.value === undefined) return { error: `${prefix}${label} が必要です` };
+      texts[key] = normalized.value;
+    }
+    return { texts };
+  };
 
-  const fromAccountId = normalizeId(body["fromAccountId"], "fromAccountId", true);
-  if ("error" in fromAccountId) return { error: fromAccountId.error };
+  const place = normalizeText(body["place"], "place（店舗名）");
+  if ("error" in place) return { error: place.error };
+  if (place.value === undefined) return { error: "place（店舗名） が必要です" };
 
   const comment = normalizeText(body["comment"], "comment");
   if ("error" in comment) return { error: comment.error };
 
   // メモには冪等キーも載せる。長さの検査はスクリプト側（`composeComment`）が持つが、
   // 画面を開く前に弾けるものはここで弾く。
-  const commentLength = (comment.value ? comment.value.length + 1 : 0) + requestId.length + 1;
-  if (commentLength > MAX_TEXT_LENGTH) {
-    return {
-      error:
-        `comment と requestId の合計が ${MAX_TEXT_LENGTH} 文字を超えます（${commentLength} 文字）。` +
-        "メモには冪等キーも書き込むため、どちらかを短くしてください",
+  const commentTooLong = (value: string | undefined, prefix: string): string | null => {
+    const length = (value ? value.length + 1 : 0) + requestId.length + 1;
+    return length > MAX_TEXT_LENGTH
+      ? `${prefix}comment と requestId の合計が ${MAX_TEXT_LENGTH} 文字を超えます（${length} 文字）。` +
+          "メモには冪等キーも書き込むため、どちらかを短くしてください"
+      : null;
+  };
+
+  let items: ZaimWebPaymentItem[] | undefined;
+  let head: Record<string, string>;
+  if (body["items"] !== undefined) {
+    const rawItems = body["items"];
+    if (!Array.isArray(rawItems) || rawItems.length < 2) {
+      return { error: "items は2行以上の配列で指定してください（1商品なら name・amount などを直接指定）" };
+    }
+    if (rawItems.length > MAX_RECEIPT_ITEMS) {
+      return { error: `items が多すぎます（${MAX_RECEIPT_ITEMS}行まで）` };
+    }
+    items = [];
+    let sum = 0;
+    for (const [index, entry] of rawItems.entries()) {
+      const prefix = `items[${index}].`;
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        return { error: `items[${index}] はオブジェクトで指定してください` };
+      }
+      const row = entry as Record<string, unknown>;
+      const rowAmount = row["amount"];
+      if (typeof rowAmount !== "number" || !Number.isInteger(rowAmount)) {
+        return { error: `${prefix}amount は整数で指定してください` };
+      }
+      if (rowAmount < 1) {
+        return {
+          error:
+            `${prefix}amount は1以上で指定してください。値引き（負の金額の行）は未対応です。` +
+            "値引き後の金額を該当する行へ反映して渡してください。商品別の独立登録へは切り替えません",
+        };
+      }
+      if (rowAmount > MAX_AMOUNT) return { error: `${prefix}amount が大きすぎます（${MAX_AMOUNT}まで）` };
+      const texts = normalizeTexts(row, prefix);
+      if ("error" in texts) return { error: texts.error };
+      const rowComment = normalizeText(row["comment"], `${prefix}comment`);
+      if ("error" in rowComment) return { error: rowComment.error };
+      const tooLong = commentTooLong(rowComment.value, prefix);
+      if (tooLong) return { error: tooLong };
+      sum += rowAmount;
+      items.push({
+        name: texts.texts["name"]!,
+        amount: rowAmount,
+        categoryName: texts.texts["categoryName"]!,
+        genreName: texts.texts["genreName"]!,
+        ...(rowComment.value === undefined ? {} : { comment: rowComment.value }),
+      });
+    }
+    if (sum !== amount) {
+      return {
+        error:
+          `items の金額の合計 ${sum} 円が amount（取引合計）${amount} 円と一致しません。` +
+          "税・送料・値引きを含めた全行の合計を amount にしてください",
+      };
+    }
+    // 先頭行を従来のフィールドへ写す（応答・ログ・古い受け口との互換のため）。
+    head = {
+      name: items[0]!.name,
+      categoryName: items[0]!.categoryName,
+      genreName: items[0]!.genreName,
     };
+  } else {
+    const texts = normalizeTexts(body, "");
+    if ("error" in texts) return { error: texts.error };
+    head = texts.texts;
+    const tooLong = commentTooLong(comment.value, "");
+    if (tooLong) return { error: tooLong };
   }
+
+  const fromAccountId = normalizeId(body["fromAccountId"], "fromAccountId", true);
+  if ("error" in fromAccountId) return { error: fromAccountId.error };
 
   return {
     input: {
       requestId,
       amount,
       date,
-      name: texts["name"]!,
-      place: texts["place"]!,
-      categoryName: texts["categoryName"]!,
-      genreName: texts["genreName"]!,
+      name: head["name"]!,
+      place: place.value,
+      categoryName: head["categoryName"]!,
+      genreName: head["genreName"]!,
+      ...(items ? { items } : {}),
       fromAccountId: fromAccountId.value!,
       ...(comment.value === undefined ? {} : { comment: comment.value }),
       ...(body["dryRun"] === true ? { dryRun: true } : {}),
@@ -216,7 +314,10 @@ export interface ZaimWebPaymentScriptResult {
     place: string;
     date: string;
     accountName: string;
+    items?: Array<{ name: string; genre: string; amount: number }>;
   };
+  /** 複数商品のとき、送信後に読み返して親子構造と全行を確認できた結果。 */
+  verified?: { moneyId: number | null; lineCount: number } | null;
 }
 
 /**
@@ -357,6 +458,8 @@ async function runZaimWebPayment(
     genre: result.filled?.genre ?? input.genreName,
     accountName: result.filled?.accountName ?? "",
     comment: result.filled?.comment ?? "",
+    ...(input.items && result.filled?.items ? { items: result.filled.items } : {}),
+    ...(input.items && result.verified ? { verified: { lineCount: result.verified.lineCount } } : {}),
   };
 
   if (input.dryRun === true) {
@@ -365,6 +468,15 @@ async function runZaimWebPayment(
   if (result.submitted !== true) {
     // 送信していないのに成功として返ってきた。想定外なので記録は残したまま失敗させる。
     return { ok: false, kind: "failed", reason: "Zaim登録スクリプトが送信を行いませんでした" };
+  }
+
+  if (input.items && !result.verified) {
+    // 読み返しを経ていない複数行は成功にしない。記録は残したまま止め、次の再送も止める。
+    return {
+      ok: false,
+      kind: "failed",
+      reason: "送信しましたが、内訳の読み返しによる確認ができませんでした。Zaimで登録内容を確認してください。",
+    };
   }
 
   await completeWebPayment(input.requestId);

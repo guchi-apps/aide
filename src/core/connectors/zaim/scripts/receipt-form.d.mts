@@ -56,3 +56,30 @@ export declare function parseAmountValue(value: string | null | undefined): numb
 
 /** ページ内で実行される。表示中の候補を見出し／ジャンルに畳む。 */
 export declare function readMenuItems(items: unknown[]): ZaimMenuItem[];
+
+export interface ZaimRegisteredReceiptQuery {
+  date: string;
+  total: number;
+  place: string;
+  /** 空なら出金元は照合しない。 */
+  accountName: string;
+  requestId: string;
+  /** 親の1行を含む行数。 */
+  lineCount: number;
+}
+
+/** 一覧JSONから、登録した取引の候補をすべて返す。 */
+export declare function findRegisteredReceipts(
+  items: readonly Record<string, unknown>[],
+  expected: ZaimRegisteredReceiptQuery,
+): Record<string, unknown>[];
+
+/** 読み返した内訳と送った行の食い違い。一致なら null。 */
+export declare function diffReceiptItems(
+  detail: {
+    status: string;
+    reason?: string;
+    items?: readonly { name: string; amount: number; genre: string }[];
+  },
+  expectedItems: readonly { name: string; amount: number; genreName: string }[],
+): string | null;

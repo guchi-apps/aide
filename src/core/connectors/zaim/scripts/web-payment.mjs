@@ -1,15 +1,19 @@
 import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
+import { fetchDetails, readDetail, toRawEntry } from "./money-entry.mjs"
 import {
     amountDigits,
     composeComment,
     dateMatches,
+    diffReceiptItems,
+    findRegisteredReceipts,
     monthsBetween,
     parseAmountValue,
     parseMonthHeader,
     pickGenreIndex,
     readMenuItems,
+    resolveReceiptListUrl,
     resolveReceiptUrl,
     splitDate,
 } from "./receipt-form.mjs"
@@ -49,6 +53,13 @@ const SETTLE_MS = 400
 const MAX_COMMENT_LENGTH = 100
 /** 日付ピッカーで送る「前／次」の上限。これを超える月送りは入力の誤りとみなす。 */
 const MAX_MONTH_STEPS = 60
+
+/**
+ * 品目の行を足すボタンのセレクタ。**実物では未確認**（2026-08-31の調査では行は3行固定で
+ * 増やす操作が無かった）。見つからなければ送信の前に止まるだけなので、Zaimには何も残らない。
+ * 実物の当て方が分かったら環境変数で上書きする。
+ */
+const ADD_ROW_SELECTOR = process.env.ZAIM_RECEIPT_ADD_ROW_SELECTOR || '[class*="ItemForm-module__add"]'
 
 /**
  * **送信の前に**止まった失敗。Zaimには何も登録されていない。
@@ -228,8 +239,21 @@ async function selectAccount(form, fromAccountId) {
 const input = readInput()
 const dryRun = input.dryRun === true || process.env.ZAIM_WEB_PAYMENT_DRY_RUN === "1"
 
-const comment = composeComment(input.comment, input.requestId, MAX_COMMENT_LENGTH)
-if ("error" in comment) fail(comment.error)
+// 単一商品の従来入力は1行のレシートとして扱う。
+const lines = Array.isArray(input.items) && input.items.length > 0
+    ? input.items
+    : [{ name: input.name, amount: input.amount, categoryName: input.categoryName, genreName: input.genreName, comment: input.comment }]
+const isReceipt = lines.length >= 2
+
+const total = lines.reduce((sum, line) => sum + line.amount, 0)
+if (total !== input.amount) fail(`全行の合計 ${total} 円が取引合計 ${input.amount} 円と一致しません`)
+
+// 各行のメモに冪等キーを載せる。どの行からでもZaim側で引き当てられる。
+const comments = lines.map((line) => {
+    const composed = composeComment(line.comment, input.requestId, MAX_COMMENT_LENGTH)
+    if ("error" in composed) fail(composed.error)
+    return composed.text
+})
 
 const url = resolveReceiptUrl()
 const statePath = resolveStatePath()
@@ -238,6 +262,71 @@ const { chromium } = await loadPlaywright()
 const browser = await chromium.launch({ headless: true })
 const context = await browser.newContext({ storageState: statePath, ...ZAIM_CONTEXT_OPTIONS })
 const page = await context.newPage()
+
+/** 品目の行（品目名の入力欄を含むブロック）。 */
+function rowAt(names, i) {
+    return names.nth(i).locator("xpath=ancestor::div[1]/parent::div")
+}
+
+/** 行数をちょうど `count` 行にする。足りなければ追加ボタン、余れば末尾から × で消す。 */
+async function arrangeRows(form, names, count) {
+    if ((await names.count()) === 0) fail("品目の行が1つも見つかりません")
+    while ((await names.count()) < count) {
+        const before = await names.count()
+        const add = form.locator(ADD_ROW_SELECTOR)
+        if ((await add.count()) === 0) {
+            fail(
+                `入力画面の品目の行は ${before} 行で、${count} 行ぶんの内訳を入れられません` +
+                    "（行を足す操作が見つかりませんでした）。商品別の独立登録へは切り替えていません"
+            )
+        }
+        await add.first().click()
+        await page.waitForTimeout(SETTLE_MS)
+        if ((await names.count()) <= before) fail("品目の行を足せませんでした")
+    }
+    // **使わない行を消してから入れる。** 空行がそのまま送られて0円の明細が増えないよう、
+    // 「送っても無視されるはず」に賭けない。行の × は合成クリックに反応する（実物で確認済み）。
+    for (let i = (await names.count()) - 1; i >= count; i -= 1) {
+        const remove = rowAt(names, i).locator('div[class*="ItemForm-module__remove"]')
+        if ((await remove.count()) === 0) fail(`${i + 1} 行目の削除ボタンが見つかりません`)
+        await remove.first().click()
+        await page.waitForTimeout(SETTLE_MS)
+    }
+    if ((await names.count()) !== count) fail(`品目の行を ${count} 行にできませんでした（${await names.count()} 行）`)
+}
+
+/**
+ * 送信後に家計簿の一覧を開き直して、**1件の取引として**登録され、内訳の全行が揃っているかを読む。
+ * 読み返せない・食い違うときは「登録されたか不明／部分登録」として止める（成功にしない）。
+ */
+async function verifyRegistered(accountName) {
+    const listUrl = resolveReceiptListUrl(input.date)
+    await page.goto(listUrl, { waitUntil: "networkidle", timeout: PAGE_TIMEOUT })
+    await assertLoggedIn(page)
+    const month = listUrl.slice(-6)
+    const base = process.env.ZAIM_MONEY_DETAILS_URL || `${process.env.ZAIM_MONEY_URL || "https://zaim.net/money"}/details`
+    const details = await page.evaluate(fetchDetails, `${base}?month=${month}`)
+    if (!Array.isArray(details?.items)) failAfterSubmit("読み返しの明細JSONの形式が想定と異なります")
+
+    const matches = findRegisteredReceipts(details.items, {
+        date: input.date,
+        total: input.amount,
+        place: input.place,
+        accountName,
+        requestId: input.requestId,
+        lineCount: lines.length,
+    })
+    if (matches.length !== 1) {
+        failAfterSubmit(
+            `送信後の読み返しで、親子構造を持つ1件の取引を特定できませんでした（候補 ${matches.length} 件）`
+        )
+    }
+    const item = matches[0]
+    const detail = await readDetail(page, item, toRawEntry(item))
+    const problem = diffReceiptItems(detail, lines)
+    if (problem) failAfterSubmit(`読み返した内訳が送った内容と一致しません: ${problem}`)
+    return { moneyId: item.id ?? null, lineCount: detail.items.length }
+}
 
 try {
     await page.goto(url, { waitUntil: "networkidle", timeout: PAGE_TIMEOUT })
@@ -248,28 +337,15 @@ try {
     if ((await form.count()) === 0) fail(`入力フォームが見つかりません: ${url}`)
 
     const names = form.locator('input[name="item_name"]')
-    const rowCount = await names.count()
-    if (rowCount === 0) fail("品目の行が1つも見つかりません")
+    await arrangeRows(form, names, lines.length)
 
-    // **使わない行を消してから入れる。** 空行がそのまま送られて0円の明細が増えないよう、
-    // 「送っても無視されるはず」に賭けない。行の × は合成クリックに反応する（実物で確認済み）。
-    for (let i = rowCount - 1; i >= 1; i -= 1) {
-        const remove = names
-            .nth(i)
-            .locator("xpath=ancestor::div[1]/parent::div")
-            .locator('div[class*="ItemForm-module__remove"]')
-        if ((await remove.count()) === 0) fail(`${i + 1} 行目の削除ボタンが見つかりません`)
-        await remove.first().click()
-        await page.waitForTimeout(SETTLE_MS)
+    for (let i = 0; i < lines.length; i += 1) {
+        const row = rowAt(names, i)
+        await (await only(row.locator('input[name="item_name"]'), `${i + 1}行目の品目名の入力欄`)).fill(lines[i].name)
+        await selectGenre(page, row, lines[i].categoryName, lines[i].genreName)
+        await enterAmount(page, row, lines[i].amount)
+        await (await only(row.locator('input[name="comment"]'), `${i + 1}行目のメモの入力欄`)).fill(comments[i])
     }
-    if ((await names.count()) !== 1) fail(`品目の行を1行にできませんでした（${await names.count()} 行）`)
-
-    const row = names.first().locator("xpath=ancestor::div[1]/parent::div")
-
-    await (await only(row.locator('input[name="item_name"]'), "品目名の入力欄")).fill(input.name)
-    await selectGenre(page, row, input.categoryName, input.genreName)
-    await enterAmount(page, row, input.amount)
-    await (await only(row.locator('input[name="comment"]'), "メモの入力欄")).fill(comment.text)
 
     const accountName = await selectAccount(form, input.fromAccountId)
     await selectDate(page, form, input.date)
@@ -278,28 +354,45 @@ try {
     await placeField.click()
     await placeField.fill(input.place)
     // 候補のメニューが開いたままだと送信ボタンを覆う。品目名へ戻して閉じる。
-    await (await only(row.locator('input[name="item_name"]'), "品目名の入力欄")).click()
+    await (await only(rowAt(names, 0).locator('input[name="item_name"]'), "品目名の入力欄")).click()
     await page.waitForTimeout(SETTLE_MS)
 
-    // ---- 送信の直前に、入れたつもりの値を読み直す ----
+    // ---- 送信の直前に、入れたつもりの値を全行読み直す ----
+    const filledItems = []
+    for (let i = 0; i < lines.length; i += 1) {
+        const row = rowAt(names, i)
+        const got = {
+            name: await row.locator('input[name="item_name"]').inputValue(),
+            genre: await row.locator("input:not([name])").first().inputValue(),
+            amount: parseAmountValue(await row.locator('input[name="amount"]').inputValue()),
+            comment: await row.locator('input[name="comment"]').inputValue(),
+        }
+        const n = `${i + 1} 行目`
+        if (got.name !== lines[i].name) fail(`${n}の品目名が入っていません（欄の値は「${got.name}」）`)
+        if (got.genre !== lines[i].genreName) fail(`${n}のカテゴリが入っていません（欄の値は「${got.genre}」）`)
+        if (got.amount !== lines[i].amount) fail(`${n}の金額が入っていません（欄の値は ${got.amount}）`)
+        if (got.comment !== comments[i]) fail(`${n}のメモが入っていません`)
+        filledItems.push(got)
+    }
+    const filledTotal = filledItems.reduce((sum, item) => sum + item.amount, 0)
+    if (filledTotal !== input.amount) fail(`画面の全行合計 ${filledTotal} 円が取引合計 ${input.amount} 円と一致しません`)
+
     const filled = {
-        name: await row.locator('input[name="item_name"]').inputValue(),
-        genre: await row.locator("input:not([name])").first().inputValue(),
-        amount: parseAmountValue(await row.locator('input[name="amount"]').inputValue()),
-        comment: await row.locator('input[name="comment"]').inputValue(),
+        // 従来の単一商品の応答と同じ形を保つ（先頭行）。
+        name: filledItems[0].name,
+        genre: filledItems[0].genre,
+        amount: isReceipt ? input.amount : filledItems[0].amount,
+        comment: filledItems[0].comment,
         place: await placeField.inputValue(),
         date: await form.locator('input[name="date"]').inputValue(),
         accountName,
+        items: filledItems,
     }
     // 出金元は日付・お店を触った後にもう一度読む。ここが外れると置き換えに載らない。
     const accountValue = await form.locator("select").first().inputValue()
     if (accountValue !== String(input.fromAccountId)) {
         fail(`出金元が ${accountValue} に変わっています（期待は ${input.fromAccountId}）`)
     }
-    if (filled.name !== input.name) fail(`品目名が入っていません（欄の値は「${filled.name}」）`)
-    if (filled.genre !== input.genreName) fail(`カテゴリが入っていません（欄の値は「${filled.genre}」）`)
-    if (filled.amount !== input.amount) fail(`金額が入っていません（欄の値は ${filled.amount}）`)
-    if (filled.comment !== comment.text) fail("メモが入っていません")
     if (filled.place !== input.place) fail(`お店が入っていません（欄の値は「${filled.place}」）`)
     if (!dateMatches(filled.date, input.date)) fail(`日付が入っていません（欄の値は「${filled.date}」）`)
 
@@ -322,18 +415,20 @@ try {
                     const first = document.querySelector('input[name="item_name"]')
                     return first !== null && first.value !== name
                 },
-                { before, name: input.name },
+                { before, name: lines[0].name },
                 { timeout: SUBMIT_TIMEOUT }
             )
             .catch(() => {
                 failAfterSubmit("送信しましたが、画面が変わったことを確認できませんでした")
             })
         await page.waitForLoadState("networkidle", { timeout: PAGE_TIMEOUT }).catch(() => {})
+        const resultUrl = page.url()
+
+        // 複数行は親子構造まで読み返す。単一商品は従来どおり（読み返しを足さない）。
+        const verified = isReceipt ? await verifyRegistered(accountName) : null
 
         await context.storageState({ path: statePath })
-        process.stdout.write(
-            JSON.stringify({ submitted: true, url, resultUrl: page.url(), filled })
-        )
+        process.stdout.write(JSON.stringify({ submitted: true, url, resultUrl, filled, verified }))
     }
 } finally {
     await browser.close()
