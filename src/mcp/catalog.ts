@@ -16,6 +16,7 @@ import {
   saveDailyBriefTool,
 } from "./tools/notifications.ts";
 import { hostStatusTool, serviceQuotasTool, uptimeMonitorsTool } from "./tools/ops.ts";
+import { connectionPermissionsTool } from "./tools/connection-permissions.ts";
 import { pingTool } from "./tools/ping.ts";
 import { printerStatusTool } from "./tools/printer.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
@@ -58,6 +59,8 @@ import { reportWorkTool, workReportsTool } from "./tools/work-reports.ts";
 export function buildToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(pingTool);
+  // 接続診断（#629）。pingへ足さず専用の読み取りツールにし、どのscopeも要求しない。
+  registry.register(connectionPermissionsTool);
   // お金は「いま持っている額」（ストック）と「毎月出ていく額」（フロー）で分ける（#373）。
   registry.register(balancesTool);
   registry.register(fixedCostsTool);
