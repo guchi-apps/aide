@@ -6,11 +6,13 @@ import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
   handleZaimMaster,
+  handleZaimReceiptRefresh,
   handleZaimPayment,
   handleZaimWebGenreEdit,
   handleZaimWebMemoEdit,
   handleZaimWebPayment,
 } from "./api/zaim.ts";
+import { receiptRefreshJobId } from "./core/connectors/zaim/receipt-refresh-forward.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -237,6 +239,21 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 上と同じくPlaywrightとログイン状態がある実行環境（サブPC）でだけ成立する。
   if (path === "/api/zaim/payment/web/memo") {
     await handleZaimWebMemoEdit(req, res);
+    return;
+  }
+  // 対象の1取引の商品内訳をZaimから最新取得する口（#600）。非同期（受付→状態の読み取り）で、
+  // 実行はPlaywrightとログイン状態があるサブPCの受け口。ここ（VPS）は中継する。
+  if (path === "/api/zaim/receipt-detail/refresh") {
+    await handleZaimReceiptRefresh(req, res, null);
+    return;
+  }
+  if (path.startsWith("/api/zaim/receipt-detail/refresh/")) {
+    const jobId = receiptRefreshJobId(path);
+    if (jobId === null) {
+      res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    await handleZaimReceiptRefresh(req, res, jobId);
     return;
   }
   if (path === "/api/zaim/master") {

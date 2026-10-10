@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, beforeEach, describe, it } from "node:test";
+import { after, afterEach, beforeEach, describe, it, mock } from "node:test";
 
 // 検査を通らない要求はZaimへ届かないが、記録の置き場だけは本番と分けておく。
 const dir = await mkdtemp(join(tmpdir(), "aide-zaim-api-test-"));
@@ -13,6 +13,7 @@ process.env["AIDE_ZAIM_WEB_GENRE_EDIT_LOG_PATH"] = join(dir, "zaim-web-genre-edi
 const {
   handleZaimMaster,
   handleZaimPayment,
+  handleZaimReceiptRefresh,
   handleZaimWebGenreEdit,
   handleZaimWebMemoEdit,
   handleZaimWebPayment,
@@ -382,5 +383,98 @@ describe("POST /api/zaim/payment/web/memo", () => {
   it("JSONとして読めなければ400", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
     assert.equal((await postWebMemo("{壊れた")).status, 400);
+  });
+});
+
+describe("商品内訳の手動再取得 /api/zaim/receipt-detail/refresh（#600）", () => {
+  const JOB_ID = "0b6e3a52-8c5d-4a39-9f0a-1d2c3b4a5e6f";
+  const BODY = { moneyId: 9001, date: "2026-10-09", amount: 1543 };
+
+  afterEach(() => {
+    mock.restoreAll();
+    delete process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"];
+  });
+
+  async function call(
+    method: string,
+    jobId: string | null,
+    body: unknown = null,
+    authorization: string | null = `Bearer ${SECRET}`,
+    headers: Record<string, string> = {},
+  ): Promise<Captured & { json: Record<string, unknown> }> {
+    const { res, captured } = fakeRes();
+    const req = fakeReq(method, JSON.stringify(body), authorization);
+    Object.assign(req.headers, headers);
+    await handleZaimReceiptRefresh(req, res, jobId);
+    return { ...captured, json: captured.body ? (JSON.parse(captured.body) as Record<string, unknown>) : {} };
+  }
+
+  it("受付は POST、状態の読み取りは GET だけ（405）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await call("GET", null)).status, 405);
+    assert.equal((await call("POST", JOB_ID, BODY)).status, 405);
+  });
+
+  it("シークレット未設定は503、違えば401", async () => {
+    delete process.env["AIDE_ZAIM_WRITE_SECRET"];
+    assert.equal((await call("POST", null, BODY)).status, 503);
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal((await call("POST", null, BODY, "Bearer wrong")).status, 401);
+    assert.equal((await call("GET", JOB_ID, null, null)).status, 401);
+  });
+
+  it("入力が不正なら400（Zaimも中継先も触らない）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748";
+    const fetchMock = mock.method(globalThis, "fetch", async () => new Response("{}"));
+    const got = await call("POST", null, { moneyId: 9001 });
+    assert.equal(got.status, 400);
+    assert.deepEqual((got.json["failure"] as { kind: string }).kind, "invalid");
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
+
+  it("中継先があればサブPCへ中継し、受付（202）をそのまま返す", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748";
+    const accepted = { ok: true, job: { jobId: JOB_ID, status: "running" }, deduplicated: false };
+    const fetchMock = mock.method(globalThis, "fetch", async () => new Response(JSON.stringify(accepted), { status: 202 }));
+
+    const got = await call("POST", null, BODY);
+
+    assert.equal(got.status, 202);
+    assert.deepEqual(got.json, accepted);
+    assert.equal(fetchMock.mock.callCount(), 1);
+    assert.equal(String(fetchMock.mock.calls[0]?.arguments[0]), "http://subpc:4748/api/zaim/receipt-detail/refresh");
+  });
+
+  it("サブPCに繋がらなければ502 subpc_unreachable（取得の失敗とは別の種類）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748";
+    mock.method(globalThis, "fetch", async () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("x"), { code: "ECONNREFUSED" }) });
+    });
+    const got = await call("GET", JOB_ID);
+    assert.equal(got.status, 502);
+    assert.equal((got.json["failure"] as { kind: string }).kind, "subpc_unreachable");
+  });
+
+  it("中継されてきたリクエストは中継せず自分で処理する（無限に回さない）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748";
+    const fetchMock = mock.method(globalThis, "fetch", async () => new Response("{}"));
+    const got = await call("GET", JOB_ID, null, `Bearer ${SECRET}`, { "x-aide-zaim-web-forwarded": "1" });
+    assert.equal(fetchMock.mock.callCount(), 0);
+    assert.equal(got.status, 404);
+  });
+
+  it("受け口が知らないジョブは404 job_not_found（再起動で消えた場合に依頼し直せる）", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    const got = await call("GET", JOB_ID);
+    assert.equal(got.status, 404);
+    assert.deepEqual(got.json["failure"], {
+      kind: "job_not_found",
+      retryable: true,
+      message: (got.json["failure"] as { message: string }).message,
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { acquireZaimScreenFileLockWaiting } from "../../core/connectors/zaim/screen-file-lock.ts";
 import { fetchZaimMoneyList } from "../../core/connectors/zaim/index.ts";
 import type { ZaimMoneyEntry, ZaimMoneyList } from "../../core/connectors/zaim/types.ts";
 import {
@@ -53,6 +54,19 @@ export function mergeZaimMoneyLists(lists: readonly ZaimMoneyList[]): ZaimMoneyL
  * 失敗した場合は今日を含む月のみで保存する**（`months` もその範囲で覆える暦月だけになる）。
  */
 export async function runZaimMoneySync(): Promise<string> {
+  // 商品内訳の手動再取得（#600）とログイン状態のファイルを取り合わないよう、実行中は待つ。
+  const lock = await acquireZaimScreenFileLockWaiting();
+  if (!lock) {
+    throw new Error("Zaimの画面を使う別の処理（商品内訳の手動再取得）が終わらないため、巡回を始められませんでした");
+  }
+  try {
+    return await syncZaimMoney();
+  } finally {
+    await lock.release().catch(() => undefined);
+  }
+}
+
+async function syncZaimMoney(): Promise<string> {
   const now = new Date();
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
   const startDay = zaimMonthStartDay();
