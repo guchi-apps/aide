@@ -32,6 +32,7 @@
 | ツール | 問い | 利用者 | 読/書 | 代替経路 | 取得元 | 定義 | 応答 | 判断 |
 |---|---|---|---|---|---|---|---|---|
 | `aide_ping` | 疎通 | C G B | 読 | `/health` | 自身 | 0.3KB | 極小 | 維持。接続確認・稼働中バージョンと起動時刻の確認に使う |
+| `aide_connection_permissions` | 接続の権限診断 | C G B | 読 | なし | 自身（リクエストの認証結果） | 0.7KB | 極小 | 維持。現在の接続に付与されたscopeを返す。scopeは要求しない |
 | `aide_balances` | いくら持っているか | C B | 読 | `/api/money/summary` | Zaimキャッシュ | 1.0KB | 約11KB→約8KB | **改善**（下記） |
 | `aide_fixed_costs` | 毎月の固定費 | C B | 読 | `/api/money/summary` | Asset Manager | 1.4KB | 約7KB | 維持。契約の要約に絞ってあり、明細は22件×7項目 |
 | `aide_utility_bills` | 電気・ガス代 | C B | 読 | なし | Zaim公式API | 1.0KB | 未実測 | 維持（種類と期間を引数に取る） |
