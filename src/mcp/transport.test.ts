@@ -319,3 +319,16 @@ describe("ボディとセッションの上限（#539）", () => {
     assert.ok(!clients.includes("c0"), JSON.stringify(clients));
   });
 });
+
+describe("initialize が名乗るバージョン", () => {
+  it("渡された serverInfo.version をそのまま返す", async () => {
+    const res = response();
+    await new McpTransport(new ToolRegistry(), { name: "aide", version: "7.7.7" }).handle(
+      request({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+      res,
+      BASE_URL,
+    );
+    const { result } = JSON.parse(res.body) as { result: { serverInfo: { version: string } } };
+    assert.equal(result.serverInfo.version, "7.7.7");
+  });
+});
