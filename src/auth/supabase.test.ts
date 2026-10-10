@@ -6,9 +6,7 @@ import {
   callbackUrl,
   createPkce,
   exchangeCode,
-  isAllowedEmail,
   loadSupabaseAuthConfig,
-  parseAllowedEmails,
   revokeSession,
   type SupabaseAuthConfig,
 } from "./supabase.ts";
@@ -16,47 +14,29 @@ import {
 const CONFIG: SupabaseAuthConfig = {
   url: "https://project.supabase.co",
   publishableKey: "sb_publishable_test",
-  allowedEmails: ["me@example.com"],
 };
 
 function env(overrides: Record<string, string>): NodeJS.ProcessEnv {
   return {
     AIDE_SUPABASE_URL: "https://project.supabase.co",
     AIDE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
-    AIDE_STATUS_ALLOWED_EMAILS: "me@example.com",
     ...overrides,
   };
 }
 
 describe("Googleログインの設定", () => {
-  it("3つとも未設定なら null（従来のパスワードでのログインになる）", () => {
+  it("2つとも未設定なら null（従来のパスワードでのログインになる）", () => {
     assert.equal(loadSupabaseAuthConfig({}), null);
   });
 
   it("読み込んだ値は正規化される", () => {
-    const config = loadSupabaseAuthConfig(
-      env({
-        AIDE_SUPABASE_URL: "https://project.supabase.co/",
-        AIDE_STATUS_ALLOWED_EMAILS: " Me@Example.com , me@example.com ,, other@example.com ",
-      }),
-    );
+    const config = loadSupabaseAuthConfig(env({ AIDE_SUPABASE_URL: "https://project.supabase.co/" }));
     assert.equal(config?.url, "https://project.supabase.co");
-    assert.deepEqual(config?.allowedEmails, ["me@example.com", "other@example.com"]);
   });
 
-  it("許可メールだけ抜けている状態は起動時に落とす", () => {
-    // ここを通してしまうと「Googleでログインできる誰でも」が画面を開ける状態になる。
-    assert.throws(
-      () => loadSupabaseAuthConfig(env({ AIDE_STATUS_ALLOWED_EMAILS: "" })),
-      /AIDE_STATUS_ALLOWED_EMAILS/,
-    );
-  });
-
-  it("カンマだけ・空白だけの許可メールも未設定として扱う", () => {
-    assert.throws(
-      () => loadSupabaseAuthConfig(env({ AIDE_STATUS_ALLOWED_EMAILS: " , , " })),
-      /AIDE_STATUS_ALLOWED_EMAILS/,
-    );
+  it("許可メールは設定に持たない（旧環境変数が残っていても判定には使わない）", () => {
+    const config = loadSupabaseAuthConfig(env({ AIDE_STATUS_ALLOWED_EMAILS: "me@example.com" }));
+    assert.deepEqual(Object.keys(config ?? {}).sort(), ["publishableKey", "url"]);
   });
 
   it("URL・公開鍵が片方だけでも落とす", () => {
@@ -69,25 +49,6 @@ describe("Googleログインの設定", () => {
 
   it("URLとして読めない値は落とす", () => {
     assert.throws(() => loadSupabaseAuthConfig(env({ AIDE_SUPABASE_URL: "project.supabase" })), /URL/);
-  });
-
-  it("許可メールの分解は前後の空白・大文字小文字・重複を吸収する", () => {
-    assert.deepEqual(parseAllowedEmails("A@b.com, a@B.com"), ["a@b.com"]);
-    assert.deepEqual(parseAllowedEmails(undefined), []);
-  });
-});
-
-describe("画面を開いてよい人の判定", () => {
-  it("許可リストにあるアドレスだけ通る", () => {
-    assert.equal(isAllowedEmail("me@example.com", CONFIG), true);
-    assert.equal(isAllowedEmail("ME@Example.com", CONFIG), true);
-    assert.equal(isAllowedEmail(" me@example.com ", CONFIG), true);
-  });
-
-  it("それ以外は通らない", () => {
-    for (const email of [null, undefined, "", "other@example.com", "me@example.com.evil.test"]) {
-      assert.equal(isAllowedEmail(email, CONFIG), false, `${String(email)} が通ってしまった`);
-    }
   });
 });
 
@@ -142,12 +103,17 @@ describe("認可コードの交換", () => {
   it("メールアドレスとアクセストークンを取り出す", async (t) => {
     const fetched = respond(200, {
       access_token: "at",
-      user: { email: "me@example.com", user_metadata: { email_verified: true } },
+      user: {
+        id: "user-1",
+        email: "me@example.com",
+        email_confirmed_at: "2026-01-01T00:00:00Z",
+        user_metadata: { email_verified: true },
+      },
     });
     t.after(() => fetched.mock.restore());
 
     const user = await exchangeCode(CONFIG, { code: "c", verifier: "v" });
-    assert.deepEqual(user, { email: "me@example.com", accessToken: "at" });
+    assert.deepEqual(user, { sub: "user-1", email: "me@example.com", emailVerified: true, accessToken: "at" });
 
     const [endpoint, init] = fetched.mock.calls[0]!.arguments as [URL, RequestInit];
     assert.equal(endpoint.searchParams.get("grant_type"), "pkce");
@@ -172,7 +138,7 @@ describe("認可コードの交換", () => {
     // 一致するだけのアドレスで入られないようにする。
     const fetched = respond(200, {
       access_token: "at",
-      user: { email: "me@example.com", user_metadata: { email_verified: false } },
+      user: { id: "user-1", email: "me@example.com", user_metadata: { email_verified: false } },
     });
     t.after(() => fetched.mock.restore());
     await assert.rejects(exchangeCode(CONFIG, { code: "c", verifier: "v" }), /確認されていない/);

@@ -641,7 +641,7 @@ Androidのアダプティブアイコンはそれより外を切り落として�
 |---|---|
 | 載せるもの | アプリの名前・繋がり方（読む／書く）・使うMCPツールとAPIのパス |
 | 載せないもの | 実データ・設定値・シークレットの有無 |
-| 認証 | 許可したGoogleアカウント（`AIDE_STATUS_ALLOWED_EMAILS`）。Supabase未設定の環境では `AIDE_AUTH_PASSWORD`。`AIDE_AUTH_DISABLED=1` なら素通しし、画面上で警告を出す |
+| 認証 | StatusHubの共通アクセス設定で許可したGoogleアカウント。Supabase未設定の環境では `AIDE_AUTH_PASSWORD`。`AIDE_AUTH_DISABLED=1` なら素通しし、画面上で警告を出す |
 
 **中身は `src/web/map.ts` の静的な宣言**（`CALLERS` / `GROUPS`）。繋がりはMCPツール・
 HTTPエンドポイント・コネクタ・workerに散っていて、機械的に集めても「どのアプリか」までは
@@ -700,7 +700,8 @@ IssueDeck で見られる。古いブックマークから来た人は `/map` �
 ### ログインは許可したGoogleアカウントだけ
 
 ログインには他アプリ（dayspan・shopping-list）と同じ共有SupabaseプロジェクトのGoogleログインを使い、
-`AIDE_STATUS_ALLOWED_EMAILS` に挙げたメールアドレスの人だけを通す（`src/auth/supabase.ts`）。
+StatusHubの共通アクセス設定（管理画面「アプリ」タブの `aide`）で許可された人だけを通す
+（判定は `src/auth/access.ts`）。追加・取り消しは再デプロイも1Passwordの編集も要らない。
 画面をパスワード1本の内側に置くと、漏れても気づけず、誰が開いたかも残らない。
 
 `@supabase/supabase-js` は入れず、Auth の REST（`/auth/v1/authorize` と
@@ -712,13 +713,25 @@ IssueDeck で見られる。古いブックマークから来た人は `/map` �
 |---|---|
 | `AIDE_SUPABASE_URL` | 共有SupabaseプロジェクトのURL |
 | `AIDE_SUPABASE_PUBLISHABLE_KEY` | 同プロジェクトの公開鍵（旧 anon key） |
-| `AIDE_STATUS_ALLOWED_EMAILS` | 画面を開いてよいメールアドレス（カンマ区切り） |
 
-**3つとも設定するか、3つとも空にするかのどちらかで、半端な状態は起動時に落とす。** 許可メールだけが
-空だと「Googleアカウントがあれば誰でも開ける」状態になるため。3つとも空なら従来どおり
+**2つとも設定するか、2つとも空にするかのどちらかで、半端な状態は起動時に落とす。** 2つとも空なら従来どおり
 `AIDE_AUTH_PASSWORD` でのログインになり、その場合は `POST /status/login` も生きている。
 **Googleログインが有効な環境では、パスワードでのログインは受け口ごと無効になる**（404）。
 残すと、メールアドレスで絞った意味がパスワード1本で消える。
+
+### 許可の判定はStatusHubの判定API（#576）
+
+`POST /api/access/v1/decision`（`https://admin.gucchii.com`）へ、**Supabaseが検証した** `sub`・メール・
+`emailVerified`（メールの確認時刻の有無。`user_metadata` は利用者が書き換えられるので見ない）だけを送る。
+契約は status-hub の `docs/access-control.md`。
+
+- **開くたびに判定する。** 結果は `ttlSeconds`（30秒）だけ使い回すので、取り消しは最大30秒で効く
+- 取得できないときは直前の判定を `maxStaleSeconds`（5分）まで使い、超えたら拒否する。一度も判定できていない人は拒否
+- **旧 `AIDE_STATUS_ALLOWED_EMAILS` は判定にもフォールバックにも使わない。** 使うと、StatusHubで取り消した人が通る
+- アプリ別トークンは issue-deck の共有トークン `AIDE_ACCESS_APP_TOKEN`（管理画面の「トークン発行」が書き込む）から
+  実行時に読む。401なら読み直して1回だけ再試行する。トークンが無ければ全員拒否
+- 5分以内ごとにハートビートを送る（管理画面の「反映済み」の表示に使われる）
+- Cookieは利用者ID（`sub`）も署名の対象にする。**導入前に発行したCookieは形式が違うので無効になり、一度ログインし直す**
 
 ### 戻り先URLの登録ずれは、起動時と疎通確認で検知する
 

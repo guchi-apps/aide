@@ -15,6 +15,7 @@ const S256_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
 
 interface StoredAppHandoff {
+  sub: string;
   email: string;
   next: string;
   challenge: string;
@@ -22,6 +23,7 @@ interface StoredAppHandoff {
 }
 
 export interface AppHandoff {
+  sub: string;
   email: string;
   next: string;
 }
@@ -55,7 +57,7 @@ export function isAppChallenge(value: string | null | undefined): value is strin
 
 /** Googleログイン完了後に、短寿命・一回限りの交換コードを発行する。 */
 export function issueAppHandoff(
-  input: { email: string; next: string; challenge: string },
+  input: { sub: string; email: string; next: string; challenge: string },
   now: number = Date.now(),
 ): string {
   if (!isAppChallenge(input.challenge)) throw new Error("invalid app PKCE challenge");
@@ -63,6 +65,7 @@ export function issueAppHandoff(
   prune(now);
   const code = randomBytes(32).toString("base64url");
   handoffs.set(code, {
+    sub: input.sub,
     email: input.email,
     next: input.next,
     challenge: input.challenge,
@@ -86,7 +89,7 @@ export function consumeAppHandoff(
 
   if (found.expiresAt <= now || !PKCE_VERIFIER.test(verifier)) return null;
   if (!valueMatches(s256(verifier), found.challenge)) return null;
-  return { email: found.email, next: found.next };
+  return { sub: found.sub, email: found.email, next: found.next };
 }
 
 /** ASWebAuthenticationSessionだけが受け取る固定の戻り先。 */
