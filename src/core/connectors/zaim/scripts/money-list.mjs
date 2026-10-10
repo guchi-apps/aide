@@ -1,6 +1,7 @@
 import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
+import { buildReceiptDetail } from "./receipt-detail.mjs"
 import { assertLoggedIn } from "./session-check.mjs"
 
 const PAGE_TIMEOUT = 60_000
@@ -33,6 +34,27 @@ async function fetchDetails(detailsUrl) {
     })
     if (!response.ok) throw new Error(`Zaim明細JSONの取得に失敗しました（HTTP ${response.status}）`)
     return await response.json()
+}
+
+// ブラウザコンテキストで実行される。取引の編集画面のHTMLを読むだけで、何も送信しない（#596）。
+// 失敗しても例外にせず、状態として返す（1件の失敗で月全体の取得を落とさない）。
+async function fetchEditPage(editUrl) {
+    try {
+        const response = await fetch(editUrl, { credentials: "include" })
+        if (!response.ok) return { ok: false, status: response.status }
+        return { ok: true, status: response.status, html: await response.text() }
+    } catch {
+        return { ok: false, status: 0 }
+    }
+}
+
+// 子明細を持つ取引（スマートレシート・Amazon等）だけ、編集画面から商品内訳を読む。
+async function readDetail(page, item, raw) {
+    const childCount = Array.isArray(item.child_ids) ? item.child_ids.length : 0
+    if (childCount === 0 || !item.id) return buildReceiptDetail({ id: item.id, isoDate: raw.isoDate, amount: Number(item.amount), childCount: 0 }, null)
+    const origin = new URL(page.url()).origin
+    const result = await page.evaluate(fetchEditPage, `${origin}${raw.editUrl}`)
+    return buildReceiptDetail({ id: item.id, isoDate: raw.isoDate, amount: Number(item.amount), childCount }, result)
 }
 
 // JSONの1件を、parse.ts の ZaimRawMoneyEntry へ寄せる。
@@ -70,7 +92,13 @@ try {
     if (!Array.isArray(details?.items)) {
         throw new Error("Zaim明細JSONの形式が想定と異なります（items が配列ではありません）")
     }
-    const entries = details.items.map(toRawEntry)
+    const entries = []
+    for (const item of details.items) {
+        const raw = toRawEntry(item)
+        // 同じ画面を続けて開くため、1件ずつ順に読む（Zaimへの負荷を抑える）。
+        raw.detail = await readDetail(page, item, raw)
+        entries.push(raw)
+    }
 
     // 巡回・登録と同様、開いたついでにセッションを延長しておく。
     await context.storageState({ path: statePath })

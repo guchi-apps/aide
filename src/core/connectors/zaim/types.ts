@@ -142,6 +142,41 @@ export interface ZaimRawMoneyEntry {
    */
   name: string;
   comment: string;
+  /**
+   * 子明細を持つ取引の商品内訳（`scripts/receipt-detail.mjs`。#596）。
+   * 旧スクリプトの出力には無いため省略可能で、無ければ `none` として扱う。
+   */
+  detail?: ZaimRawReceiptDetail;
+}
+
+/** 取引の編集画面から読んだ商品1行。値引き・配送料・税金も1行として入る。 */
+export interface ZaimRawReceiptItem {
+  /** Zaimの子明細id（親の1行は取引のidと同じ）。 */
+  id: number | null;
+  name: string;
+  amount: number;
+  quantity: null;
+  unitPrice: null;
+  discount: null;
+  tax: null;
+  category: string;
+  genre: string;
+}
+
+/**
+ * 商品内訳の取得状態。
+ *
+ * - `none`     … 子明細を持たない通常明細（内訳は無い）
+ * - `complete` … 件数も合計も一致した（完全取得）
+ * - `partial`  … 商品行は読めたが件数か合計が合わない
+ * - `failed`   … 取得・解析に失敗した（items は付けない）
+ */
+export type ZaimItemsStatus = "none" | "complete" | "partial" | "failed";
+
+export interface ZaimRawReceiptDetail {
+  status: ZaimItemsStatus;
+  items?: ZaimRawReceiptItem[];
+  reason?: string;
 }
 
 export interface ZaimRawMoneyListResult {
@@ -166,6 +201,36 @@ export interface ZaimMoneyEntry {
   /** `ZaimRawMoneyEntry.name` を参照（省略されうる）。 */
   name: string;
   comment: string;
+  /**
+   * 商品別の内訳（スマートレシート・Amazon・カード連携の複数品目）。**`complete` と `partial` の
+   * ときだけ付く。** 取得できなかった行・内訳を持たない行にはキー自体を作らない
+   * （asset-managerが「未取得」と「空」を区別するため）。`name` が代表の1品でも、
+   * ここへ取引合計を載せた行は作らない。
+   */
+  items?: ZaimMoneyItem[];
+  /**
+   * 内訳の取得状態。**`complete` だけが完全取得。** `partial`（一部）・`failed`（失敗）の
+   * 行は、利用側が商品明細として確定してはいけない。旧キャッシュには無い。
+   */
+  itemsStatus?: ZaimItemsStatus;
+  /** `partial` / `failed` の理由。 */
+  itemsNote?: string;
+}
+
+/** `GET /api/money/transactions` の `entries[].items` の1行（asset-managerの `LinkedDetailItem` に対応）。 */
+export interface ZaimMoneyItem {
+  /** Zaimの子明細id。元取引との対応を追えるように保持する（asset-manager側は使わない）。 */
+  id: number | null;
+  name: string;
+  /** 値引き適用後の金額。値引き・割引の行は負の数になる。 */
+  amount: number;
+  /** Zaimの画面に専用項目が無いため、数量・単価・値引き額・税額は常に null（推測しない）。 */
+  quantity: number | null;
+  unitPrice: number | null;
+  discount: number | null;
+  tax: number | null;
+  category: string;
+  genre: string;
 }
 
 export interface ZaimMoneyList {

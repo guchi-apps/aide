@@ -23,7 +23,10 @@ export interface MoneyTransactionsView {
 const NAME_TRUNCATION_NOTE =
   "1件の明細に複数品目がある場合、name には一覧に表示される先頭の品目名しか入らず、" +
   "末尾が「…」で省略されていることがある（Zaim Web版の一覧表示自体の仕様）。" +
-  "正確な全品目が必要な場合は、この一覧だけでは読めない。";
+  "全品目は items に入る。items が付くのは itemsStatus が complete（件数・合計とも一致）または " +
+  "partial（一部しか読めていない可能性。合計が合わない）の行だけで、failed（取得失敗）の行と" +
+  "内訳を持たない通常明細には付かない。complete 以外は商品明細として確定しないこと。" +
+  "itemsStatus が無い行は、内訳の取得に対応する前のキャッシュで、次の巡回で更新される。";
 
 /**
  * Zaim Web版の家計簿明細一覧の横断ビュー。
