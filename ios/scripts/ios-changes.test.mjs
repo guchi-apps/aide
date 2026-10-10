@@ -53,7 +53,6 @@ describe("decide", () => {
     git("config", "user.email", "t@example.com");
     git("config", "user.name", "t");
     write("ios/AIDEios/App.swift", "let a = 1\n");
-    write("ios/AIDEiosWidget/W.swift", "let w = 1\n");
     write("ios/AIDEios-Info.plist", "<plist>1</plist>\n");
     write("ios/README.md", "# a\n");
     write("ios/scripts/x.sh", "echo a\n");
@@ -95,11 +94,11 @@ describe("decide", () => {
     assert.equal(decide({ cwd: dir }).needed, true);
   });
 
-  it("配布し終えて印を進めると不要に戻る。Widgetだけの変更も拾う", () => {
+  it("配布し終えて印を進めると不要に戻る。Swiftだけの変更も拾う", () => {
     git("tag", "ios-testflight/200");
     assert.equal(decide({ cwd: dir }).needed, false);
-    write("ios/AIDEiosWidget/W.swift", "let w = 2\n");
-    commit("widget");
+    write("ios/AIDEios/App.swift", "let a = 3\n");
+    commit("swift");
     const r = decide({ cwd: dir });
     assert.equal(r.needed, true);
     assert.equal(r.base, "ios-testflight/200");

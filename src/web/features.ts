@@ -109,18 +109,6 @@ export const ENDPOINTS: FeatureItem[] = [
       "iOSアプリの短寿命・一回限りコードをPKCE verifierと交換し、WKWebViewへ画面用Cookieを発行する。",
   },
   {
-    name: "/api/mobile/token",
-    meta: "POST / DELETE",
-    description:
-      "iOSアプリ専用の読み取りトークンを発行・失効する。POSTは `/status/auth/app/start?scope=mobile` のログインで得た一回限りコードをPKCE verifierと交換する（form: code・code_verifier）。DELETEは自分のトークンを失効させる。",
-  },
-  {
-    name: "/api/mobile/room-temperature",
-    meta: "GET",
-    description:
-      "iOSアプリ向けに、いまの室温を1件だけ返す（`{sensorName, temperature, measuredAt, stale}`）。専用トークンのBearer認証。センサーは AIDE_MOBILE_ROOM_SENSOR（任意）で選ぶ。読み取り専用。",
-  },
-  {
     name: "/features",
     meta: "GET",
     description: "このページ。ログインが要る（/map と同じ。許可されたGoogleアカウント、未設定の環境ではパスワード）。",
@@ -198,12 +186,6 @@ export const ENDPOINTS: FeatureItem[] = [
       empty: "明細が無い場合は空配列（[]）を返す。取得失敗ではない。",
       errors: ["401: 認証情報が無い、または一致しない。", "503: 読み取り用の共有シークレットが未設定。", "405: GET・HEAD以外。"],
     },
-  },
-  {
-    name: "/api/room/summary",
-    meta: "GET",
-    description:
-      "iOSウィジェット向けの室温API。受信が止まっていないセンサー1台分の室温・湿度・屋外との気温差・最終測定時刻をJSONで返す。画面と同じログインのCookieで認証し、未ログインは401（リダイレクトしない）。値が取れないときは最終測定時刻を添えて503。",
   },
   {
     name: "/api/status",

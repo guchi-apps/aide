@@ -697,56 +697,6 @@ IssueDeck で見られる。古いブックマークから来た人は `/map` �
 ナビに載っている画面（`src/web/layout.ts` の `NAV`）以外は既定（`/map`）へ落とす。外部URLを
 そのまま `Location` に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
 
-### iOSアプリ向けの室温API（aide#454）
-
-iOSアプリ（このリポジトリの `ios/`）のApp Intent（ショートカット・Siri）が、現在の室温をHTTPSで読む
-ための口。**アプリからmyroomへは直接繋がず、AIDEが窓口になる。読み取り専用で、操作系は置かない。**
-
-| 口 | 内容 |
-|---|---|
-| `GET /api/mobile/room-temperature` | `{sensorName, temperature(℃), measuredAt, stale}`。認証なし・不正は401、myroom未設定・取得失敗は503、室温にできるセンサーが無ければ502。`stale: true` は現在値ではない |
-| `POST /api/mobile/token` | ログイン引き継ぎコードをトークンへ交換（form: `code`・`code_verifier`） |
-| `DELETE /api/mobile/token` | 自分のトークンを失効（`Authorization: Bearer`）。存在しないトークンでも204 |
-| `PUT /api/mobile/push/devices` | APNsデバイストークンの登録（JSON: `{deviceToken(hex), environment: development\|production, preferences?: {<種別>: bool}}`）。同じトークンの再登録は更新。成功204・不正400・認証失敗401 |
-| `DELETE /api/mobile/push/devices` | 登録の失効（JSON: `{deviceToken}`）。未登録でも204 |
-
-### プッシュ通知（APNs。#463）
-
-登録された端末へ `src/core/push/send.ts` の `sendPush(kind, path)` で送る。認証は `.p8` のトークン認証
-（`node:http2`＋ES256のJWT。実行時依存なし）。ペイロードは
-`{"aps":{"alert":{"title":"AIDE","body":"<種別ごとの固定文>"},"sound":"default"},"kind":"<種別>","path":"/map"}`。
-**本文は固定文だけで、金額・個人情報・トークンを入れない**（詳細はアプリからAIDEの画面を開いて確認する）。
-`path` は `/` 始まりの相対パスだけ受け付ける。`environment` が `development` ならAPNsのsandbox、
-`production` なら本番のエンドポイントへ送る。`preferences` が `false` の種別は、その端末へ送らない。
-
-APNsが `410`・`400 BadDeviceToken` を返したトークンは、送信のたびに登録簿（`data/push-devices.json`）から自動で消す。
-テスト通知は認証情報のある環境（VPS）で `npm run push-test [-- <path>]`（既定 `/map`）。
-
-| 環境変数 | 内容 |
-|---|---|
-| `AIDE_APNS_KEY` | `.p8` の中身（改行は `\n` の2文字にした1行でもよい） |
-| `AIDE_APNS_KEY_ID` / `AIDE_APNS_TEAM_ID` | Key ID・Team ID |
-| `AIDE_APNS_BUNDLE_ID` | 任意。既定 `com.gucchii.AIDEios` |
-
-値の正は1Password（`op://apps/aide/apns-auth-key` `apns-key-id` `apns-team-id`）。3つ未設定なら送信せず「未設定」になる。
-
-**認証は専用のBearerトークン**（`src/auth/mobile-token.ts`）。MCPのOAuthトークンとは別系統で、
-`/api/mobile/*` にしか通らない（`/mcp`・他の `/api/*` は通らない）ため、Keychainから漏れても
-読めるのは室温だけ。保存するのはSHA-256ハッシュだけ（`data/auth/mobile-tokens.json`・600）、有効期間は180日、
-使うたびに許可メール（`AIDE_STATUS_ALLOWED_EMAILS`）を照合する。
-
-**iOS側がトークンを取る手順:**
-
-1. `code_verifier` を作り、そのS256を `code_challenge` にする
-2. ASWebAuthenticationSessionで `/status/auth/app/start?scope=mobile&code_challenge=<challenge>` を開く（Googleログイン）
-3. `com.gucchii.aide:/auth/callback?code=<code>` で戻る。コードは2分・一回限り、**`scope=mobile` で発行したコードだけがトークンに交換できる**（画面用コードとは交換できない）
-4. `POST /api/mobile/token` に `code` と `code_verifier` を送り、`token` をKeychainへ保存する（この応答でしか平文は得られない）
-5. 以後 `Authorization: Bearer <token>` で室温を読む。401ならステップ1からやり直す
-
-「室温」にするセンサーは `AIDE_MOBILE_ROOM_SENSOR`（センサー名かdeviceId。任意）で選ぶ。未設定なら
-受信が止まっていない最初のセンサー、全部止まっていれば最初の温度ありセンサーを `stale: true` で返す。
-指定したセンサーが見つからないときは、別の部屋の温度を黙って返さず502にする。
-
 ### ログインは許可したGoogleアカウントだけ
 
 ログインには他アプリ（dayspan・shopping-list）と同じ共有SupabaseプロジェクトのGoogleログインを使い、

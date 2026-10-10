@@ -2,9 +2,9 @@
 //  DeepLink.swift
 //  AIDEios
 //
-//  AIDEのリンク（Universal Links・カスタムURLスキーム・ウィジェット・通知）から、WKWebViewで開く画面を決める。
+//  AIDEのリンク（Universal Links・カスタムURLスキーム）から、WKWebViewで開く画面を決める。
 //  受け付けるのは https://aide.gucchii.com 配下のパスだけで、それ以外は捨てる。
-//  Universal Links・ウィジェット・通知・App Intentsは、どれも AIDERoute を作って DeepLinkRouter へ渡す。
+//  どちらも AIDERoute を作って DeepLinkRouter へ渡す。
 //
 
 import Combine
@@ -43,12 +43,6 @@ struct AIDERoute: Equatable {
         }
     }
 
-    /// 通知のペイロード用。`userInfo["url"]`（文字列）を読む。
-    init?(userInfo: [AnyHashable: Any]) {
-        guard let text = userInfo["url"] as? String, let url = URL(string: text) else { return nil }
-        self.init(url: url)
-    }
-
     private init(validatedURL: URL) {
         url = validatedURL
     }
@@ -85,7 +79,7 @@ enum AIDEHost {
 
 /// 開く予定の画面を保持する。ロック中・未ログイン中に届いたリンクも、WebViewが読める状態になるまで持ち続ける。
 final class DeepLinkRouter: ObservableObject {
-    /// `AppDelegate`（通知タップ）とSwiftUIの両方から同じ状態を触るための共有インスタンス。
+    /// アプリ全体で同じ状態を触るための共有インスタンス。
     static let shared = DeepLinkRouter()
 
     @Published private(set) var pendingRoute: AIDERoute?
@@ -96,23 +90,6 @@ final class DeepLinkRouter: ObservableObject {
         guard let route = AIDERoute(url: url) else { return false }
         pendingRoute = route
         return true
-    }
-
-    @discardableResult
-    func handle(userInfo: [AnyHashable: Any]) -> Bool {
-        guard let route = AIDERoute(userInfo: userInfo) else { return false }
-        pendingRoute = route
-        return true
-    }
-
-    /// 通知payloadの`path`（AIDE配下の相対パス）用。`/`始まり以外は捨てる。
-    @discardableResult
-    func handle(path: String?) -> Bool {
-        guard
-            let path, path.hasPrefix("/"), !path.hasPrefix("//"),
-            let url = URL(string: path, relativeTo: AIDEHost.baseURL)?.absoluteURL
-        else { return false }
-        return handle(url)
     }
 
     func consume(_ route: AIDERoute) {

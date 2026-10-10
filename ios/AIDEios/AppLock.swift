@@ -59,8 +59,6 @@ final class AppLock: ObservableObject {
                 // Cookieを復元してからWebViewの読み込みを許可する。
                 await vault.sync(context: context)
                 state = .unlocked
-                // ウィジェット用の室温は、Cookieが復元された後に取得する（画面の表示は待たせない）。
-                Task { await RoomFetcher.refresh() }
             case .cancelled:
                 state = .locked(.cancelled)
             case .failed:

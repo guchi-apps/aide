@@ -46,7 +46,7 @@ open ios/AIDEios.xcodeproj
 ## iOS に関わる変更をしたときの手順
 
 アプリは AIDE のページを `WKWebView` で開く殻なので、**入れ直しが要るのは `ios/` の配布物（`AIDEios/`・
-`AIDEiosWidget/`・`AIDEios.xcodeproj/`・`AIDEios-Info.plist`）が変わったときだけ**です。`src/` の変更は
+`AIDEios.xcodeproj/`・`AIDEios-Info.plist`）が変わったときだけ**です。`src/` の変更は
 何もしなくてもアプリへそのまま届きます。
 
 - develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入れ直しが必要」を自動でコメントする
@@ -103,7 +103,7 @@ Deploy to Production 成功（main）
 ```
 
 - 判定は `node ios/scripts/ios-changes.mjs`（基準は最新のタグ `ios-testflight/<ビルド番号>`。印が無ければ初回として要配布）。
-  対象は `AIDEios/`・`AIDEiosWidget/`・`AIDEiosTests/`・`AIDEios.xcodeproj/`・`AIDEios-Info.plist`。README・`scripts/`・版番号の行だけの差分は不要
+  対象は `AIDEios/`・`AIDEiosTests/`・`AIDEios.xcodeproj/`・`AIDEios-Info.plist`。README・`scripts/`・版番号の行だけの差分は不要
 - ビルド番号は `run_number * 100 + run_attempt`（`CURRENT_PROJECT_VERSION` は `xcodebuild` の引数で上書き）。表示バージョンは `package.json` と同期済みの `MARKETING_VERSION`
 - 署名は App Store Connect API キーによるクラウド署名。**アーカイブは署名せず（`CODE_SIGNING_ALLOWED=NO`）、`-exportArchive` の配布用署名だけ**を使う（#549）。**Web と iOS は別の run**で、iOS だけ失敗することがある
 - 判定だけ確かめる: Actions → iOS TestFlight → Run workflow で `dry_run` にチェック
@@ -125,7 +125,6 @@ Deploy to Production 成功（main）
 1. `sync-secrets.yml` を `only=ASC_KEY_ID,ASC_ISSUER_ID,ASC_KEY_P8` で実行する（キーは kurashio と共通の `op://apps/AppStoreConnect/*`）
 2. App Store Connect に Bundle ID `com.gucchii.AIDEios` の App を作り、内部テストグループを用意する（複数なら `TESTFLIGHT_GROUP` を設定）
 3. Mac の Xcode で一度 Archive し、App ID・配布証明書を作っておく
-4. Widget Extension ターゲットを追加したら、`ios-testflight.yml` のビルド番号・署名の扱いを見直す（現状は本体のみ）
 
 **このワークフローは subpc では実行できず、実際の配布は未確認。** 初回は `dry_run` の後、実際の run で各段階を確かめる。
 
@@ -141,17 +140,6 @@ Deploy to Production 成功（main）
 
 `write-git-sha.sh` はビルド成果物の Info.plist にだけ書くので、ソースの plist は汚れません。未コミットの変更があるビルドには `-dirty` が付きます。
 
-## プッシュ通知（初回のみ Xcode で設定）
-
-`AIDEios/AIDEios.entitlements` に `aps-environment` を書いてありますが、Capability の登録は **Mac の Xcode で 1 回だけ** 確認します（Provisioning Profile の再生成が入ります）。
-
-1. TARGETS の `AIDEios` > **Signing & Capabilities** > `+ Capability` > **Push Notifications** を追加する（既に `aps-environment` が出ていれば追加済み）
-2. 実機でアプリを開き、本人確認後に出る通知許可ダイアログで「許可」する
-3. AIDE 側（`guchi-apps/aide#463`）のテスト通知を送り、受信できることと、タップで `path` の画面が開くことを確かめる
-4. 通知許可を「許可しない」にした後は、AIDE 側の登録が失効される（AIDE のログで確認）
-
-Xcode から実機へ入れたビルドは sandbox の APNs、TestFlight・配布ビルドは本番の APNs を使います（アプリは `DEBUG` かどうかで `environment` を AIDE へ伝えます）。
-
 ## 実機で確認する項目
 
 PR 本文の「Xcodeで確認が必要な項目」を上から順に確かめます。よくある項目は次のとおりです。
@@ -162,7 +150,6 @@ PR 本文の「Xcodeで確認が必要な項目」を上から順に確かめま
 - **ログイン保持**: ログイン後にアプリを終了して再起動しても、ロック解除後にログイン状態が復元される
 - **URL スキーム**: 認証コールバック（`com.gucchii.aide://`）でアプリに戻れる
 - **AIDEリンク**: Safari・メモ等で`https://aide.gucchii.com/...`のリンクを開くとアプリが起動し、対応する画面が開く（AIDE側のAASA配信後）。未ログインでもログイン後に同じ画面へ戻る。`/status/auth`配下や他ドメインのリンクは開かない
-- **プッシュ通知**: 許可ダイアログが出る・テスト通知が届く・タップで該当画面が開く
 - **Signing & Capabilities**: 変更が入った PR では、Team・Bundle ID・Capability に想定外の差分がない
 
 ## コマンドラインでビルドする（任意）
@@ -182,7 +169,7 @@ xcodebuild \
 
 ## Xcode でファイルを追加・Target を追加するとき
 
-Swift ファイルの追加や Target（Widget Extension・Share Extension など）の追加は `project.pbxproj` の変更を伴うため、Linux 側のエージェントは行えません。Mac の Xcode で次のように行い、変更をコミットします。
+Swift ファイルの追加や Target（Share Extension など）の追加は `project.pbxproj` の変更を伴うため、Linux 側のエージェントは行えません。Mac の Xcode で次のように行い、変更をコミットします。
 
 1. File > New > File（または Target）から追加する
 2. 追加先の Target（`AIDEios`）にチェックが入っていることを確認する

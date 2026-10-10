@@ -8,7 +8,7 @@
 #
 # xcodebuildの代わりにはならない。Linuxで気付ける既知の漏れだけを見る。
 #
-# 使い方: scripts/check-swift-imports.sh [ファイル...]（省略時は AIDEios/ と AIDEiosWidget/ 全体）
+# 使い方: scripts/check-swift-imports.sh [ファイル...]（省略時は AIDEios/ 全体）
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ RULES=(
 if [[ $# -gt 0 ]]; then
   files=("$@")
 else
-  mapfile -t files < <(find AIDEios AIDEiosWidget -name '*.swift' 2>/dev/null | sort)
+  mapfile -t files < <(find AIDEios -name '*.swift' 2>/dev/null | sort)
 fi
 
 status=0
