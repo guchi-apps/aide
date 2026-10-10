@@ -33,6 +33,7 @@ export type {
   ZaimBalance,
   ZaimHolding,
   ZaimMoneyEntry,
+  ZaimMoneyItem,
   ZaimMoneyList,
   ZaimOnlineAccount,
   ZaimRawScrapeResult,

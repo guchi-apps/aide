@@ -7,7 +7,8 @@ import { buildZaimMoneyList } from "./parse.ts";
 import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
 import type { ZaimMoneyList, ZaimRawMoneyListResult } from "./types.ts";
 
-const MONEY_LIST_TIMEOUT_MS = 60_000;
+// 子明細を持つ取引ごとに編集画面を1枚ずつ開くため、一覧だけの頃（60秒）より長く取る（#596）。
+const MONEY_LIST_TIMEOUT_MS = 240_000;
 
 const MONEY_LIST_SCRIPT = zaimScriptPath("money-list.mjs");
 
@@ -22,7 +23,7 @@ const MONEY_LIST_SCRIPT = zaimScriptPath("money-list.mjs");
  * 直接呼んではいけない。worker から定期実行し、結果をキャッシュに書いて、参照側はキャッシュを読む。
  *
  * **1件の明細に複数品目がある場合、`name` には一覧に出る先頭の品目名しか入らない。**
- * Zaim Web版の一覧表示自体が省略するため（`parse.ts` の `ZaimRawMoneyEntry.name` を参照）。
+ * 全品目は `items` に入る（子明細を持つ取引の編集画面から読む。#596。取得状態は `itemsStatus`）。
  */
 export async function fetchZaimMoneyList(month: string, deps?: ZaimScriptDeps): Promise<ZaimMoneyList> {
   try {

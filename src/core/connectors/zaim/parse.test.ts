@@ -511,3 +511,54 @@ describe("buildZaimMoneyList", () => {
         assert.equal(list.entries[0]?.amount, 500)
     })
 })
+
+describe("buildZaimMoneyList（商品内訳 #596）", () => {
+    const base = {
+        editUrl: "/money/100/edit",
+        isoDate: "2026-10-06",
+        date: "",
+        amount: "678",
+        category: "食費",
+        genre: "食料品",
+        account: "スマートレシート",
+        toAccount: "",
+        place: "テスト店",
+        name: "玉子L6個入",
+        comment: "",
+    }
+    const item = (name: string, amount: number) => ({
+        id: null, name, amount, quantity: null, unitPrice: null, discount: null, tax: null, category: "食費", genre: "食料品",
+    })
+    const build = (detail?: Parameters<typeof buildZaimMoneyList>[0]["entries"][number]["detail"]) =>
+        buildZaimMoneyList({ url: "", month: "202610", entries: [{ ...base, ...(detail ? { detail } : {}) }] }).entries[0]!
+
+    it("complete は items と itemsStatus を付ける（契約のフィールドを保つ）", () => {
+        const entry = build({ status: "complete", items: [item("玉子L6個入", 199), item("豚こま", 479)] })
+        assert.equal(entry.itemsStatus, "complete")
+        assert.deepEqual(entry.items?.map((i) => i.amount), [199, 479])
+        assert.equal(entry.amount, 678)
+        assert.equal(entry.name, "玉子L6個入")
+    })
+
+    it("partial は items を付けて理由を残す。failed は items を付けない", () => {
+        const partial = build({ status: "partial", items: [item("玉子", 199)], reason: "合計不一致" })
+        assert.equal(partial.itemsStatus, "partial")
+        assert.equal(partial.itemsNote, "合計不一致")
+        const failed = build({ status: "failed", reason: "HTTP 500" })
+        assert.equal(failed.itemsStatus, "failed")
+        assert.equal("items" in failed, false)
+    })
+
+    it("none と旧スクリプトの出力には、内訳のキーを作らない", () => {
+        for (const entry of [build({ status: "none" }), build()]) {
+            assert.equal("items" in entry, false)
+            assert.equal("itemsStatus" in entry, false)
+        }
+    })
+
+    it("読めない行が1つでもあれば、内訳ごと failed にする", () => {
+        const entry = build({ status: "complete", items: [item("玉子", 199), item("", 479)] })
+        assert.equal(entry.itemsStatus, "failed")
+        assert.equal("items" in entry, false)
+    })
+})
