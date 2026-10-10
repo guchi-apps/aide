@@ -49,7 +49,7 @@ struct LockView: View {
 
             VStack {
                 Spacer()
-                Text("build \(BuildInfo.gitSHA)")
+                Text(BuildInfo.label)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
                     .padding(.bottom, 8)
