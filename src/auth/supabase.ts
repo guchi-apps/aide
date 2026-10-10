@@ -28,13 +28,10 @@ export interface SupabaseAuthConfig {
   url: string;
   /** ブラウザへ出しても構わない公開鍵（旧 anon key）。Auth REST の `apikey` に要る。 */
   publishableKey: string;
-  /** 画面を開いてよいメールアドレス。小文字化・重複排除済みで、**空にはならない**。 */
-  allowedEmails: string[];
 }
 
 const ENV_URL = "AIDE_SUPABASE_URL";
 const ENV_KEY = "AIDE_SUPABASE_PUBLISHABLE_KEY";
-const ENV_EMAILS = "AIDE_STATUS_ALLOWED_EMAILS";
 
 /** コールバックのパス。Supabaseダッシュボードへ登録する形は `callbackUrl` の注意書きを見ること。 */
 export const CALLBACK_PATH = "/status/auth/callback";
@@ -56,43 +53,29 @@ export function callbackUrl(baseUrl: string, state: string): string {
 /** 外部への問い合わせが返らないまま画面が固まらないようにする。 */
 const REQUEST_TIMEOUT_MS = 10_000;
 
-export function parseAllowedEmails(raw: string | undefined): string[] {
-  return [
-    ...new Set(
-      (raw ?? "")
-        .split(",")
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean),
-    ),
-  ];
-}
-
 /**
- * 設定を読む。3つとも未設定なら `null`（＝Googleログインを使わず、従来のパスワードで開く）。
+ * 設定を読む。2つとも未設定なら `null`（＝Googleログインを使わず、従来のパスワードで開く）。
  *
- * **半端に設定された状態は起動失敗にする。** 特に許可メールだけが抜けた状態は、
- * 「Googleでログインできる誰でも」が画面を開ける状態になる。`AIDE_AUTH_PASSWORD` を
- * 未設定なら起動させない（`src/auth/config.ts`）のと同じ考え方で、設定ミスを
- * 実行時の穴ではなく起動時の失敗として顕在化させる。
+ * **半端に設定された状態は起動失敗にする。** `AIDE_AUTH_PASSWORD` を未設定なら起動させない
+ * （`src/auth/config.ts`）のと同じ考え方で、設定ミスを実行時の穴ではなく起動時の失敗として
+ * 顕在化させる。
+ *
+ * **誰を通すかは設定に持たない。** 許可の判定はStatusHubの共通アクセス設定
+ * （`src/auth/access.ts`）が正本で、ここは「Googleで身元を確かめる」ところまで。
  */
 export function loadSupabaseAuthConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): SupabaseAuthConfig | null {
   const url = (env[ENV_URL] ?? "").trim().replace(/\/+$/, "");
   const publishableKey = (env[ENV_KEY] ?? "").trim();
-  const allowedEmails = parseAllowedEmails(env[ENV_EMAILS]);
 
-  const missing = [
-    url ? "" : ENV_URL,
-    publishableKey ? "" : ENV_KEY,
-    allowedEmails.length ? "" : ENV_EMAILS,
-  ].filter(Boolean);
+  const missing = [url ? "" : ENV_URL, publishableKey ? "" : ENV_KEY].filter(Boolean);
 
-  if (missing.length === 3) return null;
+  if (missing.length === 2) return null;
   if (missing.length > 0) {
     throw new Error(
       `画面のGoogleログインの設定が足りません: ${missing.join(", ")}。` +
-        "3つすべてを設定するか、3つとも未設定にしてください（未設定ならパスワードでのログインになります）。",
+        "2つとも設定するか、2つとも未設定にしてください（未設定ならパスワードでのログインになります）。",
     );
   }
 
@@ -102,13 +85,7 @@ export function loadSupabaseAuthConfig(
     throw new Error(`${ENV_URL} がURLとして読めません。`);
   }
 
-  return { url, publishableKey, allowedEmails };
-}
-
-/** 画面を開いてよいメールアドレスか。大文字小文字は区別しない。 */
-export function isAllowedEmail(email: string | null | undefined, config: SupabaseAuthConfig): boolean {
-  if (!email) return false;
-  return config.allowedEmails.includes(email.trim().toLowerCase());
+  return { url, publishableKey };
 }
 
 // ---- 認可の開始 ----
@@ -145,14 +122,18 @@ export function authorizeUrl(
 // ---- 認可コードの交換 ----
 
 export interface SignedInUser {
+  /** Supabaseが検証した利用者ID。判定APIへ `sub` として送る。 */
+  sub: string;
   email: string;
+  /** Supabaseが確かめたメールの確認時刻の有無。`user_metadata` は利用者が書き換えられるので使わない。 */
+  emailVerified: boolean;
   /** Supabase側のセッションを失効させるためだけに持つ。保存はしない。 */
   accessToken: string;
 }
 
 interface TokenResponse {
   access_token?: unknown;
-  user?: { email?: unknown; user_metadata?: { email_verified?: unknown } };
+  user?: { id?: unknown; email?: unknown; email_confirmed_at?: unknown; user_metadata?: { email_verified?: unknown } };
 }
 
 /**
@@ -185,13 +166,17 @@ export async function exchangeCode(
   const email = typeof body.user?.email === "string" ? body.user.email : "";
   if (!email) throw new Error("Supabaseの応答にメールアドレスが含まれていない");
 
+  const sub = typeof body.user?.id === "string" ? body.user.id : "";
+  if (!sub) throw new Error("Supabaseの応答に利用者IDが含まれていない");
+  const emailVerified = Boolean(body.user?.email_confirmed_at);
+
   // Googleでログインした場合は常に確認済みだが、将来ほかの経路が有効になったときに
   // 未確認のアドレスが許可リストと一致してしまわないよう、明示的に否定されたら拒む。
   if (body.user?.user_metadata?.email_verified === false) {
     throw new Error("メールアドレスが確認されていない");
   }
 
-  return { email, accessToken: typeof body.access_token === "string" ? body.access_token : "" };
+  return { sub, email, emailVerified, accessToken: typeof body.access_token === "string" ? body.access_token : "" };
 }
 
 /** アクセストークン（JWT）が現在のセッションを指しているか。署名は検証しない（失効の宛先判定だけに使う）。 */

@@ -70,7 +70,7 @@ describe("ログイン画面", () => {
 
 describe("ヘッダーのアカウントメニュー", () => {
   it("ログイン中のメールアドレスとログアウトをメニューの中に出す", () => {
-    const html = accountAction({ email: "me@example.com" }, true);
+    const html = accountAction({ email: "me@example.com", sub: null }, true);
     const menu = html.slice(html.indexOf('class="account-menu"'));
     assert.ok(menu.includes("me@example.com"));
     assert.ok(menu.includes('action="/status/logout"'));
@@ -81,7 +81,7 @@ describe("ヘッダーのアカウントメニュー", () => {
   });
 
   it("ボタンがメニューを開く（popover）ように結ばれている", () => {
-    const html = accountAction({ email: "me@example.com" }, true);
+    const html = accountAction({ email: "me@example.com", sub: null }, true);
     const target = /popovertarget="([^"]+)"/.exec(html)?.[1];
     assert.ok(target, "ボタンに popovertarget が無い");
     assert.ok(html.includes(`id="${target}"`));
@@ -90,16 +90,16 @@ describe("ヘッダーのアカウントメニュー", () => {
   });
 
   it("メールアドレスが無いセッションでも、ログアウトだけは出す", () => {
-    const html = accountAction({ email: null }, true);
+    const html = accountAction({ email: null, sub: null }, true);
     assert.ok(html.includes('action="/status/logout"'));
     assert.ok(!html.includes("ログイン中"));
   });
 
   it("認証が無効なら何も出さない", () => {
-    assert.equal(accountAction({ email: null }, false), "");
+    assert.equal(accountAction({ email: null, sub: null }, false), "");
   });
 
   it("メールアドレスもエスケープする", () => {
-    assert.ok(!accountAction({ email: "<b>x</b>" }, true).includes("<b>x</b>"));
+    assert.ok(!accountAction({ email: "<b>x</b>", sub: null }, true).includes("<b>x</b>"));
   });
 });

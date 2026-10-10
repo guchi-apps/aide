@@ -227,7 +227,7 @@ describe("接続先の設定状況", () => {
     );
 
     const connector = (await readConnectors({
-      supabase: { url: "https://project.supabase.co", publishableKey: "k", allowedEmails: ["a@b.c"] },
+      supabase: { url: "https://project.supabase.co", publishableKey: "k" },
     })).find((item) => item.key === "supabase-redirect");
     assert.equal(connector?.configured, true);
     assert.equal(connector?.probeable, true);

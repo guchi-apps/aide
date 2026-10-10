@@ -23,6 +23,7 @@ import {
   requireBearer,
 } from "./auth/oauth.ts";
 import { logRedirectCheck } from "./auth/redirect-check.ts";
+import { startAccessHeartbeat } from "./auth/access.ts";
 import { CALLBACK_PATH, loadSupabaseAuthConfig } from "./auth/supabase.ts";
 import { recordMcpAuthFailure } from "./mcp/access-log.ts";
 import { McpTransport } from "./mcp/transport.ts";
@@ -311,10 +312,14 @@ server.listen(PORT, HOST, () => {
   console.log(
     `[status] 画面のログイン: ${
       supabaseAuthConfig
-        ? `Google（許可 ${supabaseAuthConfig.allowedEmails.length} 件）`
+        ? "Google（許可はStatusHubの共通アクセス設定）"
         : "パスワード（Googleログインは未設定）"
     }`,
   );
+
+  // 許可判定の反映状況を、StatusHubの管理画面（「反映済み」の表示）へ知らせる。
+  // 画面のログインを使わない環境では判定そのものが無いので送らない。
+  if (supabaseAuthConfig) startAccessHeartbeat();
 
   // Googleログインの戻り先がSupabaseに登録されているかを起動時に一度だけ確かめる（#114）。
   // **待たない・失敗させない。** 判定にはSupabaseへの1往復が要り、相手が落ちているだけで

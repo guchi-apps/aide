@@ -18,11 +18,12 @@ afterEach(() => resetAppHandoffs());
 describe("iOSアプリへのログイン引き継ぎ", () => {
   it("正しいverifierなら一度だけ交換できる", () => {
     const code = issueAppHandoff(
-      { email: "me@example.com", next: "/map", challenge: CHALLENGE },
+      { sub: "user-1", email: "me@example.com", next: "/map", challenge: CHALLENGE },
       1_000,
     );
 
     assert.deepEqual(consumeAppHandoff(code, VERIFIER, 2_000), {
+      sub: "user-1",
       email: "me@example.com",
       next: "/map",
     });
@@ -31,7 +32,7 @@ describe("iOSアプリへのログイン引き継ぎ", () => {
 
   it("違うverifierでは交換できず、そのコードは再利用できない", () => {
     const code = issueAppHandoff(
-      { email: "me@example.com", next: "/features", challenge: CHALLENGE },
+      { sub: "user-1", email: "me@example.com", next: "/features", challenge: CHALLENGE },
       1_000,
     );
 
@@ -42,7 +43,7 @@ describe("iOSアプリへのログイン引き継ぎ", () => {
 
   it("2分を過ぎたコードは交換できない", () => {
     const code = issueAppHandoff(
-      { email: "me@example.com", next: "/map", challenge: CHALLENGE },
+      { sub: "user-1", email: "me@example.com", next: "/map", challenge: CHALLENGE },
       1_000,
     );
     assert.equal(consumeAppHandoff(code, VERIFIER, 121_001), null);
@@ -52,7 +53,7 @@ describe("iOSアプリへのログイン引き継ぎ", () => {
     assert.equal(isAppChallenge(CHALLENGE), true);
     assert.equal(isAppChallenge("short"), false);
     assert.throws(
-      () => issueAppHandoff({ email: "me@example.com", next: "/map", challenge: "short" }),
+      () => issueAppHandoff({ sub: "user-1", email: "me@example.com", next: "/map", challenge: "short" }),
       /invalid app PKCE challenge/,
     );
   });

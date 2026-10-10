@@ -124,18 +124,26 @@ function readSigned(
 /** ログインしている人。Googleログインならメールアドレス、パスワードでのログインなら `null`。 */
 export interface StatusSession {
   email: string | null;
+  /** Supabaseが検証した利用者ID。判定API（`src/auth/access.ts`）へ送る。パスワードでのログインでは `null`。 */
+  sub: string | null;
 }
 
 /**
- * Cookieに入れる値。`<失効時刻>.<メールアドレス>.<署名>`。
+ * Cookieに入れる値。`<失効時刻>.<メールアドレス>.<利用者ID>.<署名>`。
  *
  * メールアドレスは `.` を含みうるので base64url にしてから並べる
  * （区切りが増えると、どこまでが本体か決められなくなる）。
  */
-export function issueSession(key: Buffer, email: string | null, now: Date = new Date()): string {
+export function issueSession(
+  key: Buffer,
+  email: string | null,
+  now: Date = new Date(),
+  sub: string | null = null,
+): string {
   const expiresAt = now.getTime() + TTL_MS;
   const encoded = Buffer.from(email ?? "", "utf8").toString("base64url");
-  return `${expiresAt}.${encoded}.${sign(PURPOSE, [String(expiresAt), encoded], key)}`;
+  const encodedSub = Buffer.from(sub ?? "", "utf8").toString("base64url");
+  return `${expiresAt}.${encoded}.${encodedSub}.${sign(PURPOSE, [String(expiresAt), encoded, encodedSub], key)}`;
 }
 
 /** 署名が合っていて期限内なら、その中身を返す。通らなければ `null`。 */
@@ -144,10 +152,11 @@ export function readSession(
   key: Buffer,
   now: Date = new Date(),
 ): StatusSession | null {
-  const body = readSigned(value, key, PURPOSE, 1, now);
+  const body = readSigned(value, key, PURPOSE, 2, now);
   if (!body) return null;
   const email = Buffer.from(body[0]!, "base64url").toString("utf8");
-  return { email: email || null };
+  const sub = Buffer.from(body[1]!, "base64url").toString("utf8");
+  return { email: email || null, sub: sub || null };
 }
 
 // ---- Googleログインの往復（`src/auth/supabase.ts`）----
@@ -263,10 +272,10 @@ export function sessionCookie(value: string, options: { secure: boolean; maxAge:
 /** ログイン直後に付けるCookie。 */
 export function loginCookie(
   key: Buffer,
-  options: { secure: boolean; email: string | null },
+  options: { secure: boolean; email: string | null; sub?: string | null },
   now: Date = new Date(),
 ): string {
-  return sessionCookie(issueSession(key, options.email, now), {
+  return sessionCookie(issueSession(key, options.email, now, options.sub ?? null), {
     secure: options.secure,
     maxAge: Math.floor(TTL_MS / 1000),
   });
