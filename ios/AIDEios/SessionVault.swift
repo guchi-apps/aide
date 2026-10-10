@@ -10,7 +10,6 @@
 import Foundation
 import LocalAuthentication
 import WebKit
-import WidgetKit
 import os
 
 final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
@@ -79,20 +78,6 @@ final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
         hasSeenSession = false
         lastSavedValue = nil
 
-        // ログアウトした端末へ通知を送り続けない（ショートカット用トークンを使うため、そのトークン自身の失効より先に行う）。
-        await PushNotificationManager.shared.revokeStoredToken()
-
-        // ショートカット用トークンもAIDE側で失効させ、この端末からも消す。
-        let intentTokenStore = IntentTokenStore()
-        if let token = try? intentTokenStore.load() {
-            await IntentTokenRevoker().revoke(token: token)
-        }
-        try? intentTokenStore.delete()
-
-        // ウィジェットに前の室温を残さない。
-        RoomSnapshotStore.save(.loggedOut)
-        WidgetCenter.shared.reloadTimelines(ofKind: WidgetShared.widgetKind)
-
         let dataStore = WKWebsiteDataStore.default()
         await dataStore.removeData(
             ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
@@ -142,13 +127,12 @@ final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
         }
     }
 
-    /// iOSのKeychainはアプリを削除しても残る。再インストール直後に前のログイン・ショートカット用トークンを
+    /// iOSのKeychainはアプリを削除しても残る。再インストール直後に前のログインを
     /// 復元しないよう、初回起動（UserDefaultsは削除で消える）ではKeychainの控えを捨てる。フラグに秘密は含まない。
     private func discardStaleItemAfterReinstall() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.launchedKey) else { return }
         removeStoredSession()
-        try? IntentTokenStore().delete()
         defaults.set(true, forKey: Self.launchedKey)
     }
 

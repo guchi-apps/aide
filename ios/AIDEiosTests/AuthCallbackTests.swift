@@ -2,8 +2,7 @@
 //  AuthCallbackTests.swift
 //  AIDEiosTests
 //
-//  `AuthCallback.code(from:scheme:path:)`は、通常ログイン（ContentView）とショートカット用
-//  トークン発行（MobileTokenIssuer）の両方が使う、認証コールバックURLの共通の検証。
+//  `AuthCallback.code(from:scheme:path:)`は、通常ログイン（ContentView）が使う、認証コールバックURLの検証。
 //  `code`の形式・`error`の有無を含めて受理・拒否のケースを表形式で確認する（#68）。
 //
 

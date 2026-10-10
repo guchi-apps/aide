@@ -2,8 +2,7 @@
 //  AIDERouteTests.swift
 //  AIDEiosTests
 //
-//  `AIDERoute`（DeepLink.swift）は、外部から来るURL（Universal Links・カスタムURLスキーム・
-//  通知のpath）を通すか捨てるかを決める唯一の関門。受理・拒否のケースを表形式で確認する。
+//  `AIDERoute`（DeepLink.swift）は、外部から来るURL（Universal Links・カスタムURLスキーム）を通すか捨てるかを決める唯一の関門。受理・拒否のケースを表形式で確認する。
 //  純粋関数なのでKeychain・WebKitは使わない（#68）。
 //
 

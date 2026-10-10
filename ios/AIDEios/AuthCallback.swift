@@ -2,8 +2,7 @@
 //  AuthCallback.swift
 //  AIDEios
 //
-//  認証コールバックURL（com.gucchii.aide://...）からcodeを取り出す。通常ログイン（ContentView）と
-//  ショートカット用トークン発行（MobileTokenIssuer）で同じ検証をしていたため共通化する。
+//  認証コールバックURL（com.gucchii.aide://...）からcodeを取り出す。通常ログイン（ContentView）で使う。
 //
 
 import Foundation

@@ -27,7 +27,6 @@ struct ContentView: View {
     @EnvironmentObject private var router: DeepLinkRouter
     @State private var authenticationError = ""
     @State private var showsAuthenticationError = false
-    @State private var showsTokenSettings = false
 
     var body: some View {
         ZStack {
@@ -56,40 +55,14 @@ struct ContentView: View {
                 )
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if lock.isUnlocked, scenePhase == .active {
-                Button {
-                    showsTokenSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .accessibilityLabel("ショートカット設定")
-                .padding(.trailing, 12)
-                .padding(.top, 4)
-            }
-        }
-        .onChange(of: lock.isUnlocked) { _, unlocked in
-            if !unlocked { showsTokenSettings = false }
-        }
-        .sheet(isPresented: $showsTokenSettings) {
-            IntentTokenSettingsView()
-        }
         .task { lock.authenticateIfRequired() }
-        // Universal Links・カスタムURLスキーム・ウィジェットのタップはここに届く。
+        // Universal Links・カスタムURLスキームはここに届く。
         .onOpenURL { router.handle($0) }
         .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
             if let url = activity.webpageURL { router.handle(url) }
         }
         .onChange(of: scenePhase) { _, phase in
             lock.scenePhaseChanged(phase)
-        }
-        .onChange(of: lock.isUnlocked) { _, unlocked in
-            // 本人確認後に通知許可を求め、デバイストークンをAIDEへ登録する。
-            if unlocked {
-                Task { await PushNotificationManager.shared.prepare(isLoggedIn: lock.isLoggedIn) }
-            }
         }
     }
 }
