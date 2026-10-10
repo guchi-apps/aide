@@ -2,10 +2,13 @@ import type {
   ZaimBalance,
   ZaimHolding,
   ZaimMoneyEntry,
+  ZaimMoneyItem,
   ZaimMoneyList,
   ZaimOnlineAccount,
   ZaimRawEntry,
+  ZaimRawMoneyEntry,
   ZaimRawMoneyListResult,
+  ZaimRawReceiptItem,
   ZaimRawRefreshResult,
   ZaimRawScrapeResult,
   ZaimRefreshResult,
@@ -256,6 +259,47 @@ function isValidCalendarDate(value: string): boolean {
   return at.getUTCFullYear() === year && at.getUTCMonth() === month - 1 && at.getUTCDate() === day;
 }
 
+/** 内訳の1行を整える。名前か金額が読めなければ null。 */
+function toMoneyItem(raw: ZaimRawReceiptItem): ZaimMoneyItem | null {
+  const name = collapseWhitespace(raw.name ?? "");
+  if (!name || typeof raw.amount !== "number" || !Number.isInteger(raw.amount)) return null;
+  return {
+    id: typeof raw.id === "number" ? raw.id : null,
+    name,
+    amount: raw.amount,
+    quantity: null,
+    unitPrice: null,
+    discount: null,
+    tax: null,
+    category: collapseWhitespace(raw.category ?? ""),
+    genre: collapseWhitespace(raw.genre ?? ""),
+  };
+}
+
+/**
+ * 取得結果の内訳を、一覧の明細へ付ける形にする。**1行でも読めなければ内訳ごと `failed` に落とす**
+ * （一部だけ付けると、欠けた行ぶんが差額に見えて原因の失敗が隠れる）。
+ * 内訳を持たない明細（`none`・旧スクリプトの出力）には何も付けない。
+ */
+function buildItems(
+  detail: ZaimRawMoneyEntry["detail"],
+): Pick<ZaimMoneyEntry, "items" | "itemsStatus" | "itemsNote"> {
+  if (!detail || detail.status === "none") return {};
+  const note = detail.reason ? { itemsNote: detail.reason } : {};
+
+  if (detail.status === "failed" || !Array.isArray(detail.items)) {
+    return { itemsStatus: "failed", itemsNote: detail.reason ?? "商品内訳を取得できませんでした" };
+  }
+  const items: ZaimMoneyItem[] = [];
+  for (const raw of detail.items) {
+    const item = toMoneyItem(raw);
+    if (!item) return { itemsStatus: "failed", itemsNote: "商品名か金額を読めない行がありました" };
+    items.push(item);
+  }
+  if (items.length === 0) return { itemsStatus: "failed", itemsNote: "商品の行が1件もありませんでした" };
+  return { items, itemsStatus: detail.status, ...note };
+}
+
 /**
  * 一覧の生テキストを、金額を数値化しIDを取り出した明細一覧へ変換する。**純粋関数。**
  *
@@ -282,6 +326,7 @@ export function buildZaimMoneyList(raw: ZaimRawMoneyListResult): ZaimMoneyList {
       place: collapseWhitespace(entry.place),
       name: collapseWhitespace(entry.name),
       comment: collapseWhitespace(entry.comment),
+      ...buildItems(entry.detail),
     });
   }
   return { entries, months: [raw.month] };
