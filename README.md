@@ -2590,6 +2590,75 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 - 編集画面を子明細を持つ取引の数だけ開くため、巡回は一覧だけの頃より長くかかる（スクリプトの
   タイムアウトは240秒）
 
+#### 商品内訳の手動再取得（`POST /api/zaim/receipt-detail/refresh`・#600）
+
+`GET /api/money/transactions` は定期巡回（11:30 / 23:30）のキャッシュで、最大約12時間古い。
+asset-manager の「元の取引から再取得」のように**押した時点の最新**が要るときは、対象の1取引だけ
+Zaimから読み直させる。**読むだけで、Zaimの取引の登録・更新・削除も連携口座の更新もしない。**
+
+取得はPlaywrightで数十秒かかるので**非同期**にしている（Web要求のタイムアウトで結果が失われない）。
+
+1. `POST /api/zaim/receipt-detail/refresh`（本文 `{ "moneyId": 9001, "date": "2026-10-09", "amount": 1543 }`）
+   → **202** と `job`（`status: "running"`）。**受付は成功ではない。** `date`・`amount` は取り違えの
+   検知用で、Zaimの取引と一致しなければ `not_found` で止める
+2. `GET /api/zaim/receipt-detail/refresh/<jobId>` を数秒おきに読み、`job.status` が `succeeded` /
+   `failed` になるまで待つ（目安は30〜60秒。2分を超えたら諦めてよい）
+
+```jsonc
+// 成功。fetchedAt が「今回Zaimから読み取れた時刻」。キャッシュの時刻ではない
+{ "ok": true, "job": { "jobId": "…", "moneyId": 9001, "status": "succeeded",
+    "requestedAt": "…", "finishedAt": "…", "fetchedAt": "2026-10-10T03:00:45.000Z",
+    "result": { "cached": true, "entry": { "id": 9001, "date": "2026-10-09", "amount": 1543,
+      "itemsStatus": "complete", "items": [ /* 7行。形は entries[].items と同じ */ ] } } } }
+// 失敗
+{ "ok": true, "job": { "status": "failed", "failure": { "kind": "session_expired", "retryable": false, "message": "…" } } }
+```
+
+- **成功の判定は `job.status === "succeeded"`**（`fetchedAt` と `result` が付く）。受付（202）・`running`・
+  失敗に取得時刻と結果は付かない。`result.entry` の `items` / `itemsStatus` / `itemsNote` は
+  `entries[]` と同じ契約で、**`complete` のときだけ商品明細として確定してよい**（`partial` は確定させない。
+  内訳の読み取りに失敗した取引は `detail_failed` の失敗で、`items` は返さない）。`itemsStatus: "none"`
+  は「確かめたうえで内訳を持たない取引」
+- 失敗は `job.failure.kind` と `retryable` で判別する
+
+| `kind` | 意味 | `retryable` |
+|---|---|---|
+| `busy` | 別の取引の取得中、受け口の別のZaim操作中、または定期巡回の実行中 | true（数分後に） |
+| `session_expired` | Zaimのログインが失効し、自動再ログインでも直らなかった（人が `login.mjs` を実行する） | false |
+| `not_found` | その月の明細に無い、または日付・金額が依頼と一致しない | false |
+| `detail_failed` | 取引は見つかったが商品内訳を読めなかった | true |
+| `fetch_failed` | 画面の操作・通信の失敗 | true |
+| `internal` | 想定外の例外 | true |
+
+  サブPCに届かないときは、ジョブではなくリクエスト自体が **502** で `failure.kind` が `subpc_unreachable`
+  （接続できない＝取得は始まっていない）・`subpc_timeout`（応答待ちで切れた＝受付済みか不明）・
+  `subpc_rejected`（シークレット不一致や受け口が未更新。再試行不可）・`subpc_bad_response`。
+  Zaim側の失敗とは別の種類なので、サブPC停止と認証切れを取り違えない。入力の誤りは400（`invalid`）、
+  受付時に `busy` なら429。`GET` が404 `job_not_found` のときは、受け口の再起動かジョブの期限（1時間）で
+  消えている。**依頼し直してよい**（読むだけなので副作用は無い）
+- **連打**: 同じ取引の取得中に再度 `POST` すると、新しく走らせず**受付済みの `job`**（`deduplicated: true`）を返す。
+  完了後の `POST` は新しく取得し直す。同時に動くのは1件だけ
+- **定期巡回との排他**: 手動再取得と `zaim-money-sync` は `data/zaim/screen.lock`（pidと時刻だけを書く）を取り合う。
+  巡回中の手動再取得は待たずに `busy` で断り、手動再取得中の巡回は最大5分待ってから始める。
+  ログイン状態のファイルを2つのChromiumが同時に更新しない。持ち主が居ない・15分を超えたロックは奪う。
+  **ほかのZaimジョブ（`zaim-sync`・`zaim-keep-alive`・`zaim-refresh`）はこのロックを取らない**
+- **成功結果の後続利用**: 成功（`complete`・`partial`）した内訳はVPSのキャッシュ `zaim-money-detail-<moneyId>` へ送る。
+  `GET /api/money/transactions` は**同じ取引（id・日付・金額が一致）で定期巡回より新しい**ものだけを重ね、
+  その行に `itemsFetchedAt`（手動再取得の時刻）を付ける。次の巡回が走れば巡回のほうが新しくなり、重ならない。
+  送れなかったときは `result.cached: false`（取得自体は成功）
+- **範囲を絞る**: 月の一覧JSONを1回読み、対象の取引の編集画面だけを開く（全体巡回はしない）。対象の月は
+  `date` から `ZAIM_MONTH_START_DAY` で決める。スクリプトの上限は120秒で、一時的な失敗のやり直しはしない
+- ジョブの状態は**サブPCの受け口のメモリだけ**に持つ（取得した商品名・金額を `data/` へ書かない）
+
+認証は他のZaim登録口と同じ `AIDE_ZAIM_WRITE_SECRET`（読み取り用の `AIDE_READ_SECRET` ではない。
+Zaimの画面を操作する権限なので登録口と同じ側に置いた）。呼び出しは同じVPS上の `127.0.0.1:3114` から。
+実行はサブPCの `aide-zaim-web.service`（`AIDE_ZAIM_WEB_UPSTREAM_URL` で中継する他の登録口と同じ経路）。
+
+**デプロイ・サブPC更新**: 新しいシークレット・環境変数・systemd unitは無い。VPSは `develop` → `main` の
+デプロイで反映される。サブPCは `self-update` が `origin/develop` を取り込み、受け口を再起動する
+（再起動で進行中のジョブは消える）。**VPSだけ先に出すと `subpc_rejected`（404）になる**ので、
+サブPCが先（`develop` の取り込み後）、VPS（`main`）が後。
+
 **対象は「当月＋先月（JST）ぶん」。** 月初直後に先月のカード連携明細が候補から漏れないよう、
 `zaim-money-sync` が2か月ぶんを取得して1つのキャッシュにまとめる（aide#286）。`months` に実際に
 読んだ月（`YYYYMM`）を返す。**先月分だけの取得に失敗した場合は当月のみで保存し、`months` も

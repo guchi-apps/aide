@@ -15,6 +15,14 @@ describe("routeZaimWeb", () => {
     assert.equal(routeZaimWeb("/health"), "health");
   });
 
+  it("商品内訳の手動再取得（#600）は受付とジョブの状態の2経路だけ開く", () => {
+    const id = "0b6e3a52-8c5d-4a39-9f0a-1d2c3b4a5e6f";
+    assert.equal(routeZaimWeb("/api/zaim/receipt-detail/refresh"), "receipt-refresh");
+    assert.equal(routeZaimWeb(`/api/zaim/receipt-detail/refresh/${id}`), "receipt-refresh-job");
+    assert.equal(routeZaimWeb("/api/zaim/receipt-detail/refresh/../../payment"), "not-found");
+    assert.equal(routeZaimWeb("/api/zaim/receipt-detail"), "not-found");
+  });
+
   it("本体サーバーの他の口は開かない", () => {
     // MCP・OAuth・画面・公式APIでの登録は、サブPCに2組目を作らないため載せていない。
     for (const path of [

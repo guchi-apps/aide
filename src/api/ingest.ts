@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isZaimReceiptDetailCacheKey } from "../core/connectors/zaim/receipt-refresh.ts";
 import { writeCacheWithHistory } from "../worker/job-history.ts";
 import { JOB_CATALOG } from "../worker/jobs/catalog.ts";
 import { CLAUDE_SESSIONS_CACHE_KEY } from "../worker/jobs/claude-sessions-sync.ts";
@@ -72,7 +73,8 @@ export async function handleIngest(
     return;
   }
 
-  if (!ALLOWED_KEYS.has(key)) {
+  // 商品内訳の手動再取得結果（#600）は取引idごとのキー。固定の集合に列挙できないので形で判定する。
+  if (!ALLOWED_KEYS.has(key) && !isZaimReceiptDetailCacheKey(key)) {
     res.writeHead(404, { "Content-Type": "application/json" })
       .end(JSON.stringify({ error: `未知のキー: ${key}` }));
     return;

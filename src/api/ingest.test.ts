@@ -163,6 +163,16 @@ describe("worker からの取り込み", () => {
     assert.ok(checkedKeys > 0, "CACHE_KEYをexportするジョブが1件も見つからなかった");
   });
 
+  it("商品内訳の手動再取得の結果（zaim-money-detail-<取引id>）は受け入れ、形の違うキーは弾く（#600）", async () => {
+    const accepted = await post("zaim-money-detail-9001", { source: "zaim-receipt-detail", data: { fetchedAt: "x" } });
+    assert.equal(accepted.status, 200);
+    assert.ok(await readCache("zaim-money-detail-9001"));
+
+    for (const key of ["zaim-money-detail-", "zaim-money-detail-0", "zaim-money-detail-abc", "zaim-money-detail-1-2"]) {
+      assert.equal((await post(key, { source: "x", data: {} })).status, 404, key);
+    }
+  });
+
   it("未知のキーは404で弾く", async () => {
     const captured = await post("unknown-key", { source: "worker", data: {} });
 
