@@ -41,6 +41,7 @@ import {
   assetManagerSubscriptionsTool,
 } from "./tools/asset-manager.ts";
 import { researchDeskImportWeeklyReportTool } from "./tools/research-desk.ts";
+import { reportWorkTool, workReportsTool } from "./tools/work-reports.ts";
 
 /**
  * MCPに出すツールの登録簿を組み立てる。**ツールを足すときはここへ足す。**
@@ -115,5 +116,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(createNotificationTool);
   registry.register(createTaskCandidateTool);
   registry.register(saveDailyBriefTool);
+  // dotの作業報告（#609）。読み取りと書き込みは別ツール・別scope。通知・タスク候補の登録では代用しない。
+  registry.register(reportWorkTool);
+  registry.register(workReportsTool);
   return registry;
 }

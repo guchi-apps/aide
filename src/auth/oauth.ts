@@ -23,7 +23,15 @@ import { escapeHtml, renderPage } from "../web/layout.ts";
 /** タスク専用の読み取り・書き込みを別承認単位にする。 */
 export const TASK_READ_SCOPE = "tasks:read";
 export const TASK_WRITE_SCOPE = "tasks:write";
-const SUPPORTED_SCOPES = new Set([TASK_READ_SCOPE, TASK_WRITE_SCOPE]);
+/** dotの作業報告（#609）。書き込みと読み取りは別の承認単位にする。 */
+export const WORK_REPORTS_READ_SCOPE = "work-reports:read";
+export const WORK_REPORTS_WRITE_SCOPE = "work-reports:write";
+const SUPPORTED_SCOPES = new Set([
+  TASK_READ_SCOPE,
+  TASK_WRITE_SCOPE,
+  WORK_REPORTS_READ_SCOPE,
+  WORK_REPORTS_WRITE_SCOPE,
+]);
 
 /**
  * 自分が発行できる権限だけを認可コードへ保存する。

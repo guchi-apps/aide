@@ -200,6 +200,12 @@ export const ENDPOINTS: FeatureItem[] = [
       "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/api/status と同じ共有シークレットで認証する。",
   },
   {
+    name: "/api/work-reports",
+    meta: "GET",
+    description:
+      "dotが報告した作業状況の読み取りAPI（StatusHub向け）。作業ID・適用版・状態・結果と鮮度（fresh / stale / final）をJSONで返し、無報告（reportState: none）・更新途絶・取得失敗（503）を区別できる。作業報告専用の共有シークレットで認証する。",
+  },
+  {
     name: "/api/zaim/payment",
     meta: "POST",
     description:
