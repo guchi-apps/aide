@@ -45,6 +45,13 @@ describe("OAuth scope", () => {
       ["tasks:read", "tasks:write"],
     );
   });
+
+  it("作業報告の読み取り・書き込みは別のscopeとして付与できる（#609）", () => {
+    assert.deepEqual(
+      parseSupportedScopes("work-reports:read work-reports:write work-reports:admin"),
+      ["work-reports:read", "work-reports:write"],
+    );
+  });
 });
 
 describe("設定", () => {

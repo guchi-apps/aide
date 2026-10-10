@@ -529,6 +529,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
+| `aide_report_work` | dotが明示的に報告した作業の節目（開始・実行中・待機・完了・失敗・取消）を保存する。**書き込みツール**（scope `work-reports:write`。再送しても二重登録されない。契約は [docs/work-reports.md](docs/work-reports.md)） |
+| `aide_work_reports` | 保存済みの作業報告を読み戻す。**読み取り専用**（scope `work-reports:read`。StatusHubは同じ正本を `GET /api/work-reports` で読む） |
 | `asset_manager_import_payment` | Gmailの請求メール1件をAsset Managerへ取り込む。**ChatGPTスケジュール向けの書き込みツール**（信頼度が十分だとAsset ManagerがZaimへの登録まで進める。この経路から取り消せない。詳細は[ChatGPTからAsset Managerへ請求情報を取り込む](#chatgptからasset-managerへ請求情報を取り込むmcp)） |
 | `asset_manager_subscriptions` | Asset Manager（サブスク管理の移管先）のサブスク一覧。合計（月額・年額・件数）・次の請求・契約ごとの明細（1回あたりの請求額と月あたりの金額の両方）。**読み取り専用**（`includeEnded` で解約済みも含める。詳細は[サブスクを読む](#asset-managerのサブスクを読むmcp)） |
 | `asset_manager_create_subscription` | Asset Managerへサブスクと初回料金を新規登録する。**書き込みツール**（作成のみ。既存の契約・料金を編集・削除しない） |

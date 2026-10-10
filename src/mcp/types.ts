@@ -65,6 +65,12 @@ export interface ToolContext {
   sessionId: string | null;
   /** MCPアクセストークンが持つ権限。認証無効の開発時は全権限として扱う。 */
   scopes?: readonly string[];
+  /**
+   * 認可済みアクセストークンに結び付いたOAuthクライアントID。**サーバーが検証した値**で、
+   * 引数やクライアントの自己申告ではない。認証無効の開発時は固定の開発用値。
+   * 再接続（動的クライアント登録のやり直し）で変わりうるため、所有者ではなく報告元の識別に使う。
+   */
+  clientId?: string | null;
 }
 
 /** JSON-RPC の標準エラーコード。 */

@@ -70,6 +70,8 @@
 | `aide_create_notification` | aide-botへ通知登録 | G | **書** | aide-bot API | aide-bot | 1.3KB | 小 | 維持（G専用） |
 | `aide_create_task_candidate` | aide-botへタスク候補 | G | **書** | aide-bot API | aide-bot | 1.3KB | 小 | 維持（G専用） |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフ | G | **書** | aide-bot API | aide-bot | 1.3KB | 小 | 維持（G専用） |
+| `aide_report_work` | dotの作業報告を保存 | C | **書** | なし | `data/work-reports.json` | 約2.5KB | 小 | 新規（#609）。scope `work-reports:write`。[docs/work-reports.md](work-reports.md) |
+| `aide_work_reports` | 保存済みの作業報告を読む | C | 読 | `/api/work-reports` | `data/work-reports.json` | 約1.0KB | 小〜中（上限50件） | 新規（#609）。scope `work-reports:read` |
 
 **未使用・重複と確認できたツールは無く、廃止・改名はしない。** 似た名前の組
 （`aide_balances`/`aide_fixed_costs`、`aide_room_sensors`/`aide_aircon_status`、`aide_dev_status`/`aide_repo_status`、

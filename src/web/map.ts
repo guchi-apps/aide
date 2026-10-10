@@ -139,6 +139,13 @@ export const CALLERS: Caller[] = [
     ],
   },
   {
+    id: "dot",
+    name: "dot",
+    via: "MCP",
+    what: "作業の節目を報告する／報告済みの作業を読み戻す",
+    uses: ["aide_report_work", "aide_work_reports"],
+  },
+  {
     id: "asset-manager",
     name: "Asset Manager",
     via: "API",
@@ -170,8 +177,8 @@ export const CALLERS: Caller[] = [
     id: "ops-dashboard",
     name: "StatusHub",
     via: "API",
-    what: "AIDEの動作状況を表示",
-    uses: ["/api/status", "/api/status/checks"],
+    what: "AIDEの動作状況・dotの作業報告を表示",
+    uses: ["/api/status", "/api/status/checks", "/api/work-reports"],
   },
 ];
 
