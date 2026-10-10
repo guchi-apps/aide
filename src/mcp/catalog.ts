@@ -32,6 +32,7 @@ import {
   updateTaskTool,
 } from "./tools/tasks.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
+import { vpsMemoryTool } from "./tools/vps-memory.ts";
 import { weatherTool } from "./tools/weather.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
 import {
@@ -102,6 +103,8 @@ export function buildToolRegistry(): ToolRegistry {
   // IssueDeckの進捗・要対応・予約の読み取り（#569）。GitHub由来の aide_dev_status とは別。集計はIssueDeck側。
   registry.register(issueDeckSummaryTool);
   registry.register(issueDeckItemsTool);
+  // 本番issue-deckのVPSメモリ計測結果の読み取り（#608）。計測・集計はissue-deck側で、AIDEは中継のみ。
+  registry.register(vpsMemoryTool);
   registry.register(claudeSessionsTool);
   // Zaimへの支出登録（#135）。**読み取り（候補の一覧）と書き込み（登録）を分けている。**
   // 1本に畳むと、Claude Code側で「常に許可」にしたときに書き込みまで素通しになる。
