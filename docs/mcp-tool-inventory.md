@@ -68,6 +68,8 @@
 | `asset_manager_subscriptions` | サブスク明細 | C B | 読 | Asset Manager API | Asset Manager | 2.3KB | **約40KB超→約16〜18KB** | **改善**（下記） |
 | `asset_manager_create_subscription` | サブスク登録 | C G B | **書** | Asset Manager API | Asset Manager | 2.4KB | 小 | 維持 |
 | `asset_manager_add_subscription_price` | 料金改定を追加 | C G B | **書** | Asset Manager API | Asset Manager | 1.4KB | 小 | 維持 |
+| `asset_manager_update_subscription` | 契約の編集 | C G B | **書** | Asset Manager API | Asset Manager | 3.0KB | 小 | 維持 |
+| `asset_manager_record_subscription_cancellation` | 解約情報の記録 | C G B | **書** | Asset Manager API | Asset Manager | 2.0KB | 小 | 維持 |
 | `aide_research_desk_import_weekly_report` | 業界情報の登録 | G | **書** | Research Desk内部API | Research Desk | 5.1KB | 小 | 維持（G専用の定期タスク。ChatGPTが繋げるのはAIDEだけ） |
 | `aide_create_notification` | aide-botへ通知登録 | G | **書** | aide-bot API | aide-bot | 1.3KB | 小 | 維持（G専用） |
 | `aide_create_task_candidate` | aide-botへタスク候補 | G | **書** | aide-bot API | aide-bot | 1.3KB | 小 | 維持（G専用） |
@@ -105,6 +107,6 @@
 
 - **aide-bot の書き込み名指しの漏れ**（guchi-apps/aide-bot#367）: `presets.ts` の `writeTools` は
   `aide_zaim_payment`・`aide_create_issue` の2本だけで、`aide_create_event`・`aide_update_event`・`aide_delete_event`・`aide_room_press`・`aide_aircon_control`・
-  `asset_manager_create_subscription`・`asset_manager_add_subscription_price`・`issue_deck_upload_image` は
+  `asset_manager_create_subscription`・`asset_manager_add_subscription_price`・`asset_manager_update_subscription`・`asset_manager_record_subscription_cancellation`・`issue_deck_upload_image` は
   「書き込みツールを渡さない」設定でも素通しになる。AIDE側の書き込みツールの一覧はこの表の「書」の行。
   ここでは変更しない。

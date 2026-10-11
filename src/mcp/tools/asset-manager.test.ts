@@ -5,7 +5,9 @@ import {
   assetManagerAddSubscriptionPriceTool,
   assetManagerCreateSubscriptionTool,
   assetManagerImportPaymentTool,
+  assetManagerRecordSubscriptionCancellationTool,
   assetManagerSubscriptionsTool,
+  assetManagerUpdateSubscriptionTool,
   omitSubscriptionHistory,
 } from "./asset-manager.ts";
 
@@ -454,9 +456,10 @@ describe("asset_manager_subscriptions", () => {
     process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
   }
 
-  it("引数は includeEnded・includeHistory だけの任意項目で、必須は無い", () => {
+  it("引数は includeEnded・name・includeHistory だけの任意項目で、必須は無い", () => {
     assert.deepEqual(Object.keys(assetManagerSubscriptionsTool.inputSchema.properties as object), [
       "includeEnded",
+      "name",
       "includeHistory",
     ]);
     assert.equal(assetManagerSubscriptionsTool.inputSchema.required, undefined);
@@ -704,6 +707,11 @@ describe("asset_manager_create_subscription", () => {
   it("POSTで契約と初回料金をBearer認証付きで送る", async () => {
     useEnv();
     const fetchMock = mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+      // 登録前の重複確認（既存に類似名は無い）
+      if (init?.method === "GET") {
+        assert.equal(input, "https://asset.example.test/api/subscriptions?includeEnded=1");
+        return new Response(JSON.stringify({ status: "ok", subscriptions: [{ id: 1, name: "Hulu" }] }), { status: 200 });
+      }
       assert.equal(input, "https://asset.example.test/api/subscriptions");
       assert.equal(init?.method, "POST");
       assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${SECRET}`);
@@ -824,6 +832,196 @@ describe("asset_manager_add_subscription_price", () => {
       const badMonth = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, ...PRICE, billingMonth: 13 }, { sessionId: null });
       assert.deepEqual(parsed(badMonth), { status: "error", reason: "YEARLY の billingMonth は1〜12の整数で指定してください" });
       assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+});
+
+describe("asset_manager_create_subscription の重複確認（#642）", () => {
+  it("類似名の既存契約があれば登録せず候補を返す。allowDuplicate: true なら登録する", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const methods: string[] = [];
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      methods.push(String(init?.method));
+      if (init?.method === "GET") {
+        return new Response(JSON.stringify({ status: "ok", subscriptions: [{ id: 7, name: "ＮＥＴＦＬＩＸ", status: "ENDED" }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ status: "created", subscriptionId: 8 }), { status: 201 });
+    });
+    const base = {
+      name: "netflix", paymentMethodName: "楽天カード", startDate: "2026-09-01",
+      amount: 1080, currency: "JPY", billingCycle: "MONTHLY", billingInterval: 1, billingDay: 15, effectiveFrom: "2026-10-01",
+    };
+    try {
+      const blocked = parsed(await assetManagerCreateSubscriptionTool.handler(base, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(blocked["status"], "duplicateCandidates");
+      assert.equal(blocked["applied"], false);
+      assert.deepEqual(methods, ["GET"]);
+
+      const forced = parsed(await assetManagerCreateSubscriptionTool.handler({ ...base, allowDuplicate: true }, { sessionId: null }));
+      assert.deepEqual(forced, { status: "created", subscriptionId: 8 });
+      assert.deepEqual(methods, ["GET", "POST"]);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+});
+
+describe("asset_manager_update_subscription / record_subscription_cancellation（#642）", () => {
+  const BEFORE = {
+    id: 5, name: "Claude Pro", category: "SUBSCRIPTION", status: "AUTO_RENEWING", paymentMethod: "楽天カード",
+    startDate: "2026-01-01", endDate: null, autoRenew: true, cancelPlanned: false, memo: "個人用",
+    labels: ["AI"], nextBillingDay: "2026-11-01", updatedAt: "2026-10-01T00:00:00.000Z",
+  };
+
+  function useEnv(): void {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+  }
+
+  /** GET は state を返し、PATCH は state へ反映する簡易の Asset Manager。 */
+  function fakeAssetManager(opts: { patchStatus?: number; patchBody?: unknown } = {}) {
+    let state: Record<string, unknown> = { ...BEFORE };
+    const patches: unknown[] = [];
+    const mocked = mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => {
+      if (init?.method === "GET") return new Response(JSON.stringify({ status: "ok", subscriptions: [state] }), { status: 200 });
+      assert.equal(input, "https://asset.example.test/api/subscriptions/5");
+      assert.equal(init?.method, "PATCH");
+      const body = JSON.parse(String(init?.body)) as { subscription: Record<string, unknown> };
+      patches.push(body);
+      if (opts.patchStatus && opts.patchStatus >= 300) return new Response(JSON.stringify(opts.patchBody ?? {}), { status: opts.patchStatus });
+      const { paymentMethodName: _ignored, paymentMethodEffectiveFrom: _ignored2, ...rest } = body.subscription;
+      state = { ...state, ...rest, status: rest["autoRenew"] === false ? "SCHEDULED_TO_END" : state["status"] };
+      return new Response(JSON.stringify({ status: "updated" }), { status: 200 });
+    });
+    return { mocked, patches };
+  }
+
+  it("指定した項目だけをPATCHし、変更前後を返す", async () => {
+    useEnv();
+    const { mocked, patches } = fakeAssetManager();
+    try {
+      const out = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "claude pro", memo: "家族共有" }, { sessionId: null })) as Record<string, any>;
+      assert.equal(out.status, "updated");
+      assert.equal(out.applied, true);
+      assert.deepEqual(out.changedFields, ["memo"]);
+      assert.equal(out.before.memo, "個人用");
+      assert.equal(out.after.memo, "家族共有");
+      assert.equal(out.after.name, "Claude Pro");
+      assert.deepEqual(patches, [{ expectedName: "Claude Pro", expectedUpdatedAt: BEFORE.updatedAt, subscription: { memo: "家族共有" } }]);
+    } finally {
+      mocked.mock.restore();
+    }
+  });
+
+  it("同じ内容の再実行は何も送らない（unchanged）", async () => {
+    useEnv();
+    const { mocked, patches } = fakeAssetManager();
+    try {
+      const out = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", autoRenew: true, labels: ["AI"] }, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(out["status"], "unchanged");
+      assert.equal(patches.length, 0);
+    } finally {
+      mocked.mock.restore();
+    }
+  });
+
+  it("対象が無い・名前が一致しない・日付が不正・項目が空なら変更しない", async () => {
+    useEnv();
+    const { mocked, patches } = fakeAssetManager();
+    try {
+      const missing = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 99, expectedName: "x", memo: "a" }, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(missing["applied"], false);
+      const mismatch = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "ChatGPT Plus", memo: "a" }, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(mismatch["applied"], false);
+      assert.match(String(mismatch["reason"]), /一致しません/);
+      const badDate = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", endDate: "2026-02-31" }, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(badDate["status"], "error");
+      const beforeStart = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", endDate: "2025-12-31" }, { sessionId: null })) as Record<string, unknown>;
+      assert.match(String(beforeStart["reason"]), /startDate 以後/);
+      const empty = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro" }, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(empty["status"], "error");
+      const methodWithoutDate = parsed(await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", paymentMethodName: "三井住友" }, { sessionId: null })) as Record<string, unknown>;
+      assert.match(String(methodWithoutDate["reason"]), /paymentMethodEffectiveFrom/);
+      assert.equal(patches.length, 0);
+    } finally {
+      mocked.mock.restore();
+    }
+  });
+
+  it("競合（409）・未対応（404）は isError で applied: false と未反映を返す", async () => {
+    useEnv();
+    for (const [status, pattern] of [[409, /別の更新/], [404, /未反映の可能性/]] as const) {
+      const { mocked } = fakeAssetManager({ patchStatus: status, patchBody: status === 409 ? { reason: "更新が競合しました" } : {} });
+      try {
+        const result = await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", memo: "x" }, { sessionId: null });
+        assert.equal(result.isError, true);
+        const out = parsed(result) as Record<string, unknown>;
+        assert.equal(out["applied"], false);
+        assert.match(String(out["reason"]), pattern);
+        assert.match(String(out["reason"]), /変更は反映されていません/);
+      } finally {
+        mocked.mock.restore();
+      }
+    }
+  });
+
+  it("解約手続き完了: 自動更新停止・終了日・メモ追記をまとめて送り、メモの既存内容を残す。再実行は unchanged", async () => {
+    useEnv();
+    const { mocked, patches } = fakeAssetManager();
+    try {
+      const args = { subscriptionId: 5, expectedName: "Claude Pro", stage: "procedure_completed", usableUntil: "2026-11-30", completedOn: "2026-10-11" };
+      const out = parsed(await assetManagerRecordSubscriptionCancellationTool.handler(args, { sessionId: null })) as Record<string, any>;
+      assert.equal(out.status, "updated");
+      assert.deepEqual(patches, [{
+        expectedName: "Claude Pro",
+        expectedUpdatedAt: BEFORE.updatedAt,
+        subscription: {
+          autoRenew: false,
+          cancelPlanned: true,
+          endDate: "2026-11-30",
+          memo: "個人用\n[解約手続き完了 2026-10-11] 事業者での解約手続き済み（2026-11-30まで利用可能。台帳上の記録）",
+        },
+      }]);
+      assert.equal(out.after.autoRenew, false);
+      assert.equal(out.after.endDate, "2026-11-30");
+      assert.equal(out.after.name, "Claude Pro");
+
+      const again = parsed(await assetManagerRecordSubscriptionCancellationTool.handler(args, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(again["status"], "unchanged");
+      assert.equal(patches.length, 1);
+    } finally {
+      mocked.mock.restore();
+    }
+  });
+
+  it("解約: considering は cancelPlanned だけ、procedure_completed は usableUntil が必須", async () => {
+    useEnv();
+    const { mocked, patches } = fakeAssetManager();
+    try {
+      const missing = parsed(await assetManagerRecordSubscriptionCancellationTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", stage: "procedure_completed" }, { sessionId: null })) as Record<string, unknown>;
+      assert.equal(missing["status"], "error");
+      assert.equal(patches.length, 0);
+      await assetManagerRecordSubscriptionCancellationTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", stage: "considering" }, { sessionId: null });
+      assert.deepEqual((patches[0] as { subscription: unknown }).subscription, { cancelPlanned: true });
+    } finally {
+      mocked.mock.restore();
+    }
+  });
+});
+
+describe("asset_manager_subscriptions の name 絞り込み（#642）", () => {
+  it("全角半角・大文字小文字を無視した部分一致で絞り、件数を返す", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      new Response(JSON.stringify({ status: "ok", subscriptions: [{ id: 1, name: "ＮＥＴＦＬＩＸ" }, { id: 2, name: "Hulu" }] }), { status: 200 }));
+    try {
+      const out = parsed(await assetManagerSubscriptionsTool.handler({ name: "netflix" }, { sessionId: null })) as Record<string, any>;
+      assert.deepEqual(out.subscriptions.map((s: { id: number }) => s.id), [1]);
+      assert.deepEqual(out.nameFilter, { query: "netflix", matchCount: 1 });
     } finally {
       fetchMock.mock.restore();
     }
