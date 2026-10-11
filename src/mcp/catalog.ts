@@ -38,6 +38,8 @@ import { weatherTool } from "./tools/weather.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
 import {
   assetManagerAddSubscriptionPriceTool,
+  assetManagerRecordSubscriptionCancellationTool,
+  assetManagerUpdateSubscriptionTool,
   assetManagerCreateSubscriptionTool,
   assetManagerImportPaymentTool,
   assetManagerSubscriptionsTool,
@@ -118,6 +120,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(assetManagerSubscriptionsTool);
   registry.register(assetManagerCreateSubscriptionTool);
   registry.register(assetManagerAddSubscriptionPriceTool);
+  registry.register(assetManagerUpdateSubscriptionTool);
+  registry.register(assetManagerRecordSubscriptionCancellationTool);
   registry.register(researchDeskImportWeeklyReportTool);
   registry.register(createNotificationTool);
   registry.register(createTaskCandidateTool);
