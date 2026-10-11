@@ -18,6 +18,7 @@ AIDE（`https://aide.gucchii.com/map`）を表示する iOS アプリのラッ�
   - 認証コールバックの検証: `AuthCallback.swift`（`code(from:scheme:path:)`。認証コールバックURL〔`com.gucchii.aide:/auth/callback?code=...`〕のスキーム・ホスト（無し）・パス・`error`の有無・`code`の形式〔43文字のbase64url〕を確認する純粋関数。通常ログイン〔`ContentView.swift`のCoordinator〕が使う。Keychain・WebKitに依存しないため`AIDEiosTests`で直接テストできる）
 - `AIDEiosTests/` — Unit Testのソース（`AIDERouteTests.swift`・`AuthCallbackTests.swift`）。いずれもKeychain・WebKitに依存しない純粋関数の受理・拒否ケースを表形式で確認する。Unit Testing BundleのTargetはXcodeで追加する（`project.pbxproj`は手編集しない。#68時点では未追加）
 - `scripts/install-to-iphone.sh`・`scripts/remote-install.sh` — Mac mini で `main` を取り込み実機へ入れ直す／subpc から SSH で呼ぶ
+- `scripts/remote-build-check.sh` — subpc の作業ツリーの `ios/` を Mac へ送り、署名なしでビルドが通るかだけ確かめる（コミット前の確認用）
 - `scripts/check-consistency.mjs`・`scripts/sync-version.mjs`・`scripts/ios-changes.mjs` — バージョン・ログイン戻り先の照合／MARKETING_VERSION の同期／入れ直し要否の判定
 - `scripts/write-git-sha.sh` — Run Script build phase用。ビルドSHAを成果物のInfo.plistへ書く
 - `scripts/check-swift-imports.sh` — Linuxでも動く明示importの漏れ検出（下記「明示importの規則」）
