@@ -745,6 +745,43 @@ describe("asset_manager_create_subscription", () => {
     }
   });
 
+  it("planName を前後の空白を除いて初回料金へ載せ、空白だけなら null にする（#647）", async () => {
+    useEnv();
+    const sent: unknown[] = [];
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      if (init?.method === "GET") return new Response(JSON.stringify({ status: "ok", subscriptions: [] }), { status: 200 });
+      sent.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ status: "created", subscriptionId: 42 }), { status: 201 });
+    });
+    try {
+      const base = { name: "Netflix", paymentMethodName: "楽天カード", startDate: "2026-09-01", ...PRICE };
+      await assetManagerCreateSubscriptionTool.handler({ ...base, planName: " プレミアム " }, { sessionId: null });
+      await assetManagerCreateSubscriptionTool.handler({ ...base, planName: "  " }, { sessionId: null });
+      await assetManagerCreateSubscriptionTool.handler(base, { sessionId: null });
+      const prices = sent.map((body) => (body as { price: Record<string, unknown> }).price);
+      assert.equal(prices[0]!["planName"], "プレミアム");
+      assert.equal(prices[1]!["planName"], null);
+      assert.ok(!("planName" in prices[2]!));
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("planName が文字列でない・100文字を超えるなら送信しない（#647）", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch");
+    try {
+      const base = { name: "Netflix", paymentMethodName: "楽天カード", startDate: "2026-09-01", ...PRICE };
+      const notString = await assetManagerCreateSubscriptionTool.handler({ ...base, planName: 1 }, { sessionId: null });
+      assert.deepEqual(parsed(notString), { status: "error", reason: "planName は文字列で指定してください" });
+      const tooLong = await assetManagerCreateSubscriptionTool.handler({ ...base, planName: "a".repeat(101) }, { sessionId: null });
+      assert.deepEqual(parsed(tooLong), { status: "error", reason: "planName は100文字以内で指定してください" });
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
   it("入力不正なら外部へ送信しない", async () => {
     useEnv();
     const fetchMock = mock.method(globalThis, "fetch");
@@ -800,6 +837,23 @@ describe("asset_manager_add_subscription_price", () => {
       const result = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, memo: " 値上げ ", ...PRICE }, { sessionId: null });
       assert.equal(result.isError, false);
       assert.deepEqual(parsed(result), { status: "created", subscriptionId: 42, priceId: 99 });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("planName を memo とは別に料金履歴へ送る。長すぎるときは送信しない（#647）", async () => {
+    useEnv();
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), { price: { ...PRICE, planName: "Pro", memo: "値上げ" } });
+      return new Response(JSON.stringify({ status: "created", subscriptionId: 42, priceId: 99 }), { status: 201 });
+    });
+    try {
+      const ok = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, planName: " Pro ", memo: "値上げ", ...PRICE }, { sessionId: null });
+      assert.equal(ok.isError, false);
+      const tooLong = await assetManagerAddSubscriptionPriceTool.handler({ subscriptionId: 42, planName: "a".repeat(101), ...PRICE }, { sessionId: null });
+      assert.deepEqual(parsed(tooLong), { status: "error", reason: "planName は100文字以内で指定してください" });
+      assert.equal(fetchMock.mock.callCount(), 1);
     } finally {
       fetchMock.mock.restore();
     }
