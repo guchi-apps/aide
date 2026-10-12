@@ -29,6 +29,8 @@ const DAY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_SUBSCRIPTION_NAME_LENGTH = 100;
 const MAX_PAYMENT_METHOD_NAME_LENGTH = 50;
 const MAX_LABEL_NAME_LENGTH = 30;
+/** プラン名の上限。Asset Manager の `PLAN_NAME_MAX_LENGTH`（`SubscriptionPrice.planName` は VARCHAR(100)）と同じ値（#647）。 */
+const MAX_PLAN_NAME_LENGTH = 100;
 
 function result(payload: unknown): ToolResult {
   return {
@@ -117,6 +119,12 @@ function buildPricePayload(args: Record<string, unknown>, memoField = "memo"): R
   const memo = args[memoField];
   if (memo !== undefined && memo !== null && typeof memo !== "string") return "memo は文字列で指定してください";
 
+  const planName = args["planName"];
+  if (planName !== undefined && planName !== null) {
+    if (typeof planName !== "string") return "planName は文字列で指定してください";
+    if (planName.trim().length > MAX_PLAN_NAME_LENGTH) return `planName は${MAX_PLAN_NAME_LENGTH}文字以内で指定してください`;
+  }
+
   return {
     amount,
     currency,
@@ -125,6 +133,7 @@ function buildPricePayload(args: Record<string, unknown>, memoField = "memo"): R
     billingDay,
     billingMonth: billingCycle === "YEARLY" ? billingMonth : null,
     effectiveFrom,
+    ...(typeof planName === "string" ? { planName: planName.trim() || null } : {}),
     ...(typeof memo === "string" ? { memo: memo.trim() || null } : {}),
   };
 }
@@ -522,7 +531,7 @@ export const assetManagerCreateSubscriptionTool: Tool = {
   description:
     "Asset Managerへサブスクと最初の料金を新規登録する書き込みツール。既存のサブスク・料金は変更も削除もできない。" +
     "登録前に asset_manager_subscriptions の paymentMethod で支払い方法の名前を確認し、paymentMethodName にはその名前を正確に指定する。" +
-    "料金は「1回あたりの請求額」を amount に入れ、プラン変更・値上げはこのツールで作り直さず asset_manager_add_subscription_price を使う。" +
+    "料金は「1回あたりの請求額」を amount に入れ、プラン名が分かるときは planName に入れ（メモと分ける）、プラン変更・値上げはこのツールで作り直さず asset_manager_add_subscription_price を使う。" +
     "登録前に同名・類似名の既存契約（解約済みを含む）を自動で確認し、候補があれば登録せず status: duplicateCandidates と候補を返す。" +
     "既存契約の名前・メモ・終了日・解約情報の更新はこのツールではなく asset_manager_update_subscription / asset_manager_record_subscription_cancellation を使う。" +
     "実行すると契約と初回料金が作成されるため、内容を利用者に確認してから呼ぶ。",
@@ -543,7 +552,8 @@ export const assetManagerCreateSubscriptionTool: Tool = {
       billingDay: { type: "integer", minimum: 1, maximum: 31, description: "支払日。" },
       billingMonth: { type: "integer", minimum: 1, maximum: 12, description: "毎年払いの支払い月。MONTHLYでは指定しない。" },
       effectiveFrom: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "初回料金の適用開始日（YYYY-MM-DD）。" },
-      priceMemo: { type: ["string", "null"], description: "初回料金のメモ。" },
+      planName: { type: ["string", "null"], maxLength: MAX_PLAN_NAME_LENGTH, description: "初回料金のプラン名（例: Pro、ファミリー）。任意。変更理由などのメモは priceMemo に入れ、プラン名と混ぜない。100文字以内。" },
+      priceMemo: { type: ["string", "null"], description: "初回料金のメモ（変更理由など。プラン名は planName）。" },
       allowDuplicate: {
         type: "boolean",
         description:
@@ -583,7 +593,7 @@ export const assetManagerAddSubscriptionPriceTool: Tool = {
   name: "asset_manager_add_subscription_price",
   description:
     "Asset Managerの既存サブスクへ、プラン変更・値上げ・値下げ後の料金を履歴として追加する書き込みツール。" +
-    "既存料金を上書きしない。対象は asset_manager_subscriptions の id で指定し、適用開始日 effectiveFrom を必ず指定する。" +
+    "既存料金を上書きしない。プラン変更のときは新しいプラン名を planName に入れる（変更理由は memo）。対象は asset_manager_subscriptions の id で指定し、適用開始日 effectiveFrom を必ず指定する。" +
     "同じ適用開始日の料金は追加できない。既存の適用開始日は asset_manager_subscriptions を includeHistory: true で呼んで priceHistory の effectiveFrom を確かめる。" +
     "内容を利用者に確認してから呼ぶ。",
   inputSchema: {
@@ -597,7 +607,8 @@ export const assetManagerAddSubscriptionPriceTool: Tool = {
       billingDay: { type: "integer", minimum: 1, maximum: 31 },
       billingMonth: { type: "integer", minimum: 1, maximum: 12, description: "毎年払いの支払い月。MONTHLYでは指定しない。" },
       effectiveFrom: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "改定料金の適用開始日（YYYY-MM-DD）。" },
-      memo: { type: ["string", "null"], description: "料金改定のメモ。" },
+      planName: { type: ["string", "null"], maxLength: MAX_PLAN_NAME_LENGTH, description: "改定後のプラン名（例: Pro、ファミリー）。プラン変更のときに指定する。任意。変更理由は memo に入れ、プラン名と混ぜない。100文字以内。" },
+      memo: { type: ["string", "null"], description: "料金改定のメモ（変更理由など。プラン名は planName）。" },
     },
     required: ["subscriptionId", "amount", "currency", "billingCycle", "billingInterval", "billingDay", "effectiveFrom"],
     additionalProperties: false,
