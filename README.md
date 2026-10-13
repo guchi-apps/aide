@@ -524,6 +524,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_repo_labels` | リポジトリ1件に定義されているラベル（名前・色・説明）。`aide_create_issue` に渡す候補 |
 | `aide_create_issue` | GitHubのIssueを新規作成する。**書き込みツール**（作成のみ。編集・close・コメントは持たない。`dryRun` で起票せず確認できる） |
 | `issue_deck_upload_image` | 画像を1枚 IssueDeck の画像置き場へアップロードし、Issue本文へ貼れるURLを返す。**書き込みツール**（作成のみ。base64で渡す。png/jpeg/gif/webp/svg・10MBまで。`dryRun` で送らず検査だけできる。`AIDE_ISSUE_DECK_URL` と `AIDE_ISSUE_DECK_UPLOAD_TOKEN` が要る） |
+| `issue_deck_list_release_candidates` ほか8本（#651） | issue-deckの全体レビュー・修正API（`/api/review-agent/tools/<name>`）への中継。読み取り: `list_release_candidates`・`get_release_candidate`・`get_fix_status`。更新: `claim_fix`・`release_fix`・`pause_fix`・`resume_fix`・`report_fix_test`・`report_fix_review`（`idempotencyKey` は呼び出し側が操作ごとに作る）。認可・状態遷移・冪等性はissue-deck側で、AIDEは引数と応答をそのまま中継するだけ。`AIDE_ISSUE_DECK_URL` と、共有鍵とは別の専用トークン `AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN`（`ida_…`。issue-deckの設定＞フリート運用で発行）が要る。主経路はissue-deck内蔵のMCP（`/api/mcp/review-agent`）で、こちらは任意の経路 |
 | `aide_issue_deck_summary` | IssueDeckの全体サマリー（未着手・実行中・予約待ち・確認待ち・手作業待ち・問題・PR・本番反映・指定期間の完了）を、全体合計・リポジトリ別内訳・要対応の上位10件で返す。**読み取り専用**。集計はIssueDeck側（`/api/integrations/aide/development-summary`）で、AIDEは再集計せず中継する。GitHub由来の `aide_dev_status` とは別（#569） |
 | `aide_vps_memory` | 本番VPS上の issue-deck のメモリ計測結果（最新・最後に取得できた時刻・経過秒・PID/起動時刻ごとの区間、`history` で採取サンプル）を返す。**読み取り専用**。計測・集計はIssueDeck側（`/api/integrations/vps-memory`）で、AIDEは中継のみ。取得不可は `reason` のまま返し0MBにしない（#608） |
 | `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`・`repo`・`cursor`・`limit` でページングする。読み取り専用（#569） |
