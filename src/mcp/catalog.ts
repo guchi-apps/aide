@@ -7,6 +7,7 @@ import { updateEventTool } from "./tools/update-event.ts";
 import { devStatusTool, repoLabelsTool, repoStatusTool } from "./tools/dev.ts";
 import { garbageCollectionTool } from "./tools/garbage.ts";
 import { issueDeckUploadImageTool } from "./tools/issue-deck.ts";
+import { issueDeckReviewAgentTools } from "./tools/issue-deck-review-agent.ts";
 import { issueDeckItemsTool, issueDeckSummaryTool } from "./tools/issue-deck-summary.ts";
 import { createIssueTool } from "./tools/issue.ts";
 import { balancesTool, fixedCostsTool } from "./tools/money.ts";
@@ -105,6 +106,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(createIssueTool);
   // IssueDeckへの画像アップロード（#449）。起票（aide_create_issue）とは別ツールにしている。
   registry.register(issueDeckUploadImageTool);
+  // issue-deckの全体レビュー・修正API（#651）。issue-deckの専用トークンで中継するだけで、判断はissue-deck側。
+  for (const tool of issueDeckReviewAgentTools) registry.register(tool);
   // IssueDeckの進捗・要対応・予約の読み取り（#569）。GitHub由来の aide_dev_status とは別。集計はIssueDeck側。
   registry.register(issueDeckSummaryTool);
   registry.register(issueDeckItemsTool);
