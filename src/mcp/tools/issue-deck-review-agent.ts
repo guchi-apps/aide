@@ -4,6 +4,7 @@ import {
   type ReviewAgentToolName,
 } from "../../core/connectors/issue-deck/review-agent.ts";
 import type { Tool, ToolResult } from "../types.ts";
+import { REVIEW_AGENT_READ_SCOPE, REVIEW_AGENT_WRITE_SCOPE } from "../../auth/oauth.ts";
 
 function result(payload: unknown, isError = false): ToolResult {
   return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError };
@@ -33,6 +34,8 @@ function relay(
 ): Tool {
   return {
     name: `issue_deck_${remote}`,
+    requiredScopes: [["list_release_candidates", "get_release_candidate", "get_fix_status"].includes(remote)
+      ? REVIEW_AGENT_READ_SCOPE : REVIEW_AGENT_WRITE_SCOPE],
     description,
     inputSchema: { type: "object", properties, required, additionalProperties: false },
     handler: async (args) => {

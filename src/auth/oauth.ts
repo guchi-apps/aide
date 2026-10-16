@@ -26,11 +26,15 @@ export const TASK_WRITE_SCOPE = "tasks:write";
 /** dotの作業報告（#609）。書き込みと読み取りは別の承認単位にする。 */
 export const WORK_REPORTS_READ_SCOPE = "work-reports:read";
 export const WORK_REPORTS_WRITE_SCOPE = "work-reports:write";
+export const REVIEW_AGENT_READ_SCOPE = "review-agent:read";
+export const REVIEW_AGENT_WRITE_SCOPE = "review-agent:write";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
   WORK_REPORTS_READ_SCOPE,
   WORK_REPORTS_WRITE_SCOPE,
+  REVIEW_AGENT_READ_SCOPE,
+  REVIEW_AGENT_WRITE_SCOPE,
 ]);
 
 /**

@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, beforeEach, describe, it } from "node:test";
 import type { McpAccessEntry } from "./access-log.ts";
+import { issueDeckReviewAgentTools } from "./tools/issue-deck-review-agent.ts";
+import { parseSupportedScopes } from "../auth/oauth.ts";
 
 // 記録の置き場を差し替えてから読み込む（access-log.test.ts と同じ理由）。
 const dir = await mkdtemp(join(tmpdir(), "aide-mcp-transport-test-"));
@@ -102,6 +104,26 @@ async function waitForEntries(count: number): Promise<McpAccessEntry[]> {
 }
 
 describe("MCPのやり取りの記録", () => {
+  it("レビュー中継9ツールは明示的なOAuthスコープがある場合だけ実行する", async () => {
+    assert.deepEqual(parseSupportedScopes("review-agent:read review-agent:write review-agent:admin"),
+      ["review-agent:read", "review-agent:write"]);
+    for (const tool of issueDeckReviewAgentTools) {
+      const required = ["issue_deck_list_release_candidates", "issue_deck_get_release_candidate", "issue_deck_get_fix_status"].includes(tool.name)
+        ? "review-agent:read" : "review-agent:write";
+      let calls = 0;
+      const registry = new ToolRegistry();
+      registry.register({ ...tool, handler: () => { calls++; return { content: [{ type: "text", text: "called" }] }; } });
+      const instance = new McpTransport(registry, { name: "aide", version: "test" });
+      for (const scopes of [[], [required === "review-agent:read" ? "review-agent:write" : "review-agent:read"], ["tasks:write"]]) {
+        const res = response();
+        await instance.handle(request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name } }), res, BASE_URL, scopes);
+        assert.match(res.body, /"isError":true/);
+        assert.equal(calls, 0, tool.name);
+      }
+      await instance.handle(request({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: tool.name } }), response(), BASE_URL, [required]);
+      assert.equal(calls, 1, tool.name);
+    }
+  });
   it("read-onlyのscopeではタスク書き込みを実行しない", async () => {
     const res = response();
     await transport().handle(
