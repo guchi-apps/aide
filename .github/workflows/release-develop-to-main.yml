@@ -12,8 +12,8 @@ name: Release develop to main
 # deploy.ymlのtagジョブが「タグを付け替えずに止める」ガードで失敗してデプロイ自体が飛ぶ
 # （aide#6。PR #3 のマージ後に実際に起きた）。
 #
-# 入力（version-file・version-query・bump-command）はすべて既定値で足りる。aideはルートの
-# package.jsonの.versionを持ち、npm version で書き換えられる。
+# 入力のうち version-file・version-query は既定値で足りる（aideはルートのpackage.jsonの
+# .versionを持つ）。bump-command は公開準備（finalize）でも同じものが使われ、Web・iOSの版が揃う。
 #
 # バンプPRの作成は人間の確認なしに走るため、scheduleでの自動起動はしない。
 on:
@@ -28,6 +28,19 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+      # 新方式（候補作成→公開準備）の入口。issue-deckの画面が要求のJSONを渡す
+      # （guchi-apps/issue-deck#4604・#4623）。これが無いとissue-deck側は新方式に未対応として
+      # 通常開始を止める（旧方式へは落とさない）。手で起動するときは空のままにする。
+      candidate_request:
+        description: "リリース候補の作成要求（issue-deckが渡す。手動実行では空）"
+        required: false
+        type: string
+        default: ""
+      finalize_request:
+        description: "公開準備の要求（issue-deckが渡す。手動実行では空）"
+        required: false
+        type: string
+        default: ""
   # バンプPRがdevelopへマージされバージョンが変わったときに再起動して、develop→mainのPRを
   # 自動作成する。通常のフィーチャーpushでは変わらないため起動しない。
   push:
@@ -41,11 +54,13 @@ concurrency:
 
 jobs:
   release:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-release-develop-to-main.yml@workflows/v50
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-release-develop-to-main.yml@workflows/v52
     with:
       # pushトリガー（バンプPRのマージ）で起動したときは`inputs`自体が無いため空文字を渡す。
       # そちらの実行はdevelop→mainのPR作成だけを行い、上げ幅を使わない。
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
+      candidate-request: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_request || '' }}
+      finalize-request: ${{ github.event_name == 'workflow_dispatch' && inputs.finalize_request || '' }}
       # 既定の `npm version` に加えて、iOSアプリ（ios/）のXcodeプロジェクトが持つ
       # MARKETING_VERSION も同時に package.json の値へ揃える（#525）。バンプ時点で揃えないと
       # 次のリリースごとにずれ、ci.yml の ios/scripts/check-consistency.mjs が赤くなる。
