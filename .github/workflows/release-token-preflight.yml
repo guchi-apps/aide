@@ -1,0 +1,22 @@
+name: リリース前の認証設定確認
+on:
+  push:
+    branches: [issue-652]
+    paths: [.github/workflows/release-token-preflight.yml]
+permissions: {}
+jobs:
+  check:
+    if: github.repository == 'guchi-apps/aide'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 登録有無だけ確認（値は出力しない）
+        env:
+          REVIEW_AGENT_TOKEN: ${{ secrets.AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$REVIEW_AGENT_TOKEN" ]]; then
+            echo "AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN: configured"
+          else
+            echo "AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN: missing"
+          fi
