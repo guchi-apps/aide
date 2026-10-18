@@ -130,6 +130,22 @@ git show origin/main:<相手のファイル>    | grep -n <確かめたい実装
 行が無いリポジトリには以後の更新が黙って届かない。実際に aide だけリリース通知のジョブが無く、
 リリースがどのチャンネルにも通知されない状態が続いていた（#184）。
 
+### 本番デプロイ（app-deploy-gate）
+
+`deploy.yml` の `deploy` ジョブは、VPSのgate（`/usr/local/sbin/app-deploy-gate`。guchi-apps/vps#275）へ
+**アプリ専用の鍵（`SSH_PRIVATE_KEY`＝`op://apps/aide/deploy-ssh-key`）**で `upload`・`env`・`deploy` の
+3語だけを送る（#662）。gateのアプリ名は `aide`（置き場 `/home/github-user/apps/aide`、pm2 のプロセス名 `aide`）で、
+VPSの `authorized_keys` の `command=` が固定する。旧配布物の削除・展開・`.env` 更新・`npm ci --omit=dev`・
+`pm2 delete/start/save`（`deploy/ecosystem.config.cjs`）・`/api/app-version` の `sha` と `APP_COMMIT_SHA` の
+照合はgateが行う。`TARGET_DIR` はgateが置き場を固定するため使わない。
+
+- **配布物（tar）には `package-lock.json` を含める。** 実行時依存（`dependencies`）が無い間はgateの
+  `npm ci --omit=dev` が何も入れず従来と同じ結果になり、足したときはそのまま本番へ入る。外すとgateは
+  インストールを飛ばす
+- **gateの外の処理は動かない。** SSH先で任意のコマンドは実行できない（以前の deploy.yml にあった
+  Node 24 未満で止める確認も無くなった。古いNodeでは起動に失敗し、gateの稼働版の照合で落ちる）
+- 本番へ渡す値を足すときは README「環境変数の配線」の5か所に通す（`src/deploy-env-wiring.test.ts` が検査する）
+
 ### ブランチ
 
 - 機能開発: `develop`（**デフォルトブランチ**）

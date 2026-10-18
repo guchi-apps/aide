@@ -60,10 +60,12 @@ jobs:
     #
     # このブロックは scripts/generate-workflow-env-block.sh で生成する。
     env:
-      SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       HOST: ${{ secrets.SERVER_HOST }}
       USERNAME: ${{ secrets.SERVER_USERNAME }}
       SSH_PORT: ${{ secrets.SERVER_SSH_PORT }}
+      # gateが置き場（/home/github-user/apps/aide）を固定するため使わなくなった（#662）。
+      # マニフェストの行と合わせ、撤去は移行を確かめてから。
       TARGET_DIR: ${{ secrets.TARGET_DIR }}
       AIDE_AUTH_PASSWORD: ${{ secrets.AIDE_AUTH_PASSWORD }}
       AIDE_INGEST_SECRET: ${{ secrets.AIDE_INGEST_SECRET }}
@@ -120,8 +122,11 @@ jobs:
 
       # ビルド成果物が無いため、ソースをそのまま送る。
       # Node 24 が .ts を型ストリッピングで直接実行し、実行時依存パッケージも無い。
+      # package-lock.json はgateに `npm ci --omit=dev` を実行させるために含める（#662）。
+      # 実行時依存が無い間は何も入らず従来（インストールしない）と同じ結果になり、
+      # 将来 dependencies を足したときにそのまま本番へ入る。lockfile が無いとgateはインストールを飛ばす。
       - name: Create archive
-        run: tar -czf deploy.tar.gz src deploy package.json README.md
+        run: tar -czf deploy.tar.gz src deploy package.json package-lock.json README.md
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -132,24 +137,32 @@ jobs:
 
       - name: Add known hosts
         run: ssh-keyscan -p "${SSH_PORT}" -H "${HOST}" >> ~/.ssh/known_hosts
-        env:
-          HOST: ${{ env.HOST }}
-          SSH_PORT: ${{ env.SSH_PORT }}
 
+      # **VPSのgate（/usr/local/sbin/app-deploy-gate。guchi-apps/vps#275）へ渡す**（#662）。
+      # 鍵はこのアプリ専用で、VPSのauthorized_keysのcommand=がgateのアプリ名（aide。置き場
+      # /home/github-user/apps/aide）を固定する。任意のシェルコマンドは実行できず、
+      # upload・env・deployの3語だけが通る。旧配布物の削除・展開・.env更新・npm ci・
+      # pm2の再起動（deploy/ecosystem.config.cjs が宣言する aide）・稼働版の照合はgate側が行う
+      # （guchi-apps/vps#298・#300）。置き場はgateが決めるため TARGET_DIR は使わない。
       - name: Upload archive
-        run: scp -P "${SSH_PORT}" deploy.tar.gz "${USERNAME}@${HOST}:${TARGET_DIR}/deploy.tar.gz"
-        env:
-          HOST: ${{ env.HOST }}
-          USERNAME: ${{ env.USERNAME }}
-          SSH_PORT: ${{ env.SSH_PORT }}
-          TARGET_DIR: ${{ env.TARGET_DIR }}
+        run: ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" upload < deploy.tar.gz
 
-      - name: Deploy and restart
-        uses: appleboy/ssh-action@v1
+      # gateは .env の該当キーだけを書き換える（従来のように .env をまるごと上書きしない）。
+      # 実行時に要る値は、従来どおり毎回ここから送る（aide#55。README「環境変数の配線」）。
+      # トークン類は未発行でもデプロイを止めないよう `${VAR:-}` で空を許す。
+      # 空ならAIDE側は「未設定」として振る舞い、そのツールだけが使えなくなる。
+      - name: Send environment variables
         env:
-          TARGET_DIR: ${{ env.TARGET_DIR }}
+          # 稼働中の版の照合に使う（#662）。gateが .env の APP_COMMIT_SHA と稼働中の
+          # /api/app-version の sha を照合する（guchi-apps/vps#298）。コミットのSHAは公開情報なのでそのまま渡してよい。
+          APP_COMMIT_SHA: ${{ github.sha }}
           AIDE_AUTH_PASSWORD: ${{ env.AIDE_AUTH_PASSWORD }}
           AIDE_BASE_URL: ${{ env.AIDE_BASE_URL }}
+          AIDE_ASSET_MANAGER_URL: ${{ env.AIDE_ASSET_MANAGER_URL }}
+          AIDE_BOT_URL: ${{ env.AIDE_BOT_URL }}
+          AIDE_RESEARCH_DESK_URL: ${{ env.AIDE_RESEARCH_DESK_URL }}
+          AIDE_ISSUE_DECK_URL: ${{ env.AIDE_ISSUE_DECK_URL }}
+          AIDE_IOS_TEAM_ID: ${{ env.AIDE_IOS_TEAM_ID }}
           AIDE_INGEST_SECRET: ${{ env.AIDE_INGEST_SECRET }}
           AIDE_READ_SECRET: ${{ env.AIDE_READ_SECRET }}
           AIDE_STATUS_SECRET: ${{ env.AIDE_STATUS_SECRET }}
@@ -190,149 +203,96 @@ jobs:
           AIDE_GMAIL_CLIENT_ID: ${{ env.AIDE_GMAIL_CLIENT_ID }}
           AIDE_GMAIL_CLIENT_SECRET: ${{ env.AIDE_GMAIL_CLIENT_SECRET }}
           AIDE_GMAIL_REFRESH_TOKEN: ${{ env.AIDE_GMAIL_REFRESH_TOKEN }}
-          AIDE_ASSET_MANAGER_URL: ${{ env.AIDE_ASSET_MANAGER_URL }}
-          AIDE_BOT_URL: ${{ env.AIDE_BOT_URL }}
-          AIDE_RESEARCH_DESK_URL: ${{ env.AIDE_RESEARCH_DESK_URL }}
-          AIDE_ISSUE_DECK_URL: ${{ env.AIDE_ISSUE_DECK_URL }}
-          AIDE_IOS_TEAM_ID: ${{ env.AIDE_IOS_TEAM_ID }}
-        with:
-          host: ${{ env.HOST }}
-          username: ${{ env.USERNAME }}
-          key: ${{ env.SSH_PRIVATE_KEY }}
-          port: ${{ env.SSH_PORT }}
-          # appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない。
-          # 上の env: に足しただけでは届かず、.env が空で書かれる（aide#55）。
-          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_ASSET_MANAGER_URL,AIDE_BOT_URL,AIDE_RESEARCH_DESK_URL,AIDE_ISSUE_DECK_URL,AIDE_IOS_TEAM_ID,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_STATUS_SECRET,AIDE_WORK_REPORTS_READ_SECRET,SHARED_TOKEN_API_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_MYROOM_TOKEN,AIDE_MYROOM_CONTROL_TOKEN,AIDE_DAYSPAN_TOKEN,AIDE_DAYSPAN_WRITE_TOKEN,AIDE_DAYSPAN_TASKS_WRITE_TOKEN,AIDE_DAYSPAN_TARGET_EMAIL,AIDE_GITHUB_TOKEN,AIDE_GITHUB_ISSUE_TOKEN,AIDE_ISSUE_DECK_UPLOAD_TOKEN,AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN,AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET,AIDE_BOT_TOKEN,AIDE_BOT_EMAIL,AIDE_RESEARCH_DESK_TOKEN,AIDE_SUPABASE_URL,AIDE_SUPABASE_PUBLISHABLE_KEY,AIDE_STATUS_ALLOWED_EMAILS,AIDE_ZAIM_WRITE_SECRET,AIDE_ZAIM_CONSUMER_KEY,AIDE_ZAIM_CONSUMER_SECRET,AIDE_ZAIM_ACCESS_TOKEN,AIDE_ZAIM_ACCESS_TOKEN_SECRET,AIDE_ZAIM_WEB_UPSTREAM_URL,AIDE_IMAGE_MAIL_TOKEN,AIDE_IMAGE_MAIL_TO,AIDE_IMAGE_MAIL_BCC,AIDE_IMAGE_MAIL_FROM,AIDE_NEWS_MAIL_TOKEN,AIDE_NEWS_MAIL_TO,AIDE_NEWS_MAIL_BCC,AIDE_NEWS_MAIL_FROM,AIDE_GMAIL_CLIENT_ID,AIDE_GMAIL_CLIENT_SECRET,AIDE_GMAIL_REFRESH_TOKEN
-          script: |
-            set -euo pipefail
-            cd "${TARGET_DIR}"
-
-            # 待受ポートはシークレットではなく設定値として平文で持つ
-            # （guchi-apps/docs の standards/ports.md「ポート番号は 1Password で管理しない」。#73）。
-            PORT=3114
-
-            # .ts を直接実行するため型ストリッピングが要る（Node 23.6以降で既定有効）。
-            # 古いNodeだと起動時に構文エラーになるだけで原因が分かりにくいので、ここで止める。
-            NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
-            if [ "$NODE_MAJOR" -lt 24 ]; then
-              echo "::error::Node 24 以降が必要です（現在: $(node -v)）"
-              exit 1
-            fi
-
-            echo "Cleaning up old release files..."
-            rm -rf src deploy package.json README.md
-
-            echo "Extracting archive..."
-            tar -xzf deploy.tar.gz
-            rm deploy.tar.gz
-
-            # 認証情報は .env に置く。PM2は .env を自動で読まないため、
-            # ecosystem 側ではなくサーバー起動時に --env-file で読ませる。
-            #
-            # **このファイルは毎回まるごと上書きされる。** サーバー上で手で足した値は残らないため、
-            # 実行時に要る値はここへ書くこと。実際に AIDE_GITHUB_TOKEN（aide#47）と
-            # AIDE_OPS_DASHBOARD_TOKEN（aide#42）が手作業の追記だけで運用されており、
-            # 次のデプロイで黙って消える状態になっていた（aide#55）。
-            #
-            # トークン類は未発行でもデプロイを止めないよう `${VAR:-}` で空を許す。
-            # 空ならAIDE側は「未設定」として振る舞い、そのツールだけが使えなくなる。
-            echo "Writing .env..."
-            umask 077
-            cat > .env <<ENVFILE
-            NODE_ENV=production
-            PORT=${PORT}
-            HOST=127.0.0.1
-            AIDE_AUTH_PASSWORD=${AIDE_AUTH_PASSWORD}
-            AIDE_BASE_URL=${AIDE_BASE_URL}
-            AIDE_ASSET_MANAGER_URL=${AIDE_ASSET_MANAGER_URL:-https://asset.gucchii.com}
-            AIDE_BOT_URL=${AIDE_BOT_URL:-}
-            AIDE_RESEARCH_DESK_URL=${AIDE_RESEARCH_DESK_URL:-}
-            AIDE_ISSUE_DECK_URL=${AIDE_ISSUE_DECK_URL:-}
-            AIDE_IOS_TEAM_ID=${AIDE_IOS_TEAM_ID:-}
-            AIDE_INGEST_SECRET=${AIDE_INGEST_SECRET}
-            AIDE_READ_SECRET=${AIDE_READ_SECRET:-}
+        run: |
+          set -euo pipefail
+          # gateは標準入力を1行1変数（KEY=VALUE）で受けるため、改行を含む値は送れない。
+          # gateは値を KEY="VALUE" の形で書き、`"` と `\` をエスケープするが、Nodeの --env-file
+          # （ecosystem の node_args）はそのエスケープを戻さず値が変わってしまう。黙って壊れた値で
+          # 起動させないよう、`"`・`\` を含む値もここで止める。
+          for name in AIDE_AUTH_PASSWORD AIDE_BASE_URL AIDE_ASSET_MANAGER_URL AIDE_BOT_URL AIDE_RESEARCH_DESK_URL AIDE_ISSUE_DECK_URL AIDE_IOS_TEAM_ID AIDE_INGEST_SECRET AIDE_READ_SECRET AIDE_STATUS_SECRET AIDE_WORK_REPORTS_READ_SECRET SHARED_TOKEN_API_SECRET AIDE_OPS_DASHBOARD_TOKEN AIDE_MYROOM_TOKEN AIDE_MYROOM_CONTROL_TOKEN AIDE_DAYSPAN_TOKEN AIDE_DAYSPAN_WRITE_TOKEN AIDE_DAYSPAN_TASKS_WRITE_TOKEN AIDE_DAYSPAN_TARGET_EMAIL AIDE_GITHUB_TOKEN AIDE_GITHUB_ISSUE_TOKEN AIDE_ISSUE_DECK_UPLOAD_TOKEN AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET AIDE_BOT_TOKEN AIDE_BOT_EMAIL AIDE_RESEARCH_DESK_TOKEN AIDE_ZAIM_WRITE_SECRET AIDE_ZAIM_CONSUMER_KEY AIDE_ZAIM_CONSUMER_SECRET AIDE_ZAIM_ACCESS_TOKEN AIDE_ZAIM_ACCESS_TOKEN_SECRET AIDE_ZAIM_WEB_UPSTREAM_URL AIDE_SUPABASE_URL AIDE_SUPABASE_PUBLISHABLE_KEY AIDE_STATUS_ALLOWED_EMAILS AIDE_IMAGE_MAIL_TOKEN AIDE_IMAGE_MAIL_TO AIDE_IMAGE_MAIL_BCC AIDE_IMAGE_MAIL_FROM AIDE_NEWS_MAIL_TOKEN AIDE_NEWS_MAIL_TO AIDE_NEWS_MAIL_BCC AIDE_NEWS_MAIL_FROM AIDE_GMAIL_CLIENT_ID AIDE_GMAIL_CLIENT_SECRET AIDE_GMAIL_REFRESH_TOKEN; do
+            case "${!name:-}" in
+              *$'\n'*) echo "::error::${name} が改行を含むためgateへ送れません"; exit 1 ;;
+              *'"'*|*'\'*) echo "::error::${name} が \" か \\ を含むため、gateが書く .env をNodeが正しく読めません"; exit 1 ;;
+            esac
+          done
+          # 待受ポートはシークレットではなく設定値として平文で持つ
+          # （guchi-apps/docs の standards/ports.md「ポート番号は 1Password で管理しない」。#73）。
+          # HOST はサーバーの待受アドレス。ジョブの env の HOST（SSH先）とは別物なので固定値で書く。
+          {
+            printf '%s\n' "NODE_ENV=production" "PORT=3114" "HOST=127.0.0.1"
+            # 稼働中のコミット（#662）。/api/app-version がそのまま返し、gateが照合する。
+            printf '%s\n' "APP_COMMIT_SHA=${APP_COMMIT_SHA}"
+            printf '%s\n' "AIDE_AUTH_PASSWORD=${AIDE_AUTH_PASSWORD}"
+            printf '%s\n' "AIDE_BASE_URL=${AIDE_BASE_URL}"
+            printf '%s\n' "AIDE_ASSET_MANAGER_URL=${AIDE_ASSET_MANAGER_URL:-https://asset.gucchii.com}"
+            printf '%s\n' "AIDE_BOT_URL=${AIDE_BOT_URL:-}"
+            printf '%s\n' "AIDE_RESEARCH_DESK_URL=${AIDE_RESEARCH_DESK_URL:-}"
+            printf '%s\n' "AIDE_ISSUE_DECK_URL=${AIDE_ISSUE_DECK_URL:-}"
+            printf '%s\n' "AIDE_IOS_TEAM_ID=${AIDE_IOS_TEAM_ID:-}"
+            printf '%s\n' "AIDE_INGEST_SECRET=${AIDE_INGEST_SECRET}"
+            printf '%s\n' "AIDE_READ_SECRET=${AIDE_READ_SECRET:-}"
             # ops-dashboard向けの動作状況API（#276）。空なら /api/status・/api/status/checks は503を返す。
             # 値はissue-deckの共有トークンAPI（AIDE_STATUS_TOKEN）を優先し、これは取得できなかった
             # ときのフォールバックとして残している（aide#509。issue-deckへの移行が定着したら外す）。
-            AIDE_STATUS_SECRET=${AIDE_STATUS_SECRET:-}
+            printf '%s\n' "AIDE_STATUS_SECRET=${AIDE_STATUS_SECRET:-}"
             # dotの作業報告の読み取りAPI（#609）。空なら /api/work-reports は503を返す。
-            AIDE_WORK_REPORTS_READ_SECRET=${AIDE_WORK_REPORTS_READ_SECRET:-}
+            printf '%s\n' "AIDE_WORK_REPORTS_READ_SECRET=${AIDE_WORK_REPORTS_READ_SECRET:-}"
             # issue-deckの共有トークンAPIを呼ぶための認証値（aide#509）。空なら共有トークンは
             # 取得できず、各所は自分の環境変数（AIDE_STATUS_SECRET等）だけで動く。
-            SHARED_TOKEN_API_SECRET=${SHARED_TOKEN_API_SECRET:-}
-            AIDE_OPS_DASHBOARD_TOKEN=${AIDE_OPS_DASHBOARD_TOKEN:-}
-            AIDE_MYROOM_TOKEN=${AIDE_MYROOM_TOKEN:-}
-            AIDE_MYROOM_CONTROL_TOKEN=${AIDE_MYROOM_CONTROL_TOKEN:-}
-            AIDE_DAYSPAN_TOKEN=${AIDE_DAYSPAN_TOKEN:-}
-            AIDE_DAYSPAN_WRITE_TOKEN=${AIDE_DAYSPAN_WRITE_TOKEN:-}
-            AIDE_DAYSPAN_TASKS_WRITE_TOKEN=${AIDE_DAYSPAN_TASKS_WRITE_TOKEN:-}
-            AIDE_DAYSPAN_TARGET_EMAIL=${AIDE_DAYSPAN_TARGET_EMAIL:-}
-            AIDE_GITHUB_TOKEN=${AIDE_GITHUB_TOKEN:-}
-            AIDE_GITHUB_ISSUE_TOKEN=${AIDE_GITHUB_ISSUE_TOKEN:-}
-            AIDE_ISSUE_DECK_UPLOAD_TOKEN=${AIDE_ISSUE_DECK_UPLOAD_TOKEN:-}
-            AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN=${AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN:-}
-            # iOSアプリへのプッシュ通知（#463）。3つとも空なら送信せず、テスト通知は「未設定」で失敗する。
-            AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET=${AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET:-}
-            AIDE_BOT_TOKEN=${AIDE_BOT_TOKEN:-}
-            AIDE_BOT_EMAIL=${AIDE_BOT_EMAIL:-}
-            AIDE_RESEARCH_DESK_TOKEN=${AIDE_RESEARCH_DESK_TOKEN:-}
+            printf '%s\n' "SHARED_TOKEN_API_SECRET=${SHARED_TOKEN_API_SECRET:-}"
+            printf '%s\n' "AIDE_OPS_DASHBOARD_TOKEN=${AIDE_OPS_DASHBOARD_TOKEN:-}"
+            printf '%s\n' "AIDE_MYROOM_TOKEN=${AIDE_MYROOM_TOKEN:-}"
+            printf '%s\n' "AIDE_MYROOM_CONTROL_TOKEN=${AIDE_MYROOM_CONTROL_TOKEN:-}"
+            printf '%s\n' "AIDE_DAYSPAN_TOKEN=${AIDE_DAYSPAN_TOKEN:-}"
+            printf '%s\n' "AIDE_DAYSPAN_WRITE_TOKEN=${AIDE_DAYSPAN_WRITE_TOKEN:-}"
+            printf '%s\n' "AIDE_DAYSPAN_TASKS_WRITE_TOKEN=${AIDE_DAYSPAN_TASKS_WRITE_TOKEN:-}"
+            printf '%s\n' "AIDE_DAYSPAN_TARGET_EMAIL=${AIDE_DAYSPAN_TARGET_EMAIL:-}"
+            printf '%s\n' "AIDE_GITHUB_TOKEN=${AIDE_GITHUB_TOKEN:-}"
+            printf '%s\n' "AIDE_GITHUB_ISSUE_TOKEN=${AIDE_GITHUB_ISSUE_TOKEN:-}"
+            printf '%s\n' "AIDE_ISSUE_DECK_UPLOAD_TOKEN=${AIDE_ISSUE_DECK_UPLOAD_TOKEN:-}"
+            printf '%s\n' "AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN=${AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN:-}"
+            printf '%s\n' "AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET=${AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET:-}"
+            printf '%s\n' "AIDE_BOT_TOKEN=${AIDE_BOT_TOKEN:-}"
+            printf '%s\n' "AIDE_BOT_EMAIL=${AIDE_BOT_EMAIL:-}"
+            printf '%s\n' "AIDE_RESEARCH_DESK_TOKEN=${AIDE_RESEARCH_DESK_TOKEN:-}"
             # Zaimへの支出登録（#37）。5つとも空なら /api/zaim/* は503を返し、口が開かない。
             # OAuthの4つは dev.zaim.net で発行したもので、巡回に使う storage state とは別物。
-            AIDE_ZAIM_WRITE_SECRET=${AIDE_ZAIM_WRITE_SECRET:-}
-            AIDE_ZAIM_CONSUMER_KEY=${AIDE_ZAIM_CONSUMER_KEY:-}
-            AIDE_ZAIM_CONSUMER_SECRET=${AIDE_ZAIM_CONSUMER_SECRET:-}
-            AIDE_ZAIM_ACCESS_TOKEN=${AIDE_ZAIM_ACCESS_TOKEN:-}
-            AIDE_ZAIM_ACCESS_TOKEN_SECRET=${AIDE_ZAIM_ACCESS_TOKEN_SECRET:-}
+            printf '%s\n' "AIDE_ZAIM_WRITE_SECRET=${AIDE_ZAIM_WRITE_SECRET:-}"
+            printf '%s\n' "AIDE_ZAIM_CONSUMER_KEY=${AIDE_ZAIM_CONSUMER_KEY:-}"
+            printf '%s\n' "AIDE_ZAIM_CONSUMER_SECRET=${AIDE_ZAIM_CONSUMER_SECRET:-}"
+            printf '%s\n' "AIDE_ZAIM_ACCESS_TOKEN=${AIDE_ZAIM_ACCESS_TOKEN:-}"
+            printf '%s\n' "AIDE_ZAIM_ACCESS_TOKEN_SECRET=${AIDE_ZAIM_ACCESS_TOKEN_SECRET:-}"
             # Web版の入力画面からの登録の中継先（#215）。Playwrightとログイン状態はサブPCにしか
             # 無いため、VPSは自分で画面を操作せずここへ中継する。空なら中継せず、
             # POST /api/zaim/payment/web は storage state が無いまま失敗する。
-            AIDE_ZAIM_WEB_UPSTREAM_URL=${AIDE_ZAIM_WEB_UPSTREAM_URL:-}
+            printf '%s\n' "AIDE_ZAIM_WEB_UPSTREAM_URL=${AIDE_ZAIM_WEB_UPSTREAM_URL:-}"
             # 動作状況ページのGoogleログイン（#90）。3つとも空ならパスワードでのログインになる。
             # **半端に設定するとサーバーが起動しない**（許可メールだけ空の状態＝Googleアカウントが
             # あれば誰でも開ける状態を作らないため）。設定するなら3つまとめて。
-            AIDE_SUPABASE_URL=${AIDE_SUPABASE_URL:-}
-            AIDE_SUPABASE_PUBLISHABLE_KEY=${AIDE_SUPABASE_PUBLISHABLE_KEY:-}
-            AIDE_STATUS_ALLOWED_EMAILS=${AIDE_STATUS_ALLOWED_EMAILS:-}
+            printf '%s\n' "AIDE_SUPABASE_URL=${AIDE_SUPABASE_URL:-}"
+            printf '%s\n' "AIDE_SUPABASE_PUBLISHABLE_KEY=${AIDE_SUPABASE_PUBLISHABLE_KEY:-}"
+            printf '%s\n' "AIDE_STATUS_ALLOWED_EMAILS=${AIDE_STATUS_ALLOWED_EMAILS:-}"
             # 画像メール送信API（#230）。Research Desk側から届くリクエストを認証するトークンと、
             # 送信元GmailのOAuth資格情報。いずれか欠けると /api/image-mail/send は503を返す。
-            AIDE_IMAGE_MAIL_TOKEN=${AIDE_IMAGE_MAIL_TOKEN:-}
-            AIDE_IMAGE_MAIL_TO=${AIDE_IMAGE_MAIL_TO:-}
-            AIDE_IMAGE_MAIL_BCC=${AIDE_IMAGE_MAIL_BCC:-}
-            AIDE_IMAGE_MAIL_FROM=${AIDE_IMAGE_MAIL_FROM:-}
+            printf '%s\n' "AIDE_IMAGE_MAIL_TOKEN=${AIDE_IMAGE_MAIL_TOKEN:-}"
+            printf '%s\n' "AIDE_IMAGE_MAIL_TO=${AIDE_IMAGE_MAIL_TO:-}"
+            printf '%s\n' "AIDE_IMAGE_MAIL_BCC=${AIDE_IMAGE_MAIL_BCC:-}"
+            printf '%s\n' "AIDE_IMAGE_MAIL_FROM=${AIDE_IMAGE_MAIL_FROM:-}"
             # 業界ニュース週報メール送信API（#257）。トークン・宛先・BCC・送信元は画像メールとは
             # 別の値。Gmail資格情報は画像メールと共用する。
-            AIDE_NEWS_MAIL_TOKEN=${AIDE_NEWS_MAIL_TOKEN:-}
-            AIDE_NEWS_MAIL_TO=${AIDE_NEWS_MAIL_TO:-}
-            AIDE_NEWS_MAIL_BCC=${AIDE_NEWS_MAIL_BCC:-}
-            AIDE_NEWS_MAIL_FROM=${AIDE_NEWS_MAIL_FROM:-}
-            AIDE_GMAIL_CLIENT_ID=${AIDE_GMAIL_CLIENT_ID:-}
-            AIDE_GMAIL_CLIENT_SECRET=${AIDE_GMAIL_CLIENT_SECRET:-}
-            AIDE_GMAIL_REFRESH_TOKEN=${AIDE_GMAIL_REFRESH_TOKEN:-}
-            ENVFILE
-            chmod 600 .env
+            printf '%s\n' "AIDE_NEWS_MAIL_TOKEN=${AIDE_NEWS_MAIL_TOKEN:-}"
+            printf '%s\n' "AIDE_NEWS_MAIL_TO=${AIDE_NEWS_MAIL_TO:-}"
+            printf '%s\n' "AIDE_NEWS_MAIL_BCC=${AIDE_NEWS_MAIL_BCC:-}"
+            printf '%s\n' "AIDE_NEWS_MAIL_FROM=${AIDE_NEWS_MAIL_FROM:-}"
+            printf '%s\n' "AIDE_GMAIL_CLIENT_ID=${AIDE_GMAIL_CLIENT_ID:-}"
+            printf '%s\n' "AIDE_GMAIL_CLIENT_SECRET=${AIDE_GMAIL_CLIENT_SECRET:-}"
+            printf '%s\n' "AIDE_GMAIL_REFRESH_TOKEN=${AIDE_GMAIL_REFRESH_TOKEN:-}"
+          } | ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" env
 
-            echo "Restarting PM2..."
-            if ! command -v pm2 >/dev/null 2>&1; then
-              echo "::error::pm2 が必要です。npm install -g pm2"
-              exit 1
-            fi
-            pm2 delete aide 2>/dev/null || true
-            PORT="$PORT" pm2 start deploy/ecosystem.config.cjs --env production
-            pm2 save
-
-            echo "Health check..."
-            for i in $(seq 1 15); do
-              if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/health"; then
-                echo "Deployment successful."
-                exit 0
-              fi
-              sleep 2
-            done
-
-            echo "Health check failed after 30s."
-            pm2 describe aide || true
-            pm2 logs aide --lines 50 --nostream || true
-            exit 1
+      # gateは稼働版の照合（/api/app-version の sha が APP_COMMIT_SHA と一致するまで最大60秒）まで行い、
+      # 一致しなければ失敗する。/health は旧版が動いたままでも 200 を返すため成功の根拠にしない（#662）。
+      - name: Deploy and restart
+        run: ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" deploy
 
   # GitHub Releaseの作成はこのジョブが担う。**他リポジトリにある独立した release.yml
   # （タグpushを起点にReleaseを作る）はaideには置かない**（aide#6で判断）。

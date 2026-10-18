@@ -32,6 +32,7 @@ import {
   normalizePaymentInput,
   type CreatePaymentOutcome,
 } from "../core/connectors/zaim/write.ts";
+import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
 /**
@@ -56,8 +57,29 @@ import { bearerToken, secretMatches } from "./secret.ts";
 /** ボディの上限。登録1件のJSONは数百バイトで、これを大きく超えるものは読み切らない。 */
 const MAX_BODY_BYTES = 64 * 1024;
 
+/**
+ * 環境変数 `AIDE_ZAIM_WRITE_SECRET` だけを読む。
+ *
+ * サブPCの受け口（`worker/zaim-web-routes.ts`）が起動判定に使う。サブPCは issue-deck の
+ * 共有トークンAPIの接続先を持たないため、環境変数のまま読む。**値は共有トークン
+ * `AIDE_ZAIM_WRITE_SECRET` と同じものを使う**（VPSからの中継をこの値で照合するため）。
+ */
 export function zaimWriteSecret(): string | null {
   return process.env["AIDE_ZAIM_WRITE_SECRET"] || null;
+}
+
+/**
+ * VPSの本体サーバーが使う値。issue-deck の共有トークン `AIDE_ZAIM_WRITE_SECRET`（aide#665）を
+ * 優先し、取得できなければ環境変数 `AIDE_ZAIM_WRITE_SECRET` へフォールバックする
+ * （`src/api/read.ts` の `readSecret()` と同じ形）。
+ *
+ * サブPCへの中継（`web-payment-forward.ts`）にもこの値を渡す。サブPC側は環境変数で照合するので、
+ * 共有トークンとサブPCの `.env` は同じ値にそろえておく。
+ */
+export async function resolveZaimWriteSecret(): Promise<string | null> {
+  const shared = await getSharedToken("AIDE_ZAIM_WRITE_SECRET", "aide");
+  if (shared) return shared;
+  return zaimWriteSecret();
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -77,7 +99,7 @@ function json(res: ServerResponse, status: number, body: unknown): void {
  * 「設定していないから開いていない」と「値が違う」を切り分けられるようにする）。
  */
 async function authorize(req: IncomingMessage, res: ServerResponse, label: string): Promise<boolean> {
-  const expected = zaimWriteSecret();
+  const expected = await resolveZaimWriteSecret();
   if (!expected) {
     json(res, 503, { error: "AIDE_ZAIM_WRITE_SECRET が未設定のため利用できません" });
     return false;
@@ -211,7 +233,7 @@ async function runOrForwardWebPayment(
     return createZaimWebPayment(input);
   }
 
-  const secret = zaimWriteSecret();
+  const secret = await resolveZaimWriteSecret();
   // `authorize()` を通っている以上ここには来ないが、型のために見る。
   if (!secret) return { ok: false, kind: "rejected", reason: "AIDE_ZAIM_WRITE_SECRET が未設定です" };
 
@@ -311,7 +333,7 @@ async function runOrForwardWebEdit<
     return run(input);
   }
 
-  const secret = zaimWriteSecret();
+  const secret = await resolveZaimWriteSecret();
   if (!secret) return { ok: false, kind: "rejected", reason: "AIDE_ZAIM_WRITE_SECRET が未設定です" };
 
   console.log(`[zaim-api] Web版の変更を中継: requestId=${input.requestId}`);
@@ -509,7 +531,7 @@ export async function handleZaimReceiptRefresh(
   }
 
   const upstream = zaimWebUpstreamUrl();
-  const secret = zaimWriteSecret();
+  const secret = await resolveZaimWriteSecret();
   if (upstream && req.headers[ZAIM_WEB_FORWARDED_HEADER] !== "1" && secret) {
     const forwarded = await forwardReceiptRefresh(
       jobId === null ? { method: "POST", body } : { method: "GET", jobId },
