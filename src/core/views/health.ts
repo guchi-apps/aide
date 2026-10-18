@@ -248,8 +248,8 @@ export function summarizeCache(
 /**
  * 接続先の設定状況。**トークンの値は読まず、設定されているかどうかだけを見る。**
  *
- * 本番の `.env` はデプロイのたびに丸ごと上書きされるため、配線を1か所落とすと
- * 静かに「未設定」へ戻る（#55）。それに気づける場所がこれまで無かった。
+ * 本番の `.env` の値はデプロイのたびに deploy.yml が送るもので、配線を1か所落とすと
+ * 静かに「未設定」のまま残る（#55）。それに気づける場所がこれまで無かった。
  */
 export async function readConnectors(options: { supabase?: SupabaseAuthConfig | null } = {}): Promise<HealthConnector[]> {
   return [
@@ -368,7 +368,7 @@ function connectorAttention(connectors: HealthConnector[]): HealthAttention[] {
       severity: "warn",
       message: `接続先の設定がありません: ${missing.map((connector) => connector.label).join("・")}`,
       action:
-        "本番の .env は deploy.yml が毎回上書きする。5か所すべてに通っているか確認する（README「環境変数の配線」）",
+        "本番の .env は deploy.yml がデプロイのたびにgateへ送る値で書く。5か所すべてに通っているか確認する（README「環境変数の配線」）",
     },
   ];
 }

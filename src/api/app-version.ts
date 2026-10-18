@@ -4,8 +4,8 @@ import { getProcessInfo } from "../core/process-info.ts";
 /**
  * `GET /api/app-version` の応答本文（#662）。
  *
- * `sha` は `deploy.yml` が `.env` へ書く `APP_COMMIT_SHA`。デプロイのヘルスチェックはこれが
- * 今回デプロイしたコミットと一致するまで成功にしない（旧版が `/health` に200を返しているだけの
+ * `sha` は `deploy.yml` がVPSのgate経由で `.env` へ書く `APP_COMMIT_SHA`。gate（guchi-apps/vps の
+ * app-deploy-gate）はこれが今回デプロイしたコミットと一致するまで成功にしない（旧版が `/health` に200を返しているだけの
  * 状態を成功と見なさないため）。issue-deck の新方式リリースもこの値で稼働中の版を照合する。
  * ローカル開発など未設定なら `null`（推測値は返さない）。
  */
