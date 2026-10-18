@@ -18,7 +18,7 @@ describe("buildAppVersion", () => {
     assert.equal(buildAppVersion({}).version, readPackageVersion());
   });
 
-  it("deploy.yml のヘルスチェックが探す形（\"sha\":\"<SHA>\"）でJSON化される", () => {
+  it("稼働版の照合が読む sha が \"sha\":\"<SHA>\" の形でJSON化される", () => {
     const sha = "0123456789abcdef0123456789abcdef01234567";
     assert.ok(JSON.stringify(buildAppVersion({ APP_COMMIT_SHA: sha }, "1.0.0")).includes(`"sha":"${sha}"`));
   });

@@ -95,7 +95,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
-  // 稼働中の版の照合用（#662）。deploy.yml のヘルスチェックと issue-deck のリリース確認が、
+  // 稼働中の版の照合用（#662）。デプロイのgate（guchi-apps/vps の app-deploy-gate）と issue-deck のリリース確認が、
   // ここの sha を今回デプロイしたコミットと突き合わせる。/health と同じく認証は通さない。
   if (path === "/api/app-version" && (req.method === "GET" || req.method === "HEAD")) {
     handleAppVersion(req.method, res);

@@ -4,23 +4,24 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 /**
- * 本番の `.env` は `.github/workflows/deploy.yml` が**毎回まるごと上書き**する。
- * そのため、VPS上で手で `.env` へ追記した値はデプロイのたびに消える。
+ * 本番の `.env` は `.github/workflows/deploy.yml` がデプロイのたびにVPSのgate
+ * （guchi-apps/vps の app-deploy-gate）へ送る値で書き換わる。**送っていない値はGitHub側に正が無く**、
+ * 手作業の追記だけで運用されることになる。
  *
  * 実際に AIDE_GITHUB_TOKEN（aide#47）と AIDE_OPS_DASHBOARD_TOKEN（aide#42）が手作業の
- * 追記だけで運用されており、次にデプロイが走った時点で消える状態だった（aide#55）。
- * これらが消えても例外にはならず、対応するMCPツールが「未設定」を返すだけなので、
+ * 追記だけで運用されており、当時の deploy.yml（.env をまるごと上書きしていた）で消える状態だった（aide#55）。
+ * これらが無くても例外にはならず、対応するMCPツールが「未設定」を返すだけなので、
  * 呼ぶまで誰も気づけない。**気づけない不具合は検査で塞ぐ。**
  *
  * このテストは `src/` が実行時に読む `AIDE_*` を洗い出し、それぞれが
  *
  *   1. `.github/secrets-manifest.tsv`（1Password → GitHub の対応表）
  *   2. deploy.yml のジョブの `env:`
- *   3. deploy.yml の「Deploy and restart」ステップの `env:`
- *   4. 同ステップの `envs:`（appleboy/ssh-action はここに書いた名前しかリモートへ渡さない）
- *   5. 同ステップが書き出す `.env` のheredoc
+ *   3. deploy.yml の「Send environment variables」ステップの `env:`
+ *   4. 同ステップの改行チェックの `for name in ...` の一覧
+ *   5. 同ステップが gate へ送る `printf '%s\n' "NAME=..."` の行
  *
- * すべてに載っていることを確かめる。本番で要らない値は下の NOT_REQUIRED_IN_PRODUCTION に
+ * すべてに載っていることを確かめる（#662 で gate へ移した）。本番で要らない値は下の NOT_REQUIRED_IN_PRODUCTION に
  * 理由付きで登録する。新しい `AIDE_*` を足した人は、必ずどちらかを選ぶことになる。
  */
 
@@ -94,14 +95,15 @@ const manifest = await readFile(`${REPO_ROOT}.github/secrets-manifest.tsv`, "utf
 const aideEnvNames = await collectAideEnvNames();
 const requiredInProduction = aideEnvNames.filter((name) => !(name in NOT_REQUIRED_IN_PRODUCTION));
 
-/** deploy.yml が `.env` へ書き出すheredocの中身。 */
-const envHeredoc = deployYml.match(/cat > \.env <<ENVFILE\n([\s\S]*?)\n\s*ENVFILE/)?.[1] ?? "";
+/** 「Send environment variables」ステップ（gateへ .env の値を送る）の本文。 */
+const sendStep =
+  deployYml.match(/- name: Send environment variables\n([\s\S]*?)\n\s*- name: Deploy and restart/)?.[1] ?? "";
 
-/** 「Deploy and restart」ステップの `envs:` に列挙された名前。 */
-const forwardedEnvs = (deployYml.match(/^\s*envs:\s*(.+)$/m)?.[1] ?? "")
-  .split(",")
-  .map((name) => name.trim())
-  .filter(Boolean);
+/** 同ステップが gate へ送る行（`printf '%s\n' "NAME=..."`）の `NAME=...` の部分。 */
+const sentLines = [...sendStep.matchAll(/^\s*printf '%s\\n' "([A-Z][A-Z0-9_]*=[^"]*)"$/gm)].map((match) => match[1]!);
+
+/** 同ステップの改行チェック（`for name in ...; do`）に並ぶ名前。 */
+const checkedNames = (sendStep.match(/^\s*for name in (.+); do$/m)?.[1] ?? "").split(/\s+/).filter(Boolean);
 
 /** マニフェストのKEY列（コメント行を除く）。 */
 const manifestKeys = manifest
@@ -114,6 +116,9 @@ describe("本番の.envへの配線（deploy.yml）", () => {
     // 走査そのものが壊れていると、以下の検査が全部素通りしてしまう。
     assert.ok(aideEnvNames.includes("AIDE_AUTH_PASSWORD"));
     assert.ok(requiredInProduction.length >= 5);
+    // deploy.yml の形が変わって抜き出しが空になると、以下の検査が全部素通りしてしまう。
+    assert.ok(sentLines.some((line) => line.startsWith("AIDE_AUTH_PASSWORD=")), "送信ステップの printf 行を読めていません");
+    assert.ok(checkedNames.includes("AIDE_AUTH_PASSWORD"), "送信ステップの改行チェックを読めていません");
   });
 
   it("実行時に要る AIDE_* がマニフェストに載っている", () => {
@@ -135,27 +140,26 @@ describe("本番の.envへの配線（deploy.yml）", () => {
       );
       assert.ok(
         deployYml.includes(`${name}: \${{ env.${name} }}`),
-        `${name} が「Deploy and restart」ステップの env: にありません。`,
+        `${name} が「Send environment variables」ステップの env: にありません。`,
       );
     }
   });
 
-  it("実行時に要る AIDE_* が envs: でリモートへ渡されている", () => {
+  it("実行時に要る AIDE_* が改行チェックの対象になっている", () => {
     for (const name of requiredInProduction) {
       assert.ok(
-        forwardedEnvs.includes(name),
-        `${name} が envs: にありません。appleboy/ssh-action は列挙した名前しか渡さないため、` +
-          "リモート側では空になります。",
+        checkedNames.includes(name),
+        `${name} が送信ステップの改行チェック（for name in ...）にありません。` +
+          "改行を含む値はgateが1行1変数として読めず、値が壊れたまま送られます。",
       );
     }
   });
 
-  it("実行時に要る AIDE_* が .env のheredocに書き出されている", () => {
+  it("実行時に要る AIDE_* がgateへ送られている", () => {
     for (const name of requiredInProduction) {
-      assert.match(
-        envHeredoc,
-        new RegExp(`^\\s*${name}=`, "m"),
-        `${name} が .env のheredocにありません。デプロイのたびに本番から消えます。`,
+      assert.ok(
+        sentLines.some((line) => line.startsWith(`${name}=`)),
+        `${name} が送信ステップの printf 行にありません。本番の .env へ届きません。`,
       );
     }
   });
@@ -174,9 +178,8 @@ describe("本番の.envへの配線（deploy.yml）", () => {
       "AIDE_GITHUB_TOKEN",
       "AIDE_GITHUB_ISSUE_TOKEN",
     ]) {
-      assert.match(
-        envHeredoc,
-        new RegExp(`^\\s*${name}=\\$\\{${name}:-\\}$`, "m"),
+      assert.ok(
+        sentLines.includes(`${name}=\${${name}:-}`),
         `${name} は \${${name}:-} で書き、未設定でも set -u で落ちないようにします。`,
       );
     }

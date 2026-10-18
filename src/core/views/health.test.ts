@@ -203,7 +203,7 @@ describe("接続先の設定状況", () => {
   });
 
   it("GitHubは取得用と起票用を別々に出す（片方だけ設定が落ちても気づけるように）", async () => {
-    // 本番の .env はデプロイのたびに丸ごと上書きされる（#55）。取得用だけを見ていると、
+    // 本番の .env の値はデプロイのたびに deploy.yml が送るもの（#55）。取得用だけを見ていると、
     // 起票用の配線が落ちても「設定済み」に見えてしまう。
     await withEnv({ AIDE_GITHUB_TOKEN: "read-only" }, async () => {
       const connectors = await readConnectors();
