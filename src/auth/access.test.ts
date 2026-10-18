@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { createAccessClient, parseAccessResponse, type AccessFetcher, type AccessSubject } from "./access.ts";
+import { afterEach, describe, it } from "node:test";
+import {
+  createAccessClient,
+  defaultFetcher,
+  parseAccessResponse,
+  type AccessFetcher,
+  type AccessSubject,
+} from "./access.ts";
+import { resetSharedTokenCacheForTest } from "../core/connectors/issue-deck/shared-tokens.ts";
 
 const SUBJECT: AccessSubject = { sub: "user-1", email: "me@example.com", emailVerified: true };
 
@@ -102,5 +109,36 @@ describe("アクセス判定のクライアント", () => {
       throw new Error("down");
     });
     assert.equal(await client.heartbeat(), false);
+  });
+});
+
+describe("defaultFetcher の共有トークン取得（aide#665）", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    delete process.env["AIDE_ISSUE_DECK_URL"];
+    delete process.env["SHARED_TOKEN_API_SECRET"];
+    globalThis.fetch = originalFetch;
+    resetSharedTokenCacheForTest();
+  });
+
+  it("AIDE_ACCESS_APP_TOKEN を利用元 aide として取得し、判定APIへ Bearer で送る", async () => {
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    const consumers: string[] = [];
+    let decisionAuth = "";
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      if (String(url).startsWith("https://deck.example.test/api/shared-tokens")) {
+        assert.equal(String(url), "https://deck.example.test/api/shared-tokens?name=AIDE_ACCESS_APP_TOKEN");
+        consumers.push(headers["X-Shared-Token-Consumer"] ?? "");
+        return new Response(JSON.stringify({ name: "AIDE_ACCESS_APP_TOKEN", value: "app-token" }), { status: 200 });
+      }
+      decisionAuth = headers["Authorization"] ?? "";
+      return new Response(JSON.stringify({ appVersion: 1, ttlSeconds: 30, maxStaleSeconds: 300 }), { status: 200 });
+    }) as typeof fetch;
+
+    await defaultFetcher({ appliedVersion: 0 });
+    assert.deepEqual(consumers, ["aide"]);
+    assert.equal(decisionAuth, "Bearer app-token");
   });
 });
