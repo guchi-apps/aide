@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { handleAppVersion } from "./api/app-version.ts";
 import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
@@ -91,6 +92,13 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
 
   if (path === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok\n");
+    return;
+  }
+
+  // 稼働中の版の照合用（#662）。deploy.yml のヘルスチェックと issue-deck のリリース確認が、
+  // ここの sha を今回デプロイしたコミットと突き合わせる。/health と同じく認証は通さない。
+  if (path === "/api/app-version" && (req.method === "GET" || req.method === "HEAD")) {
+    handleAppVersion(req.method, res);
     return;
   }
 

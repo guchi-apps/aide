@@ -195,6 +195,9 @@ jobs:
           AIDE_RESEARCH_DESK_URL: ${{ env.AIDE_RESEARCH_DESK_URL }}
           AIDE_ISSUE_DECK_URL: ${{ env.AIDE_ISSUE_DECK_URL }}
           AIDE_IOS_TEAM_ID: ${{ env.AIDE_IOS_TEAM_ID }}
+          # 稼働している版の照合に使う（#662）。ヘルスチェックが `/api/app-version` の `sha` と突き合わせる。
+          # コミットの SHA は公開情報なのでそのまま渡してよい。
+          APP_COMMIT_SHA: ${{ github.sha }}
         with:
           host: ${{ env.HOST }}
           username: ${{ env.USERNAME }}
@@ -202,7 +205,7 @@ jobs:
           port: ${{ env.SSH_PORT }}
           # appleboy/ssh-action はここに列挙した名前しかリモートへ渡さない。
           # 上の env: に足しただけでは届かず、.env が空で書かれる（aide#55）。
-          envs: TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_ASSET_MANAGER_URL,AIDE_BOT_URL,AIDE_RESEARCH_DESK_URL,AIDE_ISSUE_DECK_URL,AIDE_IOS_TEAM_ID,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_STATUS_SECRET,AIDE_WORK_REPORTS_READ_SECRET,SHARED_TOKEN_API_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_MYROOM_TOKEN,AIDE_MYROOM_CONTROL_TOKEN,AIDE_DAYSPAN_TOKEN,AIDE_DAYSPAN_WRITE_TOKEN,AIDE_DAYSPAN_TASKS_WRITE_TOKEN,AIDE_DAYSPAN_TARGET_EMAIL,AIDE_GITHUB_TOKEN,AIDE_GITHUB_ISSUE_TOKEN,AIDE_ISSUE_DECK_UPLOAD_TOKEN,AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN,AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET,AIDE_BOT_TOKEN,AIDE_BOT_EMAIL,AIDE_RESEARCH_DESK_TOKEN,AIDE_SUPABASE_URL,AIDE_SUPABASE_PUBLISHABLE_KEY,AIDE_STATUS_ALLOWED_EMAILS,AIDE_ZAIM_WRITE_SECRET,AIDE_ZAIM_CONSUMER_KEY,AIDE_ZAIM_CONSUMER_SECRET,AIDE_ZAIM_ACCESS_TOKEN,AIDE_ZAIM_ACCESS_TOKEN_SECRET,AIDE_ZAIM_WEB_UPSTREAM_URL,AIDE_IMAGE_MAIL_TOKEN,AIDE_IMAGE_MAIL_TO,AIDE_IMAGE_MAIL_BCC,AIDE_IMAGE_MAIL_FROM,AIDE_NEWS_MAIL_TOKEN,AIDE_NEWS_MAIL_TO,AIDE_NEWS_MAIL_BCC,AIDE_NEWS_MAIL_FROM,AIDE_GMAIL_CLIENT_ID,AIDE_GMAIL_CLIENT_SECRET,AIDE_GMAIL_REFRESH_TOKEN
+          envs: APP_COMMIT_SHA,TARGET_DIR,AIDE_AUTH_PASSWORD,AIDE_BASE_URL,AIDE_ASSET_MANAGER_URL,AIDE_BOT_URL,AIDE_RESEARCH_DESK_URL,AIDE_ISSUE_DECK_URL,AIDE_IOS_TEAM_ID,AIDE_INGEST_SECRET,AIDE_READ_SECRET,AIDE_STATUS_SECRET,AIDE_WORK_REPORTS_READ_SECRET,SHARED_TOKEN_API_SECRET,AIDE_OPS_DASHBOARD_TOKEN,AIDE_MYROOM_TOKEN,AIDE_MYROOM_CONTROL_TOKEN,AIDE_DAYSPAN_TOKEN,AIDE_DAYSPAN_WRITE_TOKEN,AIDE_DAYSPAN_TASKS_WRITE_TOKEN,AIDE_DAYSPAN_TARGET_EMAIL,AIDE_GITHUB_TOKEN,AIDE_GITHUB_ISSUE_TOKEN,AIDE_ISSUE_DECK_UPLOAD_TOKEN,AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN,AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET,AIDE_BOT_TOKEN,AIDE_BOT_EMAIL,AIDE_RESEARCH_DESK_TOKEN,AIDE_SUPABASE_URL,AIDE_SUPABASE_PUBLISHABLE_KEY,AIDE_STATUS_ALLOWED_EMAILS,AIDE_ZAIM_WRITE_SECRET,AIDE_ZAIM_CONSUMER_KEY,AIDE_ZAIM_CONSUMER_SECRET,AIDE_ZAIM_ACCESS_TOKEN,AIDE_ZAIM_ACCESS_TOKEN_SECRET,AIDE_ZAIM_WEB_UPSTREAM_URL,AIDE_IMAGE_MAIL_TOKEN,AIDE_IMAGE_MAIL_TO,AIDE_IMAGE_MAIL_BCC,AIDE_IMAGE_MAIL_FROM,AIDE_NEWS_MAIL_TOKEN,AIDE_NEWS_MAIL_TO,AIDE_NEWS_MAIL_BCC,AIDE_NEWS_MAIL_FROM,AIDE_GMAIL_CLIENT_ID,AIDE_GMAIL_CLIENT_SECRET,AIDE_GMAIL_REFRESH_TOKEN
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
@@ -308,6 +311,8 @@ jobs:
             AIDE_GMAIL_CLIENT_ID=${AIDE_GMAIL_CLIENT_ID:-}
             AIDE_GMAIL_CLIENT_SECRET=${AIDE_GMAIL_CLIENT_SECRET:-}
             AIDE_GMAIL_REFRESH_TOKEN=${AIDE_GMAIL_REFRESH_TOKEN:-}
+            # 稼働中のコミット（#662）。/api/app-version がそのまま返し、下のヘルスチェックが照合する。
+            APP_COMMIT_SHA=${APP_COMMIT_SHA}
             ENVFILE
             chmod 600 .env
 
@@ -320,16 +325,21 @@ jobs:
             PORT="$PORT" pm2 start deploy/ecosystem.config.cjs --env production
             pm2 save
 
-            echo "Health check..."
-            for i in $(seq 1 15); do
-              if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/health"; then
-                echo "Deployment successful."
+            # /health は旧版が動いたままでも 200 を返すため成功の根拠にしない。
+            # `/api/app-version` が返す `sha` が今回デプロイしたコミットと一致するまで待つ（#662）。
+            echo "Health check (sha=${APP_COMMIT_SHA})..."
+            body=""
+            for i in $(seq 1 30); do
+              body="$(curl -fsS "http://127.0.0.1:${PORT}/api/app-version" 2>/dev/null || true)"
+              if [ -n "$body" ] && printf '%s' "$body" | grep -qF "\"sha\":\"${APP_COMMIT_SHA}\""; then
+                echo "Deployment successful. (sha=${APP_COMMIT_SHA})"
                 exit 0
               fi
               sleep 2
             done
 
-            echo "Health check failed after 30s."
+            echo "Health check failed after 60s: /api/app-version did not report sha=${APP_COMMIT_SHA}."
+            echo "last response: ${body:-<none>}"
             pm2 describe aide || true
             pm2 logs aide --lines 50 --nostream || true
             exit 1
