@@ -129,6 +129,12 @@ export const ENDPOINTS: FeatureItem[] = [
     description: "死活確認。ok を返すだけ。認証は不要。",
   },
   {
+    name: "/api/app-version",
+    meta: "GET",
+    description:
+      "稼働中の版（package.json の version）とコミットSHA（APP_COMMIT_SHA）をJSONで返す。デプロイのヘルスチェックとリリースの稼働確認が使う。認証は不要。",
+  },
+  {
     name: "/.well-known/oauth-protected-resource",
     meta: "GET",
     description: "保護リソースのメタデータ。末尾に /mcp が付いた形でも同じ内容を返す。",

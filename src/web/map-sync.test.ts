@@ -17,6 +17,7 @@ describe("isAppFacingApi", () => {
   it("/api/ のエンドポイントだけを、アプリとのつながりとして数える", () => {
     assert.equal(isAppFacingApi("/api/money/summary"), true);
     assert.equal(isAppFacingApi("/health"), false);
+    assert.equal(isAppFacingApi("/api/app-version"), false);
     assert.equal(isAppFacingApi("/oauth/token"), false);
     assert.equal(isAppFacingApi("/map"), false);
   });

@@ -56,6 +56,9 @@ export interface SyncInput {
  * `:` を含むものは worker がAIDEへ送り込む受け口（`/api/cache/:key`）で、アプリが使う口ではない。
  */
 export function isAppFacingApi(name: string): boolean {
+  // `/api/app-version` はデプロイとリリース確認が版を照合する口で（#662）、`/health` と同じく
+  // アプリとのつながりではない。
+  if (name === "/api/app-version") return false;
   return name.startsWith("/api/") && !name.includes(":");
 }
 
