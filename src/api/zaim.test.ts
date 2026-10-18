@@ -18,7 +18,9 @@ const {
   handleZaimWebMemoEdit,
   handleZaimWebPayment,
 } = await import("./zaim.ts");
+const { resolveZaimWriteSecret, zaimWriteSecret } = await import("./zaim.ts");
 const { resetRateLimits } = await import("../auth/ratelimit.ts");
+const { resetSharedTokenCacheForTest } = await import("../core/connectors/issue-deck/shared-tokens.ts");
 
 /**
  * **Zaimへ実際にリクエストが飛ぶ経路はここでは扱わない。**
@@ -49,6 +51,68 @@ after(async () => {
 // 認証の失敗は回数として積み上がる。テストの並び順で後続がロックされないよう毎回戻す。
 beforeEach(() => {
   resetRateLimits();
+});
+
+const originalFetch = globalThis.fetch;
+
+describe("AIDE_ZAIM_WRITE_SECRET の取得（aide#665）", () => {
+  afterEach(() => {
+    delete process.env["AIDE_ZAIM_WRITE_SECRET"];
+    delete process.env["AIDE_ISSUE_DECK_URL"];
+    delete process.env["SHARED_TOKEN_API_SECRET"];
+    globalThis.fetch = originalFetch;
+    resetSharedTokenCacheForTest();
+  });
+
+  it("未設定なら null", async () => {
+    assert.equal(await resolveZaimWriteSecret(), null);
+  });
+
+  it("共有トークンAPIが未設定なら環境変数にフォールバックする", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal(await resolveZaimWriteSecret(), SECRET);
+  });
+
+  it("共有トークンAPIから取得できればそちらを優先し、利用元は aide を名乗る", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      assert.equal(String(url), "https://deck.example.test/api/shared-tokens?name=AIDE_ZAIM_WRITE_SECRET");
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      assert.equal(headers["X-Shared-Token-Consumer"], "aide");
+      return new Response(JSON.stringify({ name: "AIDE_ZAIM_WRITE_SECRET", value: "shared-value" }), { status: 200 });
+    }) as typeof fetch;
+
+    assert.equal(await resolveZaimWriteSecret(), "shared-value");
+  });
+
+  it("共有トークンAPIで取得できなければ環境変数へフォールバックする", async () => {
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    globalThis.fetch = (async () => new Response("", { status: 500 })) as typeof fetch;
+    const warn = mock.method(console, "warn", () => {});
+    try {
+      assert.equal(await resolveZaimWriteSecret(), SECRET);
+    } finally {
+      warn.mock.restore();
+    }
+  });
+
+  it("サブPCの受け口が読む zaimWriteSecret() は環境変数だけを見る", async () => {
+    process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
+    process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response(JSON.stringify({ value: "shared-value" }), { status: 200 });
+    }) as typeof fetch;
+    assert.equal(zaimWriteSecret(), null);
+    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
+    assert.equal(zaimWriteSecret(), SECRET);
+    assert.equal(called, false);
+  });
 });
 
 interface Captured {

@@ -40,7 +40,8 @@ interface DecisionRequest {
 export type AccessFetcher = (body: DecisionRequest) => Promise<DecisionResponse>;
 
 const TOKEN_NAME = "AIDE_ACCESS_APP_TOKEN";
-const TOKEN_CONSUMER = "ACCESS_APP_TOKEN";
+/** 共有トークンAPIへ名乗る利用元。ほかの共有トークン取得と同じく `aide`（aide#665）。 */
+const TOKEN_CONSUMER = "aide";
 /** StatusHubの本番オリジン。 */
 const DEFAULT_ACCESS_API_URL = "https://admin.gucchii.com";
 const REQUEST_TIMEOUT_MS = 5_000;
