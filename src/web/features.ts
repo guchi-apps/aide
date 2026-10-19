@@ -119,6 +119,11 @@ export const ENDPOINTS: FeatureItem[] = [
     description: "PWAのマニフェスト。ホーム画面へ追加したときの名前とアイコンを返す。認証は不要。",
   },
   {
+    name: "/",
+    meta: "GET",
+    description: "アイコンを指すだけの空のページ。Claudeアプリなどがファビコンを引くために置いている。認証は不要。",
+  },
+  {
     name: "/icons/:name",
     meta: "GET",
     description: "アイコン画像。/favicon.ico も同じ画像を返す。認証は不要。",

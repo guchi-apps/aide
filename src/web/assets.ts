@@ -137,7 +137,7 @@ export function headTags(options: { manifest: boolean } = { manifest: true }): s
 }
 
 /**
- * アイコンとマニフェストのGET/HEADを処理する。担当外のパスなら false を返し、
+ * アイコン・マニフェスト・トップページのGET/HEADを処理する。担当外のパスなら false を返し、
  * 呼び出し元（`src/server.ts`）が他のルートを探せるようにする。
  */
 export async function handleAsset(method: string | undefined, path: string, res: ServerResponse): Promise<boolean> {
@@ -147,6 +147,28 @@ export async function handleAsset(method: string | undefined, path: string, res:
     res
       .writeHead(200, { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "public, max-age=3600" })
       .end(JSON.stringify(manifest(), null, 2));
+    return true;
+  }
+
+  // トップページはアイコンを指すだけの空のページにする（#125 の続き）。
+  // Claudeアプリのコネクタ一覧には `serverInfo.icons` ではなく親ドメイン（gucchii.com）の絵が
+  // 出ていた。接続先のファビコンを外部の収集サービス経由で引いているとみられ、そうしたサービスは
+  // まずトップページの <link rel="icon"> を探すので、`/` が404のままだと親ドメインで代用される。
+  // **中身は載せない。** 機能一覧などはログインの内側（/map・/features）に置いたままにする。
+  if (path === "/") {
+    const html = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>AIde</title>
+${headTags({ manifest: false })}
+</head>
+<body></body>
+</html>
+`;
+    res
+      .writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600" })
+      .end(method === "HEAD" ? undefined : html);
     return true;
   }
 

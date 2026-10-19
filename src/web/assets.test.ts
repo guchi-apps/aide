@@ -82,10 +82,23 @@ describe("アイコン配信", () => {
     assert.equal(versioned("/icons/icon-192.png"), `/icons/icon-192.png?v=${ASSET_VERSION}`);
   });
 
+  it("トップページはアイコンを指すだけの空のページを返す", async () => {
+    const { handled, captured } = await get("/");
+    assert.ok(handled);
+    assert.equal(captured.status, 200);
+    assert.equal(captured.headers["Content-Type"], "text/html; charset=utf-8");
+    const html = String(captured.body);
+    assert.match(html, /rel="icon"[^>]*favicon-32\.png/);
+    assert.match(html, /rel="icon"[^>]*icon-192\.png/);
+    assert.match(html, /<body><\/body>/);
+    assert.equal((await get("/", "HEAD")).captured.body, undefined);
+  });
+
   it("担当外のパス・メソッドは処理せず、他のルートに渡す", async () => {
     assert.equal((await get("/mcp")).handled, false);
     assert.equal((await get("/icons/../server.ts")).handled, false);
     assert.equal((await get("/icons/icon-192.png", "POST")).handled, false);
+    assert.equal((await get("/", "POST")).handled, false);
   });
 });
 
