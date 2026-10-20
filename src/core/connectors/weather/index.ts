@@ -41,6 +41,8 @@ const DEFAULT_LONGITUDE = 135.56;
 export interface WeatherConfig {
   latitude: number;
   longitude: number;
+  /** 地点の名前（`AIDE_WEATHER_LOCATION_NAME`）。未設定なら null。 */
+  name: string | null;
 }
 
 /**
@@ -70,11 +72,14 @@ export function readWeatherConfig(): WeatherConfig {
   return {
     latitude: readCoordinate("AIDE_WEATHER_LAT", DEFAULT_LATITUDE, 90),
     longitude: readCoordinate("AIDE_WEATHER_LON", DEFAULT_LONGITUDE, 180),
+    // 既定の名前は持たない。既定の座標から市町村を推して書くと、外れたときに
+    // 「別の場所の名前」が正常に出続ける。分からなければ null で座標だけを返す（#673）。
+    name: process.env.AIDE_WEATHER_LOCATION_NAME?.trim() || null,
   };
 }
 
 /** 実際に叩くURL。テストから組み立てだけを確かめられるよう分けてある。 */
-export function forecastUrl(config: WeatherConfig): string {
+export function forecastUrl(config: Pick<WeatherConfig, "latitude" | "longitude">): string {
   const params = new URLSearchParams({
     latitude: String(config.latitude),
     longitude: String(config.longitude),
@@ -120,7 +125,7 @@ export async function fetchWeatherForecast(config: WeatherConfig): Promise<Weath
     throw new Error("Open-Meteo の応答をJSONとして読めませんでした");
   }
 
-  const forecast = parseForecast(raw);
+  const forecast = parseForecast(raw, config.name);
   if (forecast.days.length === 0) {
     throw new Error("Open-Meteo の応答に予報が含まれていませんでした");
   }
