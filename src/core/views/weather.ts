@@ -52,7 +52,7 @@ export interface WeatherSection<T> {
   data: T | null;
 }
 
-/** 天気セクションの中身。**座標は載せない**（自宅の位置にあたるため。README のOpen-Meteo節）。 */
+/** 天気セクションの中身。地点は器の外（`WeatherView.location`）に置く。 */
 export interface WeatherForecastDays {
   /** 対象日（JSTの暦日）の予報。キャッシュに含まれていなければ null。 */
   today: WeatherDay | null;
@@ -124,11 +124,44 @@ export function summarizeWeatherSection(
   };
 }
 
-/** `aide_weather` が返す形。予報の器に、対象日と組み立ての断り書きを添えたもの。 */
+/**
+ * 予報の地点（#673）。利用側（Morrow）が「どこの天気か」を見出しに出すためのもの。
+ *
+ * **座標はMCPの応答にだけ出す。** 自宅の位置にあたるので、ログ・失敗通知には引き続き出さない
+ * （README のOpen-Meteo節）。MCPは認証の内側で、呼べるのは本人が許可した利用者だけ。
+ * 座標はOpen-Meteoが実際に使った格子の点で、設定値（`AIDE_WEATHER_LAT/LON`）とは少しずれる。
+ */
+export interface WeatherViewLocation {
+  /** 市町村名（政令市は区まで）。設定されていなければ null。 */
+  name: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+/**
+ * キャッシュから地点を取り出す。**純粋関数。**
+ *
+ * 対象日を含まない古いキャッシュでも地点は変わらないので、予報の状態とは独立に返す。
+ * キャッシュが無ければ（＝どこの予報も取れていなければ）null。
+ */
+export function weatherLocation(cached: CachedValue<WeatherForecast> | null): WeatherViewLocation | null {
+  const location = cached?.data.location;
+  if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) return null;
+  return {
+    // #673 より前に書かれたキャッシュには name が無い（次の毎時同期で入る）。
+    name: typeof location.name === "string" && location.name !== "" ? location.name : null,
+    latitude: location.latitude,
+    longitude: location.longitude,
+  };
+}
+
+/** `aide_weather` が返す形。予報の器に、対象日・地点と組み立ての断り書きを添えたもの。 */
 export interface WeatherView extends WeatherSection<WeatherForecastDays> {
   checkedAt: string;
   /** 対象日（`YYYY-MM-DD`・JST）。 */
   date: string;
+  /** 予報の地点。キャッシュが無ければ null。 */
+  location: WeatherViewLocation | null;
   /** 日付をどのタイムゾーンで切ったか。 */
   timezone: string;
   note: string;
@@ -142,7 +175,8 @@ export interface WeatherView extends WeatherSection<WeatherForecastDays> {
  */
 export async function buildWeather(now: Date = new Date()): Promise<WeatherView> {
   const date = tokyoDate(now);
-  const forecast = summarizeWeatherSection(await readCache<WeatherForecast>(WEATHER_CACHE_KEY), date);
+  const cached = await readCache<WeatherForecast>(WEATHER_CACHE_KEY);
+  const forecast = summarizeWeatherSection(cached, date);
 
   const notes = [`${date}（${WEATHER_TIMEZONE} の暦日）を「今日」として組み立てている。`];
   if (forecast.state !== "ok") {
@@ -161,6 +195,7 @@ export async function buildWeather(now: Date = new Date()): Promise<WeatherView>
     checkedAt: now.toISOString(),
     date,
     timezone: WEATHER_TIMEZONE,
+    location: weatherLocation(cached),
     ...forecast,
     note: notes.join(" "),
   };

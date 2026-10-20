@@ -71,7 +71,7 @@ function at(values: (number | null)[] | undefined, index: number): number | null
  * 添字を数えず**、欠けていれば null にして日付だけは残す。予報が1日ぶんしか返らない
  * 場合でも「明日が無い」ことが参照側に伝わるほうが、例外で落とすより扱いやすい。
  */
-export function parseForecast(raw: OpenMeteoDailyResponse): WeatherForecast {
+export function parseForecast(raw: OpenMeteoDailyResponse, name: string | null = null): WeatherForecast {
   const dates = raw.daily?.time ?? [];
 
   const days: WeatherDay[] = dates.map((date, index) => {
@@ -88,6 +88,8 @@ export function parseForecast(raw: OpenMeteoDailyResponse): WeatherForecast {
 
   return {
     location: {
+      // 名前は応答に無いので、設定から渡されたものをそのまま載せる（#673）。
+      name,
       // 応答には**実際に使われた観測格子の座標**が入る。要求値ではなくこちらを残すと、
       // 「どの地点の予報か」を後から確かめられる。
       latitude: raw.latitude,

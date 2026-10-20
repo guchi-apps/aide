@@ -43,6 +43,15 @@ export interface WeatherDay {
 }
 
 export interface WeatherLocation {
+  /**
+   * 地点の名前（市町村。政令市は区まで。例: 高槻市・大阪市北区）。未設定なら null（#673）。
+   *
+   * **Open-Meteo の応答には無く、`AIDE_WEATHER_LOCATION_NAME` から worker が載せる。**
+   * 名前を座標と同じキャッシュへ入れるのは、座標を持つのがサブPCの worker だけだから
+   * （VPS側で別に持つと、別マシンの設定どうしがずれて別の場所の名前が出る）。
+   * #673 より前に書かれたキャッシュには無いため、読む側は undefined も null とみなす。
+   */
+  name?: string | null;
   latitude: number;
   longitude: number;
   /** 日付の区切りに使ったタイムゾーン。日本時間で切っていることの根拠。 */
