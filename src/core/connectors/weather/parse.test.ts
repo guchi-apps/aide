@@ -56,10 +56,15 @@ describe("天気予報の正規化", () => {
   it("実際に使われた格子の座標とタイムゾーンを残す", () => {
     const forecast = parseForecast(RESPONSE);
     assert.deepEqual(forecast.location, {
+      name: null,
       latitude: 34.8,
       longitude: 135.5625,
       timezone: "Asia/Tokyo",
     });
+  });
+
+  it("設定から渡された地点の名前を載せる", () => {
+    assert.equal(parseForecast(RESPONSE, "高槻市").location.name, "高槻市");
   });
 
   it("帰属表示をデータへ同梱する", () => {
@@ -116,14 +121,20 @@ describe("天気コードの日本語表記", () => {
 
 describe("地点の設定", () => {
   it("未設定なら既定の地点を使う", () => {
-    withEnv({ AIDE_WEATHER_LAT: undefined, AIDE_WEATHER_LON: undefined }, () => {
-      assert.deepEqual(readWeatherConfig(), { latitude: 34.82, longitude: 135.56 });
+    withEnv({ AIDE_WEATHER_LAT: undefined, AIDE_WEATHER_LON: undefined, AIDE_WEATHER_LOCATION_NAME: undefined }, () => {
+      assert.deepEqual(readWeatherConfig(), { latitude: 34.82, longitude: 135.56, name: null });
     });
   });
 
   it("環境変数で地点を差し替えられる", () => {
-    withEnv({ AIDE_WEATHER_LAT: "43.06", AIDE_WEATHER_LON: "141.35" }, () => {
-      assert.deepEqual(readWeatherConfig(), { latitude: 43.06, longitude: 141.35 });
+    withEnv({ AIDE_WEATHER_LAT: "43.06", AIDE_WEATHER_LON: "141.35", AIDE_WEATHER_LOCATION_NAME: " 札幌市中央区 " }, () => {
+      assert.deepEqual(readWeatherConfig(), { latitude: 43.06, longitude: 141.35, name: "札幌市中央区" });
+    });
+  });
+
+  it("名前が空文字なら null として扱う", () => {
+    withEnv({ AIDE_WEATHER_LOCATION_NAME: "  " }, () => {
+      assert.equal(readWeatherConfig().name, null);
     });
   });
 

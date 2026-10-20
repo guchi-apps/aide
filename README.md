@@ -2106,6 +2106,7 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 |---|---|
 | `AIDE_WEATHER_LAT` | `34.82`（myroom の `OUTDOOR_LAT` と同じ） |
 | `AIDE_WEATHER_LON` | `135.56`（myroom の `OUTDOOR_LON` と同じ） |
+| `AIDE_WEATHER_LOCATION_NAME` | 名前なし（`aide_weather` の `location.name` が `null`。座標だけ返す） |
 
 **値が要るのは worker が動くサブPCだけ**（VPSはキャッシュを読むだけ）。座標として読めない値は
 既定へ落とさず例外にする。黙って既定へ戻すと、書き間違えたまま「別の地点の予報が正常に
@@ -2113,6 +2114,18 @@ myroom（`backend/weather.py`）と portfolio（`src/hooks/use-weather.ts`）が
 
 座標は自宅の位置にあたるため、**ログにも失敗通知にも出さない**。失敗理由はHTTPステータスと
 種別まで丸める（`Open-Meteo が HTTP 429 を返しました（利用回数の上限）` など）。
+
+### 予報の地点を返す（#673）
+
+`aide_weather` は応答のトップレベルに `location: { name, latitude, longitude }` を返す。
+Morrowのダッシュボードが「どこの天気か」を見出しに出すためで、地点の正をAIDEに置く
+（利用側が自宅を別に持つと二重管理になり、ずれると別の場所の名前が出る）。
+
+- **座標を出すのはMCPの応答（認証の内側）だけ。** ログ・失敗通知には従来どおり出さない
+- 座標は Open-Meteo が実際に使った格子の点で、設定値とは少しずれる（予報が対象にした点そのもの）
+- 名前は `AIDE_WEATHER_LOCATION_NAME` を worker が予報と一緒にキャッシュへ載せる。座標と同じ
+  マシン（サブPC）で持つので、VPS側の配線は要らない。**国土地理院の逆ジオコーダは使わない**——
+  返るのが市区町村コードだけで、名前にするにはコード表の同梱・保守が要り、地点はほぼ動かないため
 
 
 ## コネクタ: Claude Code（サブPCのセッション）

@@ -22,6 +22,8 @@ export const weatherTool: Tool = {
     "現在の実測値を尋ねられたときは aide_room_sensors を呼ぶこと。" +
     "**予定は返さない**（今日・明日の予定は aide_schedule）。" +
     "date はJSTの暦日で、その日を「今日」として組み立てている。" +
+    "location は予報の地点で、name（市町村名。政令市は区まで）と latitude / longitude を持つ。" +
+    "name は未設定なら null（座標だけが入る）。予報を一度も取得できていなければ location 自体が null。" +
     "tomorrow は深夜0時台のみ null になることがある（次の毎時同期で入る）。" +
     "state が ok 以外のときは予報を取得できていないという意味で、" +
     "**そういう天気だという意味ではない**。" +

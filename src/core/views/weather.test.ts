@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { summarizeWeatherSection } from "./weather.ts";
+import { summarizeWeatherSection, weatherLocation } from "./weather.ts";
 import type { CachedValue } from "../cache/store.ts";
 import type { WeatherDay, WeatherForecast } from "../connectors/weather/types.ts";
 
@@ -34,7 +34,7 @@ function cached(
     fetchedAt: "2026-08-19T06:00:00.000Z",
     ageMinutes,
     data: {
-      location: { latitude: 34.82, longitude: 135.56, timezone: "Asia/Tokyo" },
+      location: { name: "高槻市", latitude: 34.8125, longitude: 135.625, timezone: "Asia/Tokyo" },
       days,
       attribution: "Weather data by Open-Meteo.com (CC BY 4.0)",
     },
@@ -92,5 +92,30 @@ describe("summarizeWeatherSection", () => {
     assert.equal(section.stale, true);
     assert.equal(section.data, null);
     assert.match(section.reason ?? "", /weather-sync/);
+  });
+});
+
+describe("weatherLocation", () => {
+  it("地点の名前と座標を返す（タイムゾーンは載せない）", () => {
+    assert.deepEqual(weatherLocation(cached([day(TODAY)])), {
+      name: "高槻市",
+      latitude: 34.8125,
+      longitude: 135.625,
+    });
+  });
+
+  it("名前を持たない古いキャッシュでも座標は返し、名前は null にする", () => {
+    const old = cached([day(TODAY)]);
+    const { name: _name, ...withoutName } = old.data.location;
+    const location = weatherLocation({ ...old, data: { ...old.data, location: withoutName } });
+    assert.deepEqual(location, { name: null, latitude: 34.8125, longitude: 135.625 });
+  });
+
+  it("対象日を含まない古い予報でも地点は返す", () => {
+    assert.equal(weatherLocation(cached([day("2026-08-17")], 600))?.name, "高槻市");
+  });
+
+  it("キャッシュが無ければ null", () => {
+    assert.equal(weatherLocation(null), null);
   });
 });
