@@ -208,8 +208,28 @@ function classifyThrown(cause: unknown, timeoutMs: number, writing: boolean): Bi
       ? { ok: false, kind: "unknown", reason: "応答をJSONとして読めませんでした。保存されたかどうかは分かりません" }
       : { ok: false, kind: "failed", reason: "JSONとして読めない応答が返りました" };
   }
-  // 接続そのものができていない。送れていないことが確か。
+  // 書き込みは、接続の確立前に失敗したと分かるときだけ「送れていない」と言える。
+  // 送信後に接続が切れた（ECONNRESET 等）・原因が読めないときは、kurashio に届いて保存された可能性がある。
+  if (writing && !failedBeforeConnect(cause)) {
+    return { ok: false, kind: "unknown", reason: "kurashio との通信が途中で失敗しました。保存されたかどうかは分かりません" };
+  }
   return { ok: false, kind: "failed", reason: "kurashio へ接続できませんでした" };
+}
+
+/** 名前解決・接続の確立で失敗したことを示すコード。どれもリクエストを送る前に起きる。 */
+const PRE_CONNECT_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+/** Node の fetch（undici）は接続失敗を `TypeError("fetch failed")` の `cause.code` で示す。 */
+function failedBeforeConnect(cause: unknown): boolean {
+  const inner = cause instanceof Error ? (cause.cause as { code?: unknown } | undefined) : undefined;
+  return typeof inner?.code === "string" && PRE_CONNECT_ERROR_CODES.has(inner.code);
 }
 
 function headers(config: BillsConfig): Record<string, string> {

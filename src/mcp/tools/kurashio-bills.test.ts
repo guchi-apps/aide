@@ -304,8 +304,19 @@ describe("kurashio_import_utility_bill", () => {
   it("書込の500は unknown、接続できないのは failed として分ける", async () => {
     const e500 = fakeKurashio({ contracts: CONTRACTS, import: () => json(500, { detail: "internal error" }) });
     assert.equal(body(await createKurashioImportBillTool(deps(e500.fetchImpl)).handler(VALID, { sessionId: null }))["status"], "unknown");
-    const down = fakeKurashio({ contracts: CONTRACTS, import: () => { throw new TypeError("fetch failed"); } });
+    const refused = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    const down = fakeKurashio({ contracts: CONTRACTS, import: () => { throw new TypeError("fetch failed", { cause: refused }); } });
     assert.equal(body(await createKurashioImportBillTool(deps(down.fetchImpl)).handler(VALID, { sessionId: null }))["status"], "failed");
+  });
+
+  it("送信後に接続が切れた・原因が読めない書込の失敗は unknown と照会方法を返す", async () => {
+    const reset = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+    for (const thrown of [new TypeError("fetch failed", { cause: reset }), new TypeError("fetch failed")]) {
+      const { fetchImpl } = fakeKurashio({ contracts: CONTRACTS, import: () => { throw thrown; } });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler(VALID, { sessionId: null });
+      assert.equal(body(res)["status"], "unknown");
+      assert.equal((body(res)["lookup"] as Record<string, unknown>)["tool"], "kurashio_get_utility_bill");
+    }
   });
 
   it("未設定・認証拒否・未対応を区別する", async () => {

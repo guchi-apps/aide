@@ -1689,8 +1689,11 @@ AIDEは内部APIを叩いて結果を分類するだけ（`src/core/connectors/m
 - **金額が不明なら送らない**（`insufficient_data`）。kurashio の `amount_yen` は必須で、0円で埋めると集計が狂う
 - 結果は `created`（読み戻して一致を確認済み）/ `duplicate` / `conflict` / `unverified` / `invalid` /
   `contract_unresolved` / `contract_month_conflict` / `insufficient_data` / `not_configured` / `unauthorized` / `unsupported` / `failed` / `unknown`。
-  `unknown`（応答待ちが切れた・書込の5xx）は保存されたか分からないので、再送させずに
-  `kurashio_get_utility_bill` を `sourceMessageId` で引く方法を返す
+  `unknown`（応答待ちが切れた・書込の5xx・送信後に接続が切れた）は保存されたか分からないので、再送させずに
+  `kurashio_get_utility_bill` を `sourceMessageId` で引く方法を返す。書込で `failed` にするのは、名前解決・接続の確立で
+  失敗したと分かるとき（`ECONNREFUSED` 等）だけ
+- kurashio 側の実装（認証・一意制約・rollback）・本番の稼働版・書込トークンの登録状況を照合した記録は
+  [docs/kurashio-bills-integration.md](./docs/kurashio-bills-integration.md)
 
 ## コネクタ: 3Dプリンター（myroom経由。#378）
 
