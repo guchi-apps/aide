@@ -34,6 +34,7 @@ import {
   updateTaskTool,
 } from "./tools/tasks.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
+import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { vpsMemoryTool } from "./tools/vps-memory.ts";
 import { weatherTool } from "./tools/weather.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
@@ -69,6 +70,10 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(fixedCostsTool);
   // 電気代・ガス代（#324）。種類と期間を取るため固定費・残高へは畳まない。
   registry.register(utilityBillsTool);
+  // kurashioの月次請求（#678）。Zaim由来の aide_utility_bills とは保存先が別。読み取りと書き込みは別ツール・別scope。
+  registry.register(kurashioBillContractsTool);
+  registry.register(kurashioGetBillTool);
+  registry.register(kurashioImportBillTool);
   // 運用は区画ごとに分ける（#373）。ホスト指標・外形監視・残枠は別々の問い。
   registry.register(hostStatusTool);
   registry.register(uptimeMonitorsTool);

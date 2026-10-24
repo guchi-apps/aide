@@ -36,6 +36,9 @@
 | `aide_balances` | いくら持っているか | C B | 読 | `/api/money/summary` | Zaimキャッシュ | 1.0KB | 約11KB→約8KB | **改善**（下記） |
 | `aide_fixed_costs` | 毎月の固定費 | C B | 読 | `/api/money/summary` | Asset Manager | 1.4KB | 約7KB | 維持。契約の要約に絞ってあり、明細は22件×7項目 |
 | `aide_utility_bills` | 電気・ガス代 | C B | 読 | なし | Zaim公式API | 1.0KB | 未実測 | 維持（種類と期間を引数に取る） |
+| `kurashio_utility_bill_contracts` | kurashioの電気・ガスの契約候補 | C | 読 | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:read`。お客さま番号は返さない |
+| `kurashio_get_utility_bill` | kurashioの月次請求1件 | C | 読 | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:read`。請求月か元メールのmessageIdで引く |
+| `kurashio_import_utility_bill` | kurashioへ月次請求を登録 | C | **書** | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:write`。既存行は書き換えない（duplicate/conflict）。登録後に読み戻して確認。dryRunあり |
 | `aide_host_status` | サーバーの状態 | C B | 読 | ops-dashboard | ops-dashboard | 1.2KB | 約2KB | 維持 |
 | `aide_uptime_monitors` | 外形監視 | C B | 読 | ops-dashboard | ops-dashboard | 0.8KB | 未実測 | 維持 |
 | `aide_service_quotas` | AI等の残枠 | C B | 読 | ops-dashboard | ops-dashboard | 0.9KB | 未実測 | 維持 |

@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { after, beforeEach, describe, it } from "node:test";
 import type { McpAccessEntry } from "./access-log.ts";
 import { issueDeckReviewAgentTools } from "./tools/issue-deck-review-agent.ts";
+import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { parseSupportedScopes } from "../auth/oauth.ts";
 
 // 記録の置き場を差し替えてから読み込む（access-log.test.ts と同じ理由）。
@@ -104,6 +105,27 @@ async function waitForEntries(count: number): Promise<McpAccessEntry[]> {
 }
 
 describe("MCPのやり取りの記録", () => {
+  it("kurashioの請求ツールは読み取りscopeで登録できず、登録scopeで照会できない", async () => {
+    assert.deepEqual(parseSupportedScopes("kurashio-bills:read kurashio-bills:write kurashio-bills:admin"),
+      ["kurashio-bills:read", "kurashio-bills:write"]);
+    for (const tool of [kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool]) {
+      const required = tool.name === "kurashio_import_utility_bill" ? "kurashio-bills:write" : "kurashio-bills:read";
+      const other = required === "kurashio-bills:read" ? "kurashio-bills:write" : "kurashio-bills:read";
+      let calls = 0;
+      const registry = new ToolRegistry();
+      registry.register({ ...tool, handler: () => { calls++; return { content: [{ type: "text", text: "called" }] }; } });
+      const instance = new McpTransport(registry, { name: "aide", version: "test" });
+      for (const scopes of [[], [other], ["tasks:write"]]) {
+        const res = response();
+        await instance.handle(request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name } }), res, BASE_URL, scopes);
+        assert.match(res.body, /"isError":true/);
+        assert.equal(calls, 0, tool.name);
+      }
+      await instance.handle(request({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: tool.name } }), response(), BASE_URL, [required]);
+      assert.equal(calls, 1, tool.name);
+    }
+  });
+
   it("レビュー中継9ツールは明示的なOAuthスコープがある場合だけ実行する", async () => {
     assert.deepEqual(parseSupportedScopes("review-agent:read review-agent:write review-agent:admin"),
       ["review-agent:read", "review-agent:write"]);
