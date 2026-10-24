@@ -212,6 +212,85 @@ describe("kurashio_import_utility_bill", () => {
     assert.ok(!calls.some((c) => c.path.endsWith("/import")));
   });
 
+  describe("初回・新規契約（候補に無いキー。#685）", () => {
+    const EMPTY: Handler = () => json(200, { contracts: [] });
+    const NEW = { ...VALID, contractKey: "default" };
+    const created = (key: string) => ({
+      import: () => json(200, { status: "created", record: record({ contract_key: key }), source: SOURCE }),
+      record: () => json(200, { record: record({ contract_key: key }), source: SOURCE }),
+    });
+
+    it("候補ゼロでも明示確認が無ければ送らず contract_unresolved", async () => {
+      const { calls, fetchImpl } = fakeKurashio({ contracts: EMPTY, ...created("default") });
+      for (const extra of [{}, { confirmNewContract: false }]) {
+        const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...NEW, ...extra }, { sessionId: null });
+        assert.equal(body(res)["status"], "contract_unresolved");
+      }
+      assert.ok(!calls.some((c) => c.method === "POST"));
+    });
+
+    it("confirmNewContract が真偽値以外なら invalid（\"true\" 文字列を通さない）", async () => {
+      const { calls, fetchImpl } = fakeKurashio({ contracts: EMPTY, ...created("default") });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...NEW, confirmNewContract: "true" }, { sessionId: null });
+      assert.equal(body(res)["status"], "invalid");
+      assert.ok(!calls.some((c) => c.method === "POST"));
+    });
+
+    it("候補ゼロ＋明示確認なら初回POSTし、読み戻して created（newContract:true）", async () => {
+      const { calls, fetchImpl } = fakeKurashio({ contracts: EMPTY, ...created("default") });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...NEW, confirmNewContract: true }, { sessionId: null });
+      assert.equal(body(res)["status"], "created");
+      assert.equal(body(res)["newContract"], true);
+      assert.equal(calls.find((c) => c.method === "POST")?.body?.["contract_key"], "default");
+      assert.equal(calls.at(-1)?.query.get("source_message_id"), "msg-1");
+    });
+
+    it("不正な形のキーは確認済みでも弾く", async () => {
+      const { calls, fetchImpl } = fakeKurashio({ contracts: EMPTY });
+      for (const contractKey of ["1234-5678-90", "manual", "0123456789"]) {
+        const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...VALID, contractKey, confirmNewContract: true }, { sessionId: null });
+        assert.equal(body(res)["status"], "invalid", contractKey);
+      }
+      assert.equal(calls.length, 0);
+    });
+
+    it("既存候補の外の新規キーも、確認済みで同月の行が無ければ通る", async () => {
+      const { fetchImpl } = fakeKurashio({ contracts: CONTRACTS, record: (c) => c.query.get("source_message_id") ? json(200, { record: record({ contract_key: "ffffffffffff" }), source: SOURCE }) : json(404, { detail: "not_found" }), import: () => json(200, { status: "created", record: record({ contract_key: "ffffffffffff" }), source: SOURCE }) });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...VALID, contractKey: "ffffffffffff", confirmNewContract: true }, { sessionId: null });
+      assert.equal(body(res)["status"], "created");
+    });
+
+    it("既存候補に同じ請求月の行があれば、確認済みでも contract_month_conflict で送らない", async () => {
+      const { calls, fetchImpl } = fakeKurashio({ contracts: CONTRACTS, record: () => json(200, { record: record(), source: SOURCE }), import: () => json(200, { status: "created" }) });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...VALID, contractKey: "ffffffffffff", confirmNewContract: true }, { sessionId: null });
+      assert.equal(body(res)["status"], "contract_month_conflict");
+      assert.equal(body(res)["existingContractKey"], KEY);
+      assert.ok(!calls.some((c) => c.method === "POST"));
+    });
+
+    it("dryRun は確認済みなら newContract:true を返し、POSTしない", async () => {
+      const { calls, fetchImpl } = fakeKurashio({ contracts: EMPTY, record: () => json(404, { detail: "not_found" }) });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...NEW, confirmNewContract: true, dryRun: true }, { sessionId: null });
+      assert.equal(body(res)["status"], "dry_run");
+      assert.equal(body(res)["newContract"], true);
+      assert.ok(!calls.some((c) => c.method === "POST"));
+    });
+
+    it("確認済みの新規でも duplicate / conflict は上書きせず、読み戻しも再送もしない", async () => {
+      const dup = fakeKurashio({ contracts: EMPTY, import: () => json(200, { status: "duplicate", record: record({ contract_key: "default" }), source: SOURCE }) });
+      assert.equal(body(await createKurashioImportBillTool(deps(dup.fetchImpl)).handler({ ...NEW, confirmNewContract: true }, { sessionId: null }))["status"], "duplicate");
+      const conflict = fakeKurashio({ contracts: EMPTY, import: () => json(200, { status: "conflict", record: record({ amount_yen: 1 }), source: SOURCE, fields: ["amount_yen"] }) });
+      assert.equal(body(await createKurashioImportBillTool(deps(conflict.fetchImpl)).handler({ ...NEW, confirmNewContract: true }, { sessionId: null }))["status"], "conflict");
+      assert.equal(conflict.calls.filter((c) => c.path.endsWith("/import")).length, 1);
+    });
+
+    it("候補ありの既存キーには confirmNewContract は影響せず newContract:false", async () => {
+      const { fetchImpl } = fakeKurashio({ contracts: CONTRACTS, ...created(KEY) });
+      const res = await createKurashioImportBillTool(deps(fetchImpl)).handler({ ...VALID, confirmNewContract: true }, { sessionId: null });
+      assert.equal(body(res)["newContract"], false);
+    });
+  });
+
   it("応答待ちが切れたら unknown と出典での照会方法を返す", async () => {
     const timeout = Object.assign(new Error("timeout"), { name: "TimeoutError" });
     const { fetchImpl } = fakeKurashio({ contracts: CONTRACTS, import: () => { throw timeout; } });

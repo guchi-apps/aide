@@ -22,7 +22,8 @@ import type { Tool, ToolResult } from "../types.ts";
  *
  * 安全のための作り:
  * - 既存の行は書き換えない（kurashio が `duplicate` / `conflict` を返す）。訂正の経路は持たない
- * - 契約キーは kurashio の候補一覧にあるものだけ受ける。新しい契約を推測で作らない
+ * - 契約キーは kurashio の候補一覧にあるものを受ける。候補に無い初回・新規の契約は、利用者が確認したうえで
+ *   `confirmNewContract: true` を明示したときだけ通す（推測で作らない。#685）
  * - 金額が不明なら送らない（`insufficient_data`）。0円などで埋めない
  * - 登録後に読み取り用トークンで読み戻し、主要項目が一致したときだけ `created` を返す
  * - 応答待ちが切れたら `unknown` と、出典で照会する方法を返す（盲目的な再送をさせない）
@@ -296,7 +297,9 @@ export function createKurashioImportBillTool(deps: KurashioBillsDeps = DEFAULT_D
       "電気・ガスの月次の確定請求を1件、kurashioへ登録する書き込みツール（関西電力の使用量のお知らせメール等を利用者が確認したもの）。" +
       "**既にある行は書き換えない。** 同じ内容なら duplicate（何もしない）、値が違えば conflict（既存値を返して止まる。訂正の経路は無い）。" +
       "新規なら登録後に読み戻して一致を確かめ、確かめられたときだけ created を返す（確かめられなければ unverified）。" +
-      "contractKey は kurashio_utility_bill_contracts の候補から選び、決められなければ推測せず利用者へ確認する（候補に無いキーは contract_unresolved）。" +
+      "contractKey は kurashio_utility_bill_contracts の候補から選び、決められなければ推測せず利用者へ確認する。" +
+      "候補が無い初回・引越し直後の新契約は、候補に無いキー（default かハッシュ済みの12桁）を利用者に確認してもらったうえで confirmNewContract:true を付けたときだけ登録できる" +
+      "（付けなければ contract_unresolved で止まる。既存候補に同じ請求月の行があれば contract_month_conflict で止まる）。" +
       "billingMonth はメールに書かれた「◯月分」で、受信日（receivedAt）とは別。受信日から請求月・検針日を推測しない。" +
       "金額が分からなければ insufficient_data で登録しない。unknown が返ったら再送せず、kurashio_get_utility_bill で sourceMessageId を指定して確かめる。" +
       "dryRun:true で登録せずに、送る内容と同じ月の既存の行を確かめられる。Zaim・Asset Managerへの支出登録ではない（asset_manager_import_payment とは別）。",
@@ -315,6 +318,11 @@ export function createKurashioImportBillTool(deps: KurashioBillsDeps = DEFAULT_D
         sourceMessageId: { type: "string", description: "元メール（Gmail）の messageId。照会・重複防止に使う" },
         sourceLabel: { type: "string", description: `出典の短い名前（例: はぴeみる電）。${MAX_LABEL}文字以内` },
         confidence: { type: "number", minimum: 0, maximum: 1, description: "メールからの読み取りの確からしさ（0〜1）" },
+        confirmNewContract: {
+          type: "boolean",
+          description:
+            "候補に無い初回・新規の契約キーを、利用者が確認済みのときだけ true。推測では付けない。候補にあるキーには不要",
+        },
         dryRun: { type: "boolean", description: "true なら登録せず、送る内容と同じ月の既存の行を返す" },
       },
       required: ["billingMonth", "kind", "contractKey", "sourceMessageId", "confidence"],
@@ -332,15 +340,40 @@ export function createKurashioImportBillTool(deps: KurashioBillsDeps = DEFAULT_D
 
       const contracts = await fetchBillContracts(readConfig, payload.kind, deps.fetchImpl);
       if (!contracts.ok) return failure(contracts);
+      let newContract = false;
       if (!contracts.contracts.some((c) => c.contractKey === payload.contract_key)) {
-        return result(
-          {
-            status: "contract_unresolved",
-            reason: "contractKey が kurashio の契約候補にありません。新しい契約は推測で作らず、利用者へ確認してください",
-            candidates: contracts.contracts,
-          },
-          true,
-        );
+        const confirm = args["confirmNewContract"];
+        if (confirm !== undefined && typeof confirm !== "boolean") return invalid("confirmNewContract は true か false で指定してください");
+        if (confirm !== true) {
+          return result(
+            {
+              status: "contract_unresolved",
+              reason:
+                "contractKey が kurashio の契約候補にありません。新しい契約は推測で作らず、利用者へ確認してください。" +
+                "初回・新規の契約だと利用者が確認した場合だけ、confirmNewContract:true を付けて再度呼べます",
+              candidates: contracts.contracts,
+            },
+            true,
+          );
+        }
+        // 確認済みの新規契約でも、既存契約と同じ月・種別の行があるなら取り違えの疑いが強いので止める。
+        for (const candidate of contracts.contracts) {
+          const sameMonth = await fetchBill(readConfig, payload.kind, candidate.contractKey, { billingMonth: payload.billing_month }, deps.fetchImpl);
+          if (!sameMonth.ok) return failure(sameMonth);
+          if (sameMonth.found) {
+            return result(
+              {
+                status: "contract_month_conflict",
+                reason:
+                  "既存の契約候補に同じ請求月の行があるため、新規契約としては登録しません。既存契約のメールではないか、利用者へ確認してください",
+                existingContractKey: candidate.contractKey,
+                billingMonth: payload.billing_month,
+              },
+              true,
+            );
+          }
+        }
+        newContract = true;
       }
 
       const writeConfig = await deps.writeConfig();
@@ -350,6 +383,7 @@ export function createKurashioImportBillTool(deps: KurashioBillsDeps = DEFAULT_D
         return result({
           status: "dry_run",
           wouldSend: payload,
+          newContract,
           existing: existing.found ? existing.record : null,
           writeConfigured: writeConfig !== null,
         });
@@ -395,7 +429,7 @@ export function createKurashioImportBillTool(deps: KurashioBillsDeps = DEFAULT_D
           true,
         );
       }
-      return result({ status: "created", verified: true, record: saved.record, source: saved.source });
+      return result({ status: "created", verified: true, newContract, record: saved.record, source: saved.source });
     },
   };
 }
