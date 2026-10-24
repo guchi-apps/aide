@@ -1457,7 +1457,7 @@ HTTP GETなので許容する。
 
 `aide_service_quotas` を外部（Hermes の10分cron等）から定期的に呼ぶ場合の読み方。
 
-- **各枠の `windowSeconds`（枠の長さ・秒）と返却全体の `aiUsageFetchedAt`（AIの残枠を上流から取得した時刻）を返す。**
+- **各枠の `windowSeconds`（枠の長さ・秒）と返却全体の `aiUsageFetchedAt`（AI枠のみ。上流から取得した時刻）を返す。**
   どちらも status-hub の `/api/ai-usage` が返した値をそのまま通す任意フィールドで、既存のフィールドは
   変えていない。分からないとき（GitHub・1Passwordの枠、古い status-hub）は `null`。ペース判定は
   「週間=7日」の推定ではなく `windowSeconds` を使う
