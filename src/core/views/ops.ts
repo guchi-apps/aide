@@ -101,6 +101,8 @@ export interface OpsQuotaSummary {
   name: string;
   remainingPercent: number;
   resetsAt: string | null;
+  /** 枠の長さ（秒）。AI以外の枠・上流が返さない枠は null。ペース判定に使う。 */
+  windowSeconds: number | null;
 }
 
 export interface OpsStatus {
@@ -116,6 +118,8 @@ export interface OpsStatus {
   hosts: OpsHostSummary[];
   monitors: OpsMonitorSummary | null;
   quotas: OpsQuotaSummary[];
+  /** 残枠（AI）を status-hub が上流から取得した時刻。分からなければ null。キャッシュ次第で checkedAt より古い。 */
+  quotasFetchedAt: string | null;
   /** 取得できなかった／設定されていないソース。 */
   unavailable: OpsSourceFailure[];
   note: string;
@@ -315,6 +319,8 @@ function summarizeQuotas(raw: OpsDashboardRaw): {
         name: `${provider.name} ${window.label}${window.note ? `（${window.note}）` : ""}`,
         remainingPercent: Math.max(0, Math.round(100 - window.usedPercent)),
         resetsAt: window.resetsAt,
+        windowSeconds:
+          typeof window.windowSeconds === "number" && window.windowSeconds > 0 ? window.windowSeconds : null,
       });
     }
   }
@@ -332,6 +338,7 @@ function summarizeQuotas(raw: OpsDashboardRaw): {
         name: "GitHub Actions 無料枠",
         remainingPercent: Math.max(0, Math.round(100 - used)),
         resetsAt: github.actions.resetsAt,
+        windowSeconds: null,
       });
     }
   }
@@ -350,6 +357,7 @@ function summarizeQuotas(raw: OpsDashboardRaw): {
           name: `1Password ${ONE_PASSWORD_TYPE_LABEL[limit.type]}（${ONE_PASSWORD_ACTION_LABEL[limit.action]}）`,
           remainingPercent: Math.max(0, Math.round((limit.remaining / limit.limit) * 100)),
           resetsAt: null,
+          windowSeconds: null,
         });
       }
     }
@@ -424,6 +432,7 @@ export function summarizeOps(raw: OpsDashboardRaw, now: Date): OpsStatus {
     hosts,
     monitors,
     quotas,
+    quotasFetchedAt: raw.aiUsage?.fetchedAt ?? null,
     unavailable,
     note: notes.join(" "),
   };
@@ -441,6 +450,7 @@ function notConfiguredStatus(now: Date): OpsStatus {
     hosts: [],
     monitors: null,
     quotas: [],
+    quotasFetchedAt: null,
     unavailable: [{ source: "ops-dashboard", reason: "接続が設定されていない" }],
     note:
       "AIDE_OPS_DASHBOARD_TOKEN が設定されていないため、稼働状況を取得できない。" +
