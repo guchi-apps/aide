@@ -90,7 +90,8 @@ export const serviceQuotasTool: Tool = {
   name: "aide_service_quotas",
   description:
     "AI・GitHub Actions・1Password の残枠を返す。枠ごとの残り割合（remainingPercent）と" +
-    "リセット時刻（resetsAt。分からなければ null）を含む。" +
+    "リセット時刻（resetsAt。分からなければ null）、枠の長さ（windowSeconds。秒。分からなければ null）を含み、" +
+    "aiUsageFetchedAt は AI の枠だけを上流から取得した時刻（GitHub・1Passwordの枠には当てはまらない）（status-hub のキャッシュ次第で checkedAt より古い）。" +
     "「残枠はどれくらいか」「GitHub Actions の無料枠はあとどれくらいか」" +
     "「1Passwordの上限に近づいていないか」を尋ねられたときに呼ぶ。" +
     "problems には残りが少ない枠だけが入る（35%以下で warn、15%以下で danger）。" +
@@ -100,6 +101,10 @@ export const serviceQuotasTool: Tool = {
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {
     const status = await buildOpsStatus();
-    return json({ ...section(status, "quotas", status.quotas.length > 0), quotas: status.quotas });
+    return json({
+      ...section(status, "quotas", status.quotas.length > 0),
+      aiUsageFetchedAt: status.aiUsageFetchedAt,
+      quotas: status.quotas,
+    });
   },
 };
