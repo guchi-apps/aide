@@ -38,7 +38,7 @@
 | `aide_utility_bills` | 電気・ガス代 | C B | 読 | なし | Zaim公式API | 1.0KB | 未実測 | 維持（種類と期間を引数に取る） |
 | `kurashio_utility_bill_contracts` | kurashioの電気・ガスの契約候補 | C | 読 | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:read`。お客さま番号は返さない |
 | `kurashio_get_utility_bill` | kurashioの月次請求1件 | C | 読 | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:read`。請求月か元メールのmessageIdで引く |
-| `kurashio_import_utility_bill` | kurashioへ月次請求を登録 | C | **書** | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:write`。既存行は書き換えない（duplicate/conflict）。登録後に読み戻して確認。dryRunあり |
+| `kurashio_import_utility_bill` | kurashioへ月次請求を登録 | C | **書** | なし | kurashio | 未測定 | 極小 | 新規（#678）。scope `kurashio-bills:write`。既存行は書き換えない（duplicate/conflict）。登録後に読み戻して確認。dryRunあり。候補外の契約キーは `confirmNewContract:true` の明示時のみ通し（#685）、既存候補に同月の行があれば `contract_month_conflict` |
 | `aide_host_status` | サーバーの状態 | C B | 読 | ops-dashboard | ops-dashboard | 1.2KB | 約2KB | 維持 |
 | `aide_uptime_monitors` | 外形監視 | C B | 読 | ops-dashboard | ops-dashboard | 0.8KB | 未実測 | 維持 |
 | `aide_service_quotas` | AI等の残枠 | C B | 読 | ops-dashboard | ops-dashboard | 0.9KB | 未実測 | 維持 |
