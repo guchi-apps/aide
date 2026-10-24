@@ -1679,12 +1679,16 @@ AIDEは内部APIを叩いて結果を分類するだけ（`src/core/connectors/m
 | `POST /api/internal/bills/import` | 書込専用（共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`） | `kurashio_import_utility_bill` |
 
 - **契約キー**は収集スクリプトと同じお客さま番号のハッシュ先頭12文字（読めなかった契約は `default`）。
-  会話側からは作れないので候補一覧から選び、候補に無いキーは `contract_unresolved` で止める（新しい契約を推測で作らない）
+  会話側からは作れないので候補一覧から選び、候補に無いキーは `contract_unresolved` で止める（新しい契約を推測で作らない）。
+  **候補が空の初回・引越し直後の新契約**（候補は既存の `utility_bills` 行からしか作られない）は、利用者が
+  `default` かハッシュ済み12桁のキーを確認したうえで `confirmNewContract: true` を付けたときだけ通す
+  （#685）。ただし既存候補に**同じ請求月の行**があれば `contract_month_conflict` で止める（既存契約との取り違え防止。旧契約と新契約の請求月が重なる正当なケースもここで止まるので、その場合は登録せず利用者が判断する）。キーはハッシュ済みの不透明な値か `default` で、お客さま番号そのものは渡さない。
+  `dryRun` と `created` の応答に `newContract` を添える。登録後の読み戻し・`duplicate` / `conflict` は通常と同じ
 - **請求月と受信日時を分ける。** `billingMonth` は `YYYY-MM` だけを受け、日付を渡すと弾く。受信日時は
   タイムゾーン付きで受け、既存データに合わせてJSTのタイムゾーン無しへ揃えて送る
 - **金額が不明なら送らない**（`insufficient_data`）。kurashio の `amount_yen` は必須で、0円で埋めると集計が狂う
 - 結果は `created`（読み戻して一致を確認済み）/ `duplicate` / `conflict` / `unverified` / `invalid` /
-  `contract_unresolved` / `insufficient_data` / `not_configured` / `unauthorized` / `unsupported` / `failed` / `unknown`。
+  `contract_unresolved` / `contract_month_conflict` / `insufficient_data` / `not_configured` / `unauthorized` / `unsupported` / `failed` / `unknown`。
   `unknown`（応答待ちが切れた・書込の5xx・送信後に接続が切れた）は保存されたか分からないので、再送させずに
   `kurashio_get_utility_bill` を `sourceMessageId` で引く方法を返す。書込で `failed` にするのは、名前解決・接続の確立で
   失敗したと分かるとき（`ECONNREFUSED` 等）だけ
