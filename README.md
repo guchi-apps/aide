@@ -60,6 +60,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `asset_manager_update_subscription` / `asset_manager_record_subscription_cancellation`（#642） | 利用者が明示的に依頼した、Asset Managerの既存契約の項目編集と解約情報（自動更新停止・終了日・手続き完了メモ）の記録 | 満たす | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（上と共用） | **例外**（下記。作成のみではない）|
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
+| `kurashio_import_utility_bill`（#678） | 会話で確認した電気・ガスの月次確定請求の、kurashioへの登録 | 満たす（下記） | 共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`（書込専用。読み取り用の `MYROOM_INTERNAL_API_KEY`・操作用とは別。環境変数フォールバックなし） | 作成のみ（下記） |
 
 #### アプリ連携画面からのIssue起案は条件1の例外（#355）
 
@@ -281,6 +282,15 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 - **Asset Managerのサブスク登録・料金追加も「作成のみ」を満たす。** サブスクは初回料金と一緒に新規作成するだけで、既存契約の編集・削除は持たない。料金改定は既存料金を上書きせず、適用開始日付きの `SubscriptionPrice` を履歴として1件追加する。重複する適用開始日は Asset Manager 側が拒否する
 - **Asset Managerの契約編集・解約記録は条件3の例外**（#642）。理由と権限範囲は下の「Asset Managerの契約を編集・解約記録する（MCP）」。
 - **aide-bot向け3ツールとResearch Deskへの登録は条件3の例外**（下記）
+
+#### kurashioへの月次請求の登録は3条件を満たす（#678）
+
+- **条件1**: kurashio の既存の書き込み口は収集スクリプト向けの `POST /api/bills`（無認証・同じ月は上書き）と
+  画面の水道手入力だけで、会話から電気・ガスの請求を確かめて入れる経路は他に無い
+- **条件2**: 書込専用の共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`（kurashio#814）。読み取り用・操作用の
+  トークンでは通らない。OAuth scope も `kurashio-bills:write` を照会（`kurashio-bills:read`）と分けた
+- **条件3**: kurashio の取込APIは**既存の行を書き換えない**。同じ内容は `duplicate`、値が違えば `conflict` で止まり、
+  訂正の経路は持たない。判定・単位の正規化・同時実行の保護（主キー／出典の一意制約）は kurashio 側
 
 #### 同じキーの再送は上書きになる（aide-bot・Research Desk。条件3の例外）
 
@@ -505,6 +515,9 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
 | `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
+| `kurashio_utility_bill_contracts` | kurashio に記録済みの電気・ガスの契約候補（不透明な契約キー・契約種別・最新の請求月）。お客さま番号は返さない。scope `kurashio-bills:read`（詳細は[kurashioの月次請求の照会と登録](#kurashioの月次請求の照会と登録678)） |
+| `kurashio_get_utility_bill` | kurashio に保存済みの月次請求を1件、請求月か元メールの messageId で読む（found / not_found を区別）。scope `kurashio-bills:read` |
+| `kurashio_import_utility_bill` | 電気・ガスの月次確定請求を1件 kurashio へ登録する。**書き込みツール**（既存の行は書き換えない。登録後に読み戻して一致したときだけ created。`dryRun` で登録せず確認できる）。scope `kurashio-bills:write` |
 | `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
 | `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻 |
@@ -1651,6 +1664,29 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 **操作（`aide_room_buttons` / `aide_room_press`）とは別**。読み取りと書き込みを畳むと、
 クライアント側で「常に許可」にしたときに操作まで素通しになる。
 
+
+### kurashioの月次請求の照会と登録（#678）
+
+関西電力の使用量のお知らせなどで確かめた電気・ガスの月次確定請求を、会話から kurashio
+（`utility_bills`）へ入れて読み戻す。**正本・検証・重複判定は kurashio 側**（guchi-apps/kurashio#814）で、
+AIDEは内部APIを叩いて結果を分類するだけ（`src/core/connectors/myroom/bills.ts`）。Zaim由来の
+`aide_utility_bills` とは保存先も目的も違う。
+
+| kurashio の内部API | トークン | 使うツール |
+|---|---|---|
+| `GET /api/internal/bills/contracts` | 読み取り用（`MYROOM_INTERNAL_API_KEY`） | `kurashio_utility_bill_contracts`（登録の前の契約キーの確認にも使う） |
+| `GET /api/internal/bills/record` | 同上 | `kurashio_get_utility_bill`（登録後の読み戻しにも使う） |
+| `POST /api/internal/bills/import` | 書込専用（共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`） | `kurashio_import_utility_bill` |
+
+- **契約キー**は収集スクリプトと同じお客さま番号のハッシュ先頭12文字（読めなかった契約は `default`）。
+  会話側からは作れないので候補一覧から選び、候補に無いキーは `contract_unresolved` で止める（新しい契約を推測で作らない）
+- **請求月と受信日時を分ける。** `billingMonth` は `YYYY-MM` だけを受け、日付を渡すと弾く。受信日時は
+  タイムゾーン付きで受け、既存データに合わせてJSTのタイムゾーン無しへ揃えて送る
+- **金額が不明なら送らない**（`insufficient_data`）。kurashio の `amount_yen` は必須で、0円で埋めると集計が狂う
+- 結果は `created`（読み戻して一致を確認済み）/ `duplicate` / `conflict` / `unverified` / `invalid` /
+  `contract_unresolved` / `insufficient_data` / `not_configured` / `unauthorized` / `unsupported` / `failed` / `unknown`。
+  `unknown`（応答待ちが切れた・書込の5xx）は保存されたか分からないので、再送させずに
+  `kurashio_get_utility_bill` を `sourceMessageId` で引く方法を返す
 
 ## コネクタ: 3Dプリンター（myroom経由。#378）
 
