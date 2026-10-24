@@ -119,7 +119,7 @@ export interface OpsStatus {
   monitors: OpsMonitorSummary | null;
   quotas: OpsQuotaSummary[];
   /** 残枠（AI）を status-hub が上流から取得した時刻。分からなければ null。キャッシュ次第で checkedAt より古い。 */
-  quotasFetchedAt: string | null;
+  aiUsageFetchedAt: string | null;
   /** 取得できなかった／設定されていないソース。 */
   unavailable: OpsSourceFailure[];
   note: string;
@@ -432,7 +432,7 @@ export function summarizeOps(raw: OpsDashboardRaw, now: Date): OpsStatus {
     hosts,
     monitors,
     quotas,
-    quotasFetchedAt: raw.aiUsage?.fetchedAt ?? null,
+    aiUsageFetchedAt: raw.aiUsage?.fetchedAt ?? null,
     unavailable,
     note: notes.join(" "),
   };
@@ -450,7 +450,7 @@ function notConfiguredStatus(now: Date): OpsStatus {
     hosts: [],
     monitors: null,
     quotas: [],
-    quotasFetchedAt: null,
+    aiUsageFetchedAt: null,
     unavailable: [{ source: "ops-dashboard", reason: "接続が設定されていない" }],
     note:
       "AIDE_OPS_DASHBOARD_TOKEN が設定されていないため、稼働状況を取得できない。" +

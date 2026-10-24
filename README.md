@@ -1457,13 +1457,13 @@ HTTP GETなので許容する。
 
 `aide_service_quotas` を外部（Hermes の10分cron等）から定期的に呼ぶ場合の読み方。
 
-- **各枠の `windowSeconds`（枠の長さ・秒）と返却全体の `quotasFetchedAt`（AIの残枠を上流から取得した時刻）を返す。**
+- **各枠の `windowSeconds`（枠の長さ・秒）と返却全体の `aiUsageFetchedAt`（AIの残枠を上流から取得した時刻）を返す。**
   どちらも status-hub の `/api/ai-usage` が返した値をそのまま通す任意フィールドで、既存のフィールドは
   変えていない。分からないとき（GitHub・1Passwordの枠、古い status-hub）は `null`。ペース判定は
   「週間=7日」の推定ではなく `windowSeconds` を使う
 - **AIDEは定期収集しない。** 呼ぶたびに status-hub を1回読むだけ。status-hub は提供元別に通常5分
   キャッシュするため、10分ごとに呼んでも上流の Anthropic / OpenAI への実リクエストが10分ごとに
-  なるとは限らない。鮮度は `checkedAt` ではなく `quotasFetchedAt` で見る
+  なるとは限らない。鮮度は `checkedAt` ではなく `aiUsageFetchedAt` で見る
 - **取得できなかった提供元は残枠0%として返さない。** `quotas` に出さず `unavailable` へ理由付きで
   入れる。連続失敗時にどう通知するかは呼び出し側の方針
 - 秒単位で揺れる `resetsAt` による枠の同一判定・重複通知の抑止は呼び出し側（Hermes）の責務

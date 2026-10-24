@@ -295,11 +295,11 @@ describe("残枠", () => {
       status.quotas.map((quota) => quota.windowSeconds),
       [604800, null, null, null, null, null],
     );
-    assert.equal(status.quotasFetchedAt, "2026-10-24T01:00:00.000Z");
+    assert.equal(status.aiUsageFetchedAt, "2026-10-24T01:00:00.000Z");
   });
 
-  it("古い status-hub（fetchedAt 無し）では quotasFetchedAt が null", () => {
-    assert.equal(summarizeOps(raw(), NOW).quotasFetchedAt, null);
+  it("古い status-hub（fetchedAt 無し）では aiUsageFetchedAt が null", () => {
+    assert.equal(summarizeOps(raw(), NOW).aiUsageFetchedAt, null);
   });
 
   it("取得に失敗した提供元は残枠0%にせず unavailable に残す", () => {
