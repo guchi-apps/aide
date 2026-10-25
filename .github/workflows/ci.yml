@@ -51,7 +51,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+      AIDE_DISCORD_WEBHOOK_URL: ${{ secrets.AIDE_DISCORD_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
@@ -74,25 +74,21 @@ jobs:
           else
             echo "jobs=typecheck-and-test: $job" >> "$GITHUB_OUTPUT"
           fi
-          # develop への push は失敗時のみ。main 宛のPRは成否とも通知する。
+          # 異常（失敗）だけを通知する。成功・キャンセルは送らない（#710）。
           if [ "$result" = "failure" ]; then
-            echo "should_notify=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" = "main" ]; then
             echo "should_notify=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Signaly に通知
+      - name: Discord に通知
         if: steps.status.outputs.should_notify == 'true'
-        # 通知はCIの合否そのものではない。ここが失敗してもrun全体を落とさない
-        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。
-        # guchi-apps/issue-deck#1302）。
-        continue-on-error: true
+        # 通知スクリプトは送信に失敗しても0で終わる（::warning:: だけ残す）ので、
+        # continue-on-error は付けない。付けると想定外の失敗まで隠れる。
         env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          AIDE_DISCORD_WEBHOOK_URL: ${{ env.AIDE_DISCORD_WEBHOOK_URL }}
           NOTIFY_APP: aide
           NOTIFY_KIND: CI
           NOTIFY_STATUS: ${{ steps.status.outputs.result }}
           NOTIFY_JOB: ${{ steps.status.outputs.jobs }}
-        run: bash .github/scripts/signaly-notify.sh
+        run: bash .github/scripts/discord-notify.sh

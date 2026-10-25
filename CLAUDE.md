@@ -120,10 +120,11 @@ git show origin/main:<相手のファイル>    | grep -n <確かめたい実装
 
 ### リリース・デプロイ通知
 
-`deploy.yml` の `notify`（デプロイ）と `notify-release`（リリース）が
-`.github/scripts/signaly-notify.sh` を呼ぶ。宛先は `NOTIFY_KIND` で分かれ、`リリース` のときだけ
-`SIGNALY_RELEASE_WEBHOOK_URL` へ送る。未登録なら従来のCI・デプロイ用チャンネルへフォールバック
-するため、secretの登録順は気にしなくてよい（guchi-apps/issue-deck#2391）。
+`ci.yml`・`deploy.yml`（`notify`＝デプロイ、`notify-release`＝リリース）・`ios-testflight.yml` が
+`.github/scripts/discord-notify.sh` を呼ぶ。Signaly は廃止済みで、宛先は repo secret
+`AIDE_DISCORD_WEBHOOK_URL`（worker と同じWebhook）の1つだけ。**送るのは失敗だけ**で、成功・キャンセルは
+送らない（#710）。スクリプトは送信に失敗しても0で終わり `::warning::` を残すので、通知ステップに
+`continue-on-error` は付けない。
 
 **`NOTIFY_KIND: リリース` の行を消さない。** issue-deck の共有ファイル配布
 （`propagate-shared-files.sh`）はこの行をアンカーにして通知まわりの追記を各リポジトリへ配るため、
