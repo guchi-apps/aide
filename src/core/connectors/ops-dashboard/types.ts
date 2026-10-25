@@ -93,11 +93,20 @@ export interface OpsRobotMonitor {
 
 /** GET /api/ai-usage */
 export interface OpsAiUsage {
+  /** status-hub が上流から取得した時刻（ISO8601）。古い status-hub では無い。 */
+  fetchedAt?: string;
   providers: {
     name: string;
     status: "ok" | "unconfigured" | "error";
     message?: string;
-    windows: { label: string; usedPercent: number; resetsAt: string | null; note?: string }[];
+    windows: {
+      label: string;
+      usedPercent: number;
+      resetsAt: string | null;
+      /** 枠の長さ（秒）。上流が分からない枠・古い status-hub では null か無い。 */
+      windowSeconds?: number | null;
+      note?: string;
+    }[];
   }[];
 }
 

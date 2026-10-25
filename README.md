@@ -61,6 +61,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_create_notification` / `aide_create_task_candidate` / `aide_save_daily_brief`（aide#205） | ChatGPTのスケジュールからaide-botへの通知・タスク候補・日次ブリーフの登録 | 満たす（下記） | `AIDE_BOT_TOKEN`（aide-botの `NOTICE_INGEST_TOKEN`。登録専用で、読み取り用は無い） | **例外**（下記。同じ `dedupeKey` は上書き） |
 | `aide_research_desk_import_weekly_report`（aide#211） | ChatGPTのスケジュールからResearch Deskへの業界情報の登録 | 満たす（下記） | `AIDE_RESEARCH_DESK_TOKEN`（Research Deskの `INTERNAL_API_KEY`。AIDEは読み取らないため、登録専用） | **例外**（下記。同一の発表は統合更新） |
 | `kurashio_import_utility_bill`（#678） | 会話で確認した電気・ガスの月次確定請求の、kurashioへの登録 | 満たす（下記） | 共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`（書込専用。読み取り用の `MYROOM_INTERNAL_API_KEY`・操作用とは別。環境変数フォールバックなし） | 作成のみ（下記） |
+| `kurashio_import_kepco_hourly`（#692） | 利用者が取得した関西電力（はぴeみる電）の時間別kWhの、kurashioへの登録 | 満たす（下記） | 共有トークン `MYROOM_INTERNAL_KEPCO_WRITE_API_KEY`（書込専用。他の読み取り用・書込用とは別。環境変数フォールバックなし） | 作成のみ（下記） |
 
 #### アプリ連携画面からのIssue起案は条件1の例外（#355）
 
@@ -292,6 +293,12 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 - **条件3**: kurashio の取込APIは**既存の行を書き換えない**。同じ内容は `duplicate`、値が違えば `conflict` で止まり、
   訂正の経路は持たない。判定・単位の正規化・同時実行の保護（主キー／出典の一意制約）は kurashio 側
 
+#### kurashioへの時間別kWhの登録は3条件を満たす（#692）
+
+- **条件1**: kurashio の既存の書き込み口は画面の手動CSV取込（ログイン必須・上書き型）だけで、無人の取得スクリプトから安全に入れる経路は他に無い
+- **条件2**: 書込専用の共有トークン `MYROOM_INTERNAL_KEPCO_WRITE_API_KEY`（kurashio#823）。月次請求の書込トークンでは通らない。OAuth scope も `kurashio-energy:write` を照会（`kurashio-energy:read`）と分けた
+- **条件3**: kurashio の取込APIは**既存の値を書き換えない**。1時間でも既存と違えば `conflict` で何も書かず、訂正は本人が画面の手動取込で行う。AIDEは登録後に照会で読み戻し、送った全時間が一致したときだけ `created` を返す
+
 #### 同じキーの再送は上書きになる（aide-bot・Research Desk。条件3の例外）
 
 aide-bot向けの3ツールと `aide_research_desk_import_weekly_report` は、**厳密には「作成だけ」ではない。**
@@ -517,10 +524,12 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `kurashio_utility_bill_contracts` | kurashio に記録済みの電気・ガスの契約候補（不透明な契約キー・契約種別・最新の請求月）。お客さま番号は返さない。scope `kurashio-bills:read`（詳細は[kurashioの月次請求の照会と登録](#kurashioの月次請求の照会と登録678)） |
 | `kurashio_get_utility_bill` | kurashio に保存済みの月次請求を1件、請求月か元メールの messageId で読む（found / not_found を区別）。scope `kurashio-bills:read` |
+| `kurashio_get_kepco_hourly` | kurashio に保存済みの関西電力の時間別kWhを期間で読む（件数・日別合計・各時間の値・`missing`）。scope `kurashio-energy:read`（詳細は[kurashioの関西電力 時間別kWhの照会と登録](#kurashioの関西電力-時間別kwhの照会と登録692)） |
+| `kurashio_import_kepco_hourly` | 時間別kWhを kurashio へ登録する。**書き込みツール**（既存の値は書き換えない。空欄は送らない。読み戻して全時間一致し、期間内の全時間がそろったときだけ created。欠けが残れば incomplete。`dryRun` で登録せず確認できる）。scope `kurashio-energy:write` |
 | `kurashio_import_utility_bill` | 電気・ガスの月次確定請求を1件 kurashio へ登録する。**書き込みツール**（既存の行は書き換えない。登録後に読み戻して一致したときだけ created。`dryRun` で登録せず確認できる）。scope `kurashio-bills:write` |
 | `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
-| `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻 |
+| `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻・枠の長さ・取得時刻 |
 | `aide_room_sensors` | いまの部屋の測定値。センサーごとの室温・湿度・気圧・CO2・照度、屋外との気温差 |
 | `aide_aircon_status` | エアコンの運転状態（電源・運転モード・設定温度・風量・online）。**読み取りだけ** |
 | `aide_printer_status` | 3Dプリンター（Bambu Lab A1 mini）の状態。印刷状態・進捗率・残り時間・レイヤー・温度・AMS Lite・エラー・最終更新。**鮮度を必ず返し、切れているときは現在の状態を返さない**（詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）。**読み取りだけ** |
@@ -1453,6 +1462,21 @@ HTTP GETなので許容する。
 **`ok` は区画ごとに判定し直す。** 全体の `ok` をそのまま渡すと、残枠だけを尋ねられたときに
 別ホストのディスク逼迫で `false` になり、問いと関係ない理由で「異常あり」と読まれる。
 
+### 残枠を定期観測するときの注意（#689）
+
+`aide_service_quotas` を外部（Hermes の10分cron等）から定期的に呼ぶ場合の読み方。
+
+- **各枠の `windowSeconds`（枠の長さ・秒）と返却全体の `aiUsageFetchedAt`（AI枠のみ。上流から取得した時刻）を返す。**
+  どちらも status-hub の `/api/ai-usage` が返した値をそのまま通す任意フィールドで、既存のフィールドは
+  変えていない。分からないとき（GitHub・1Passwordの枠、古い status-hub）は `null`。ペース判定は
+  「週間=7日」の推定ではなく `windowSeconds` を使う
+- **AIDEは定期収集しない。** 呼ぶたびに status-hub を1回読むだけ。status-hub は提供元別に通常5分
+  キャッシュするため、10分ごとに呼んでも上流の Anthropic / OpenAI への実リクエストが10分ごとに
+  なるとは限らない。鮮度は `checkedAt` ではなく `aiUsageFetchedAt` で見る
+- **取得できなかった提供元は残枠0%として返さない。** `quotas` に出さず `unavailable` へ理由付きで
+  入れる。連続失敗時にどう通知するかは呼び出し側の方針
+- 秒単位で揺れる `resetsAt` による枠の同一判定・重複通知の抑止は呼び出し側（Hermes）の責務
+
 
 ## コネクタ: Asset Manager（月額固定費）
 
@@ -1664,6 +1688,23 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 **操作（`aide_room_buttons` / `aide_room_press`）とは別**。読み取りと書き込みを畳むと、
 クライアント側で「常に許可」にしたときに操作まで素通しになる。
 
+
+### kurashioの関西電力 時間別kWhの照会と登録（#692）
+
+はぴeみる電の「1時間ごとの電力量内訳」CSVから得た値を kurashio（`kepco_hourly_usage`）へ入れて読み戻す。
+**正本・検証・重複判定は kurashio 側**（guchi-apps/kurashio#823）で、AIDEは内部APIを叩いて結果を分類するだけ
+（`src/core/connectors/myroom/kepco-hourly.ts`・`src/mcp/tools/kurashio-kepco-hourly.ts`）。
+
+| kurashio の内部API | トークン | 使うツール |
+|---|---|---|
+| `GET /api/internal/energy/kepco-hourly?start=&end=` | 読み取り用（`MYROOM_INTERNAL_API_KEY`） | `kurashio_get_kepco_hourly`（登録後の読み戻し・`unknown` の確認にも使う） |
+| `POST /api/internal/energy/kepco-hourly/import` | 書込専用（共有トークン `MYROOM_INTERNAL_KEPCO_WRITE_API_KEY`） | `kurashio_import_kepco_hourly` |
+
+- **入力は抽出対象期間と日別24時間値だけ。** CSVの先頭行（お客さま番号・住所・契約種別）は受けず、ログにも出さない。`MM/DD` の年は抽出対象期間から復元する
+- **空欄（公開前）の時間は `null` にして送らない。** 0で埋めない。期間内で記録の無い時間は kurashio が `missing` で返す
+- 結果は `created`（読み戻しで全時間一致し、期間内の全時間がそろった）／`unchanged`／`incomplete`／`conflict`（何も書かれない）／`unverified`／`unknown`（保存されたか不明。再送せず `kurashio_get_kepco_hourly` で確かめる）。期間は最長62日・未来日不可・1時間0〜100kWh
+- **期間内に記録の無い時間が残れば `incomplete`**（#690）。送った分が保存済みでも、`created` / `unchanged` とせず `isError` にする。必要な件数が kurashio でそろうまで「登録済み」と通知しないため。公開後に期間全体を送り直せば、保存済みの時間は書き換えられず（`unchanged` の件数に入る）、欠けていた時間だけが入る
+- **リリース順:** kurashio#823 は kurashio の `develop` にあり、`main` には未反映の場合がある。未反映の間は `unsupported`（404）を返すだけで書き込まない。kurashio を先に本番へ出してから AIDE を出す
 
 ### kurashioの月次請求の照会と登録（#678）
 

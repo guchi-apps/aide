@@ -269,6 +269,53 @@ describe("残枠", () => {
     assert.equal(status.severity, "danger");
   });
 
+  it("windowSeconds と取得時刻を通し、無い・不正な値は null にする（#689）", () => {
+    const status = summarizeOps(
+      raw({
+        aiUsage: {
+          fetchedAt: "2026-10-24T01:00:00.000Z",
+          providers: [
+            {
+              name: "ChatGPT",
+              status: "ok",
+              windows: [
+                { label: "週間", usedPercent: 10, resetsAt: null, windowSeconds: 604800 },
+                { label: "5時間", usedPercent: 10, resetsAt: null, windowSeconds: null },
+                { label: "月間", usedPercent: 10, resetsAt: null, windowSeconds: 0 },
+                { label: "日", usedPercent: 10, resetsAt: null },
+              ],
+            },
+          ],
+        },
+      }),
+      NOW,
+    );
+
+    assert.deepEqual(
+      status.quotas.map((quota) => quota.windowSeconds),
+      [604800, null, null, null, null, null],
+    );
+    assert.equal(status.aiUsageFetchedAt, "2026-10-24T01:00:00.000Z");
+  });
+
+  it("古い status-hub（fetchedAt 無し）では aiUsageFetchedAt が null", () => {
+    assert.equal(summarizeOps(raw(), NOW).aiUsageFetchedAt, null);
+  });
+
+  it("取得に失敗した提供元は残枠0%にせず unavailable に残す", () => {
+    const status = summarizeOps(
+      raw({
+        aiUsage: { providers: [{ name: "ChatGPT", status: "error", windows: [] }] },
+        githubUsage: null,
+        onePasswordUsage: null,
+      }),
+      NOW,
+    );
+
+    assert.deepEqual(status.quotas, []);
+    assert.deepEqual(status.unavailable, [{ source: "ai-usage:ChatGPT", reason: "取得に失敗した" }]);
+  });
+
   it("未設定は異常ではなく unavailable として残し、complete は下げない", () => {
     const status = summarizeOps(
       raw({
