@@ -317,7 +317,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       res,
       baseUrl,
       access === "disabled"
-        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write"]
+        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write"]
         : (access.scopes ?? []),
       access === "disabled" ? DEV_AUTH_DISABLED_CLIENT_ID : access.clientId,
     );

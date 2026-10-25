@@ -7,6 +7,8 @@ const CHECKED_SCOPES = [
   "tasks:write",
   "work-reports:read",
   "work-reports:write",
+  "travel:read",
+  "travel:write",
 ] as const;
 
 /**
@@ -18,7 +20,7 @@ export const connectionPermissionsTool: Tool = {
   name: "aide_connection_permissions",
   description:
     "読み取り専用の接続診断。いまこのMCP接続に付与されているOAuth scope（tasks:read・tasks:write・" +
-    "work-reports:read・work-reports:write）の有無を、このリクエストの認証結果から返す。" +
+    "work-reports:read・work-reports:write・travel:read・travel:write）の有無を、このリクエストの認証結果から返す。" +
     "「work-reports:writeが許可されているか」の確認に使う。書き込みの試し打ちは不要。" +
     "authMode=auth-disabled は開発用の認証無効起動で、OAuthの付与ではない。" +
     "scopeを判定できないときは未許可とせずエラーで返す。サーバーの対応scope一覧や別接続の権限は返さない。",
