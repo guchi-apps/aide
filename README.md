@@ -53,6 +53,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_update_event` / `aide_delete_event`（aide#493） | DaySpan経由での既存の予定の変更・削除 | 満たす（下記） | 同上（作成と共用） | **例外**（下記。削除は現在のタイトルの一致が要る） |
 | `aide_create_task` / `aide_update_task` / 状態変更4本（#562） | YoteiFlow経由での固定タスクDBの正式操作 | **狭い例外**（下記） | `AIDE_DAYSPAN_TASKS_WRITE_TOKEN` とOAuth `tasks:write`（読取り双方から分離） | **例外**（下記。YoteiFlowが競合・冪等性・繰り返しを処理） |
+| `aide_create_travel`（#707） | YoteiFlow経由での移動（TravelPlan）の新規作成。通常予定の作成では代替しない | **狭い例外**（下記。作成専用） | `AIDE_DAYSPAN_WRITE_TOKEN`（YoteiFlowの契約が予定書込鍵を要求）とOAuth `travel:write`（読戻しの `travel:read` と分離） | 作成のみ（更新・削除の口なし。YoteiFlowが冪等性・重複検出を処理） |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `aide_aircon_control`（aide#316） | myroom経由でのエアコンの電源・運転モード・設定温度・風量の変更（白くまくんへ運転指示を送る） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（照明の操作と共用。読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
@@ -199,6 +200,16 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 書き込みはYoteiFlow側の`INTERNAL_TASKS_API_KEY`と同じ`AIDE_DAYSPAN_TASKS_WRITE_TOKEN`を使い、読取り用・予定書込み用の鍵と分離する。対象ユーザーはMCP引数ではなく`AIDE_DAYSPAN_TARGET_EMAIL`から`X-Target-Email`へ送る。作成・状態変更の`idempotencyKey`はタイムアウトや`result_unknown`後も変えずに再送し、更新・状態変更は読取り直後の`version`を必須にする。`409 conflict`では再読取して確認し、古い値を上書きしない。
 
 公式Notion MCPは任意ページ・DBを人が直接扱う用途、AIDEは固定タスクDBの安全な業務操作だけを扱う。YoteiFlowの`main`提供確認を先に行い、その後にAIDEをリリースし、MCPクライアントを再接続してscopeとツール定義を更新する。
+
+### 移動の登録（`aide_create_travel` / `aide_get_travel`、#707）
+
+会話から航空便などを、通常のGoogleカレンダー予定ではなくYoteiFlowの「移動」（TravelPlan）として登録する。YoteiFlowの `POST /api/internal/travels`・`GET /api/internal/travels/[id]`（yoteiflow#1432。契約の正本は同リポジトリの `docs/internal-api.md`）へ中継するだけで、更新・削除の口は持たず、既存の通常予定・推定移動には触れない。
+
+- **認可**: 登録は OAuth `travel:write`、読戻しは `travel:read`。`tasks:write` や読取専用トークンでは登録できない。**既存の接続は再承認（再接続）するまで新scopeを持たない**。`aide_connection_permissions` で確認できる
+- **鍵**: 登録はYoteiFlowの契約どおり予定書込鍵（`AIDE_DAYSPAN_WRITE_TOKEN`）、読戻しは読取鍵（`AIDE_DAYSPAN_TOKEN`）。新しい秘密値は無い。対象ユーザーは `AIDE_DAYSPAN_TARGET_EMAIL` 固定で、引数では指定できない。メモ（便名・予約番号など）はログへ出さない
+- **運用**: 利用者の明示指示と、日時・区間・交通手段の確認の後だけ呼ぶ。先に `aide_schedule` で同日の既存の移動・予定を確かめ、`dryRun` で内容を見せる。`idempotencyKey` は必須で、タイムアウト・結果不明（`result_unknown`）・処理中（`in_progress`）では**同じキー・同じ内容**で再送する。同一内容があれば `duplicate`（`existingTravelId`）で止まり、別の移動と確認できたときだけ `confirmDuplicate`
+- **結果**: `saved`（保存成否）と `googleExport`（`exported` / `skipped` / `failed`）は別。書き出しが失敗しても移動は保存済みで、同じキーで再送すると書き出しだけやり直す。成功はツール応答だけで断定せず、`aide_get_travel` か `aide_schedule` の対象日で読み戻す
+- **リリース順**: YoteiFlowの `main` への反映を先に確認し、その後にAIDEを公開してMCPクライアントを再接続する（`main` に無いと本番で404になる）
 
 #### IssueDeckへの画像アップロードは3条件を満たす（#449）
 
@@ -541,6 +552,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる。`endDate` で日をまたぐ時刻予定も1件で作れる） |
 | `aide_update_event` | 既存の予定を1件変更する（`aide_schedule` の `id`・`calendarId` で指す）。**書き込みツール**（送った項目だけ変わる。`dryRun` で変更せず確認できる） |
 | `aide_delete_event` | 既存の予定を1件削除する。**書き込みツール**（元に戻せない。現在のタイトルの一致が要り、違えば消さない。`dryRun` で削除せず確認できる） |
+| `aide_create_travel` | YoteiFlowの移動（TravelPlan）を1件登録する。**書き込みツール**（通常予定は作らない。scope `travel:write`。`idempotencyKey` 必須で結果不明は同じキーで再送。`dryRun` で登録せず確認できる） |
+| `aide_get_travel` | 移動を travelId で読み戻す（Google書き出し状態つき）。scope `travel:read` |
 | `aide_dev_status` | 各リポジトリの開発状況を**俯瞰で**返す。最新リリース・未リリースの差分・Issue/PRの件数・確認待ち・直近コミット・CIの成否。引数は取らない |
 | `aide_repo_status` | リポジトリ1件の詳細。俯瞰の項目に加えて、直近コミットの一覧・確認待ちのIssue・open な Pull Request |
 | `aide_repo_labels` | リポジトリ1件に定義されているラベル（名前・色・説明）。`aide_create_issue` に渡す候補 |

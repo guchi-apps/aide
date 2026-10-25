@@ -96,6 +96,14 @@ describe("MCPツールの登録簿", () => {
     }
   });
 
+  it("移動の読戻しと登録はOAuth scopeでも分離し、登録はdryRunを持つ", () => {
+    const registry = buildToolRegistry();
+    assert.deepEqual(registry.get("aide_get_travel")?.requiredScopes, ["travel:read"]);
+    assert.deepEqual(registry.get("aide_create_travel")?.requiredScopes, ["travel:write"]);
+    const properties = tool("aide_create_travel").inputSchema["properties"] as Record<string, unknown>;
+    assert.ok(properties["dryRun"]);
+  });
+
   it("kurashioの請求の照会と登録はOAuth scopeでも分離する", () => {
     const registry = buildToolRegistry();
     for (const name of ["kurashio_utility_bill_contracts", "kurashio_get_utility_bill"]) {
