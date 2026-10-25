@@ -86,6 +86,43 @@ describe("aide_create_event ハンドラ", () => {
     });
   });
 
+  it("dryRun に日またぎの終了日・時刻がそのまま反映される", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "secret";
+    const payload = parse(
+      await createEventTool.handler(
+        {
+          title: "宿泊",
+          date: "2026-11-09",
+          endDate: "2026-11-10",
+          startTime: "20:00",
+          endTime: "08:00",
+          dryRun: true,
+        },
+        CTX,
+      ),
+    );
+    assert.equal(payload["ok"], true);
+    assert.deepEqual(payload["wouldCreate"], {
+      title: "宿泊",
+      date: "2026-11-09",
+      endDate: "2026-11-10",
+      startTime: "20:00",
+      endTime: "08:00",
+    });
+  });
+
+  it("endDate を指定しない同日の逆転は従来どおり invalid", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "secret";
+    const payload = parse(
+      await createEventTool.handler(
+        { title: "宿泊", date: "2026-11-09", startTime: "20:00", endTime: "08:00", dryRun: true },
+        CTX,
+      ),
+    );
+    assert.equal(payload["ok"], false);
+    assert.equal(payload["kind"], "invalid");
+  });
+
   it("dryRun でも入力の検査は本番と同じものを通す", async () => {
     process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "secret";
     const payload = parse(await createEventTool.handler({ title: "歯医者", date: "2026-02-31", dryRun: true }, CTX));

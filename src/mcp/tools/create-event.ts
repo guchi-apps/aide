@@ -41,6 +41,7 @@ export const createEventTool: Tool = {
     "events の calendarName と calendarId から対応するカレンダーを選んで calendarId を明示して渡すこと。" +
     "候補が返らない、または内容から選べないときは calendarId を省き、DaySpan側の既定の保存先を使うこと。" +
     "startTime・endTime は両方指定するか両方省略する（省略すると終日の予定になる）。" +
+    "日をまたぐ時刻予定は date に開始日、endDate に終了日を指定して1件で作る（2件に分けない）。" +
     "作成できたら予定の url を返すので、「入れました」の案内に使うこと。" +
     "**日時があやふやなまま登録したくないときは dryRun: true で呼ぶ**と、" +
     "登録せずに「何が入るか」だけを返す。",
@@ -49,13 +50,19 @@ export const createEventTool: Tool = {
     properties: {
       title: { type: "string", description: "予定のタイトル。" },
       date: { type: "string", description: "予定の日付（YYYY-MM-DD）。" },
+      endDate: {
+        type: "string",
+        description:
+          "終了日（YYYY-MM-DD）。日をまたぐ時刻予定（宿泊・夜行移動など）で date の翌日以降を指定する。" +
+          "省略すると date と同じ日に終わる。終日の予定では使えない。",
+      },
       startTime: {
         type: "string",
         description: "開始時刻（HH:MM）。endTime とセットで指定する。両方省略すると終日の予定になる。",
       },
       endTime: {
         type: "string",
-        description: "終了時刻（HH:MM）。startTime より後にすること。",
+        description: "終了時刻（HH:MM）。同日のときは startTime より後にすること（endDate が後の日なら不問）。",
       },
       location: { type: "string", description: "場所。分からなければ省く。" },
       calendarId: {
