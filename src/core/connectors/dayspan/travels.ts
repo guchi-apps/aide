@@ -65,8 +65,7 @@ export function normalizeCreateTravelInput(
   if (typeof mode !== "string" || !(TRAVEL_MODES as readonly string[]).includes(mode)) {
     return {
       error:
-        `mode は ${TRAVEL_MODES.join(" / ")} のいずれかで指定してください` +
-        "（航空便・船・新幹線などは PUBLIC_TRANSIT にせず、実態に近い値を利用者に確認してください）",
+        `mode は ${TRAVEL_MODES.join(" / ")} のいずれかで指定してください（航空便は OTHER）`,
     };
   }
 

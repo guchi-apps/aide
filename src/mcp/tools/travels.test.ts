@@ -53,6 +53,12 @@ describe("aide_create_travel の宣言", () => {
     assert.match(createTravelTool.description, /aide_get_travel/);
     assert.match(createTravelTool.description, /idempotencyKey/);
   });
+  it("航空便は OTHER と説明し、航空便相当の入力を受け付ける", () => {
+    assert.match(createTravelTool.description, /航空便は OTHER/);
+    const r = normalizeCreateTravelInput({ ...VALID, mode: "OTHER", note: "NH22 座席12A" });
+    assert.ok("input" in r);
+    assert.equal(r.input.mode, "OTHER");
+  });
 });
 
 describe("normalizeCreateTravelInput", () => {
@@ -83,6 +89,7 @@ describe("aide_create_travel の動作", () => {
     globalThis.fetch = (async () => { called = true; return new Response("{}"); }) as typeof fetch;
     const p = parse(await createTravelTool.handler({ ...VALID, dryRun: true }, CTX));
     assert.equal(p["dryRun"], true);
+    assert.equal(p["duplicateChecked"], false);
     assert.equal(called, false);
   });
 

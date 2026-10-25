@@ -69,21 +69,22 @@ export const createTravelTool: Tool = {
     "**呼ぶ前に、先に aide_schedule で同日の既存の移動・予定との重複を確認し、" +
     "出発地・目的地・交通手段・出発/到着日時（タイムゾーン）を復唱して利用者の確認を取ること。**" +
     "航空便の便名・座席・予約番号は note に入れてよい（応答や会話の要約に再掲しない）。" +
-    "交通手段は mode（" + TRAVEL_MODES.join("/") + "）。航空便は鉄道・公共交通の推定移動と取り違えないよう、" +
-    "該当する値が無いときは OTHER にして note に便名を書く。" +
+    "交通手段は mode（" + TRAVEL_MODES.join("/") + "）。**航空便は OTHER で登録し、PUBLIC_TRANSIT にしない**" +
+    "（鉄道・公共交通の推定移動と取り違えないため）。便名は note に書く。" +
     "**idempotencyKey は必須。** 1回の登録につき1つ決め、タイムアウト・結果不明・処理中のときは " +
     "**同じ値・同じ内容**で再送する（作り直さない）。内容が変わるときだけ新しい値にする。" +
     "応答は saved（保存成否）と googleExport（Google書き出しの成否）が別。書き出しが failed でも移動は保存済みで、" +
     "同じ idempotencyKey で再送すると書き出しだけやり直す。" +
     "**ツール応答だけで成功と断定せず**、travelId を aide_get_travel で読み戻すか、aide_schedule の対象日で確認すること。" +
-    "確認なしで登録したくないときは dryRun: true（送らずに正規化後の内容だけ返す）。",
+    "確認なしで登録したくないときは dryRun: true（YoteiFlowへは送らず、形式検査と正規化後の内容だけ返す。" +
+    "**同一内容の既存移動（重複）は実登録時に初めて分かる**ので、重複は先に aide_schedule で確認する）。",
   inputSchema: {
     type: "object",
     properties: {
       origin: { type: "string", description: "出発地（例: 伊丹空港）。" },
       destination: { type: "string", description: "目的地（例: 羽田空港）。" },
       via: { type: "array", items: { type: "string" }, description: "経由地（10件まで）。省略可。" },
-      mode: { type: "string", enum: [...TRAVEL_MODES], description: "交通手段。航空便など該当が無いものは OTHER。" },
+      mode: { type: "string", enum: [...TRAVEL_MODES], description: "交通手段。航空便は OTHER（PUBLIC_TRANSIT にしない）。" },
       departAt: { type: "string", description: "出発日時（ISO 8601、タイムゾーン必須。例: 2026-11-01T09:30:00+09:00）。" },
       arriveAt: { type: "string", description: "到着日時（同形式。出発より後）。" },
       note: { type: "string", description: "任意メモ。便名・座席・予約番号など。" },
@@ -109,7 +110,10 @@ export const createTravelTool: Tool = {
         ok: true,
         dryRun: true,
         wouldCreate: normalized.input,
-        note: "登録していません。同日の既存の移動・予定を aide_schedule で確認し、利用者がよければ dryRun を外して呼び直してください。",
+        duplicateChecked: false,
+        note:
+          "登録していません。形式検査のみで、同一内容の既存移動（重複）は未確認です。" +
+          "同日の既存の移動・予定を aide_schedule で確認し、利用者がよければ dryRun を外して呼び直してください。",
       });
     }
 
