@@ -95,7 +95,7 @@ export function forecastUrl(config: Pick<WeatherConfig, "latitude" | "longitude"
 /**
  * 今日・明日の予報を取得する。
  *
- * **失敗はその場で `Error` に丸める。** worker の失敗理由はSignalyの通知本文へ載るため、
+ * **失敗はその場で `Error` に丸める。** worker の失敗理由はDiscordの通知本文へ載るため、
  * URLを含む素の例外を投げると座標（＝自宅の位置）が通知に出る。ステータスと種別だけを残す。
  */
 export async function fetchWeatherForecast(config: WeatherConfig): Promise<WeatherForecast> {

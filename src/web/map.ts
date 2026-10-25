@@ -305,7 +305,7 @@ export const GROUPS: DestinationGroup[] = [
         what: "サブPCで動くセッション",
         uses: ["aide_claude_sessions"],
       },
-      { id: "signaly", name: "Signaly", dir: "write", what: "ジョブの失敗を通知", uses: [] },
+      { id: "discord", name: "Discord", dir: "write", what: "ジョブ・プリンターの異常を通知", uses: [] },
     ],
   },
   {

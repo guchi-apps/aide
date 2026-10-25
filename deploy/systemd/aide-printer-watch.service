@@ -1,7 +1,7 @@
 [Unit]
-# 3Dプリンターの印刷の完了・停止・エラーを見張り、遷移があったときだけSignalyへ通知する。
+# 3Dプリンターの印刷の停止・エラーを見張り、異常があったときだけDiscordへ通知する。
 # myroom の内部API（公開URL経由）を読むだけで、プリンターへは何も送らない。
-Description=AIDE: 3Dプリンターの状態遷移の通知
+Description=AIDE: 3Dプリンターの異常の通知
 Documentation=https://github.com/guchi-apps/aide
 After=network-online.target
 Wants=network-online.target

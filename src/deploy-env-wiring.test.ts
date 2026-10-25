@@ -52,7 +52,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_NEWS_MAIL_LOG_PATH: "業界ニュース週報メール送信の履歴の置き場。既定（data/news-mail-log.json）で足りる",
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",
   AIDE_MYROOM_URL: "既定 http://127.0.0.1:8000 で足りる",
-  AIDE_SIGNALY_WEBHOOK_URL: "workerジョブの通知用。workerはサブPCで動く",
+  AIDE_DISCORD_WEBHOOK_URL: "workerジョブの通知用。workerはサブPCで動く",
   AIDE_WEATHER_LAT: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
   AIDE_WEATHER_LON: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
   AIDE_WEATHER_LOCATION_NAME:

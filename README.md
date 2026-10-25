@@ -549,7 +549,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `issue_deck_list_release_candidates` ほか8本（#651） | issue-deckの全体レビュー・修正API（`/api/review-agent/tools/<name>`）への中継。読み取り: `list_release_candidates`・`get_release_candidate`・`get_fix_status`。更新: `claim_fix`・`release_fix`・`pause_fix`・`resume_fix`・`report_fix_test`・`report_fix_review`（`idempotencyKey` は呼び出し側が操作ごとに作る）。認可・状態遷移・冪等性はissue-deck側で、AIDEは引数と応答をそのまま中継するだけ。`AIDE_ISSUE_DECK_URL` と、共有鍵とは別の専用トークン `AIDE_ISSUE_DECK_REVIEW_AGENT_TOKEN`（`ida_…`。issue-deckの設定＞フリート運用で発行）が要る。主経路はissue-deck内蔵のMCP（`/api/mcp/review-agent`）で、こちらは任意の経路 |
 | `aide_issue_deck_summary` | IssueDeckの全体サマリー（未着手・実行中・予約待ち・確認待ち・手作業待ち・問題・PR・本番反映・指定期間の完了）を、全体合計・リポジトリ別内訳・要対応の上位10件で返す。**読み取り専用**。集計はIssueDeck側（`/api/integrations/aide/development-summary`）で、AIDEは再集計せず中継する。GitHub由来の `aide_dev_status` とは別（#569） |
 | `aide_vps_memory` | 本番VPS上の issue-deck のメモリ計測結果（最新・最後に取得できた時刻・経過秒・PID/起動時刻ごとの区間、`history` で採取サンプル）を返す。**読み取り専用**。計測・集計はIssueDeck側（`/api/integrations/vps-memory`）で、AIDEは中継のみ。取得不可は `reason` のまま返し0MBにしない（#608） |
-| `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`・`repo`・`cursor`・`limit` でページングする。読み取り専用（#569） |
+| `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`（`notStarted`・`reserved` 等のキー）・`repo`・`cursor`・`limit` でページングする。summary と同じエンドポイントに中継する。読み取り専用（#569） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
 | `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
 | `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる） |
@@ -881,7 +881,7 @@ MCP接続先が内部アドレスのまま表示されてしまう。
 
 ### MCPへのアクセスの記録
 
-Claudeアプリからの呼び出しは、これまでどこにも残らなかった。ジョブの失敗は Signaly へ飛び
+Claudeアプリからの呼び出しは、これまでどこにも残らなかった。ジョブの失敗は Discord へ飛び
 （`src/worker/notify.ts`）、実行の記録はキャッシュに残る（`src/worker/record.ts`）のに、
 **MCPだけは「いつ・どのツールが呼ばれたか」を後から確かめる手段が無かった**（#116）。
 `/mcp` のやり取り1件につき1行を残し、`/api/status` の `health.mcpAccess` として新しい順で出す
@@ -923,7 +923,7 @@ Claudeに聞くことになる。
 ### worker 側の設定は「未設定」と断定しない
 
 本番では worker がサブPC、サーバーがVPSで動き、**`.env` が別**（`deploy.yml` がgate経由でVPSへ書くのは
-`AIDE_*` の一部だけで、`ZAIM_*` と `AIDE_SIGNALY_WEBHOOK_URL` は含まれない）。サーバー側の
+`AIDE_*` の一部だけで、`ZAIM_*` と `AIDE_DISCORD_WEBHOOK_URL` は含まれない）。サーバー側の
 環境変数を見て判定すると、正しく動いていても常に「未設定」と出る。
 
 そのため接続先には `side`（`server` / `worker`）を持たせ、**worker 側は判定せず「worker側」と表示する。**
@@ -1060,7 +1060,7 @@ ZAIM_REFRESH_DRY_RUN=1 node --env-file-if-exists=.env src/core/connectors/zaim/s
 - 代わりに口座ごとの最終更新を持たせる。`balances` / `holdings` の `lastUpdatedAt` と、連携口座の一覧 `onlineAccounts`（いずれもJSTオフセット付きのISO8601）
 - `GET /api/money/summary` は最終更新が当日でない口座を `staleAccounts` にまとめ、`note` にも断りを入れる。**捨てるか使うかは呼び出し側が決める**
 - `lastUpdatedAt` は**AIDEが巡回した時刻（`fetchedAt`）とは別物**。巡回が新しくても中身が何ヶ月も前ということがある
-- 更新できない口座が出たら Signaly へ通知する（[ジョブ失敗の通知](#ジョブ失敗の通知)）。ジョブ自体は成功扱いのまま
+- 更新できない口座が出たら Discord へ通知する（[ジョブ失敗の通知](#ジョブ失敗の通知)）。ジョブ自体は成功扱いのまま
 - **判定するのは押下側（`zaim-refresh`）ではなく巡回側（`zaim-sync`）。** 押した直後には反映の遅い口座がまだ進んでおらず、押下側で見ると「更新できない口座」と「反映が遅いだけの口座」を区別できない（#178）
 
 ### asset-manager との境界
@@ -1741,7 +1741,7 @@ AIDEは内部APIを叩いて結果を分類するだけ（`src/core/connectors/m
 3Dプリンター（Bambu Lab A1 mini）の進捗・残り時間・完了・エラー。**AIDEはプリンターへ直接繋がない。**
 サブPCの常駐プロセスがLAN内のローカルMQTTから状態を集め、[myroom](https://github.com/guchi-apps/myroom)
 が正規化して内部API（`GET /api/internal/bambu/printer`）で返す（myroom#428）。AIDEはそれを
-`aide_printer_status` へ畳み、状態遷移を Signaly へ通知する。Bambu のシリアル番号・アクセスコード・
+`aide_printer_status` へ畳み、異常（停止・エラー）を Discord へ通知する。Bambu のシリアル番号・アクセスコード・
 ホストは**myroomのサブPC側にしか無く、AIDEは持たない**。
 
 ```
@@ -1833,16 +1833,16 @@ AIDE が畳むときの読み方:
 ### 状態遷移の通知（`printer-watch`）
 
 サブPCの systemd timer が2分ごとに `printer-watch` を走らせ、myroom の内部APIを読んで前回の記録と
-比べ、次の3つだけを Signaly へ送る（通知の基盤は[ジョブ失敗の通知](#ジョブ失敗の通知)と同じ）。
+比べ、次の2つだけを Discord へ送る（通知の基盤は[ジョブ失敗の通知](#ジョブ失敗の通知)と同じ）。
 
 | 通知 | 条件 |
 |---|---|
-| 印刷が完了 | 状態が変わって `finished` になった |
 | 印刷が停止 | 状態が変わって `failed` になった（Bambuは利用者が中止したときも `FAILED`） |
 | エラーが発生 | 前回通知していない新しいエラーが現れた（一時停止を伴うことが多い） |
 
-- **初回は通知せず基準だけ作る。** 昨日終わった印刷の「完了」を導入した瞬間に送らないため
-- **進捗の実況・印刷開始・エラーを伴わない一時停止は通知しない。** 毎回送ると完了・失敗が埋もれる。
+- **初回は通知せず基準だけ作る。** 昨日止まった印刷の「停止」を導入した瞬間に送らないため
+- **印刷の完了・進捗の実況・印刷開始・エラーを伴わない一時停止は通知しない**（異常だけを送る方針。#702）。
+- **印刷物の名前（ジョブ名）は通知に載せない。** 進捗・エラーコードと本文・時刻だけ。
   エラーが続いている間は再送せず、消えたあとに同じエラーが起きればまた送る
 - **鮮度が切れている間は何もせず、記録も進めない。** 電源が入っていない間の「最後の値」から遷移を
   作らない。切れている間に印刷が終わっていれば復帰後に「完了」が1回届く（本文に「プリンターの最終更新」と
@@ -1871,7 +1871,7 @@ AIDE が畳むときの読み方:
 | 場所 | 設定 |
 |---|---|
 | VPS（サーバー） | 追加なし。既存の `AIDE_MYROOM_TOKEN` をそのまま使う |
-| サブPCの `~/apps/aide/.env` | `AIDE_MYROOM_URL`（myroom の公開URL。`https://myroom.gucchii.com`）・`AIDE_MYROOM_TOKEN`（myroom の `INTERNAL_API_KEY` と同じ値）・`AIDE_SIGNALY_WEBHOOK_URL`（既存） |
+| サブPCの `~/apps/aide/.env` | `AIDE_MYROOM_URL`（myroom の公開URL。`https://myroom.gucchii.com`）・`AIDE_MYROOM_TOKEN`（myroom の `INTERNAL_API_KEY` と同じ値）・`AIDE_DISCORD_WEBHOOK_URL`（既存） |
 
 **リリース順は myroom#428 が先。** myroom が `main` で `bambu/printer` を返す状態（v4.18.0 以降）で、
 かつ AIDE の #401 が `main` へ出てから、サブPCの `.env` を設定し、`aide-printer-watch.timer` を有効にする
@@ -2409,7 +2409,7 @@ npm run worker printer-watch    # 3Dプリンターの完了・停止・エラ�
 実行のたびに結果を `job-<ジョブ名>` というキャッシュキーへ1件だけ書く（`src/worker/record.ts`）。
 動作状況（`/api/status` → ops-dashboard）はこれを読んで「最後に成功したのはいつか」に答える。
 
-**通知（Signaly）では代われない。** あちらは流れて消えるうえ、成功時は何も送らないため、
+**通知（Discord）では代われない。** あちらは流れて消えるうえ、成功時は何も送らないため、
 「動いているが最後の成功が3日前」という状態を後から知る手段が無かった。
 
 置き場をキャッシュにしているのは、**worker がサブPC・サーバーがVPS**で動くため。ファイルに書いても
@@ -2486,9 +2486,9 @@ systemctl --user list-timers 'aide-*'
 
 **サブPC側のコードは `aide-self-update.timer` が毎時 `origin/develop` へ自動更新する。** 更新前に
 追跡済みの未コミット変更を確認し、未追跡ファイルは判定から除く。fast-forwardできない・作業ツリーが
-汚れている場合は更新せず失敗としてSignalyへ通知する。`package-lock.json` が変わったときだけ `npm ci`
+汚れている場合は更新せず失敗としてDiscordへ通知する。`package-lock.json` が変わったときだけ `npm ci`
 を実行し、更新後は `~/apps/subpc/setup.sh --only systemd` でunitを反映してから
-`aide-zaim-web.service` を再起動する。更新なしの定期実行は通知しない。
+`aide-zaim-web.service` を再起動する。更新の成功も更新なしの定期実行も通知しない。
 
 このタイマーも `guchi-apps/subpc` の `SYSTEMD_USER_UNITS` に登録して有効化する。unitファイルの配置と
 `daemon-reload` をaide側で重複して行ってはいけない。`setup.sh` が差分検出・未コミット変更の見送り・
@@ -2496,38 +2496,37 @@ systemctl --user list-timers 'aide-*'
 
 ### ジョブ失敗の通知
 
-終了コード1は systemd のジャーナルに残るだけで誰にも届かない。実際に `aide-zaim-sync.service` の失敗が丸一日気づかれずに放置されたため、失敗を [Signaly](https://github.com/guchi-apps/signaly)（Webhook受信 + Web Push の通知ハブ）へ送っている（`src/worker/notify.ts`）。
+終了コード1は systemd のジャーナルに残るだけで誰にも届かない。実際に `aide-zaim-sync.service` の失敗が丸一日気づかれずに放置されたため、**対応が要る異常だけ**を Discord のWebhookへ送っている（`src/worker/notify.ts`。Signaly 廃止に伴う移行。#702）。
 
 | 環境変数 | 未設定のとき | 設定したとき |
 |---|---|---|
-| `AIDE_SIGNALY_WEBHOOK_URL` | 通知しない（開発機） | 失敗・復旧をそのWebhookへ送る（本番 = サブPC） |
+| `AIDE_DISCORD_WEBHOOK_URL` | 通知しない（開発機） | 異常をそのWebhookへ送る（本番 = サブPC） |
 
-URLに含まれる `channel_id` が宛先の識別子そのもの（Webhook自体は認証なし）なので、**認証情報として扱う**。ログにも通知本文にも出さない。
+URLのトークンがそのまま投稿権限なので、**認証情報として扱う**。ログにも通知本文にも記録にも出さない。
 
-送るのは次の4つだけ。
+**成功・復旧・自己更新・自動で直る見込みのセッション失効は送らない。** 送るのは次の3つだけ。
 
-- **失敗**: ジョブ名・失敗理由・発生時刻・実行ホストを載せる。`ZAIM_SESSION_EXPIRED` はタイトルと「対応」欄で他の失敗と区別する。**失効はさらに3通りに書き分ける**（下記）
-- **復旧**: 失敗が記録されている状態で成功したときに1回だけ
-- **セッション回復（ジョブ横断）**: Zaimのジョブが成功したとき、**他のZaimジョブに残っている失効の失敗**へ1回だけ。ジョブ単位の復旧通知では、12時間ごとの `zaim-refresh` の失効を30分ごとの `zaim-keep-alive` が直しても次の `zaim-refresh` まで伝わらない（#191）。消すのは失効の記録だけで、別の理由で失敗しているジョブの記録は残す
+- **失敗**: ジョブ名・失敗理由・発生時刻・実行ホストを載せる。`ZAIM_SESSION_EXPIRED` はタイトルと「対応」欄で他の失敗と区別する（下記）
 - **一部失敗**: `zaim-sync` の巡回時点で最終更新が当日でない口座があるとき。**ジョブ自体は成功扱いのまま**（押下も巡回も成功しており、AIDE側では直せない）。署名は「更新できなかった口座名の集合」なので、同じ口座が落ち続けている間は静かになり、別の口座が落ちたときは抑制せずに届く。記録は `<ジョブ名>:stale-accounts` としてジョブ自体の失敗とは別に持つ。**判定するのはその日の最後の巡回（23:30）だけ**（#165 / #178。理由は上の「実行間隔の制約」）
+- **3Dプリンターの異常**（`printer-watch`。停止・エラーのみ。詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）
 
-**失効の通知は「自動で直る見込みがあるか」で書き分ける**（#191）。かつては失効＝手動ログインでしか直らなかったが、いまは自動再ログイン（#63）があり、多くは次の `zaim-keep-alive` が勝手に直す。それでも「手動でログインし直すまで失敗し続けます」と送っていたため、受け取った側が手動対応の要否を判断できなかった（2026-08-29 22:32 の `zaim-refresh` の失敗は、4秒後の `zaim-keep-alive` が自動再ログインして復旧している）。判定は失敗の中身と資格情報の有無だけで行い、資格情報の**値は読まない**。
+**復旧は通知しない。** ジョブが成功したら、そのジョブの失敗の記録を黙って消す（再発したときは改めて通知される）。Zaimのジョブが成功したときは、他のZaimジョブに残っている失効の記録も消す（12時間ごとの `zaim-refresh` の失効を30分ごとの `zaim-keep-alive` が直しても、記録が残って次の失効が抑制されるのを防ぐ。#191）。
+
+**失効の通知は「自動で直る見込みがあるか」で分ける**（#191・#702）。多くの失効は次の `zaim-keep-alive`（自動再ログイン。#63）が勝手に直すので、人の対応が要らない。判定は失敗の中身と資格情報の有無だけで行い、資格情報の**値は読まない**。
 
 | 状態 | 見分け方 | 通知 |
 |---|---|---|
-| 自動再ログイン待ち | 失効のマーカーのみ・`ZAIM_EMAIL`/`ZAIM_PASSWORD` あり | 黄色。「30分ごとの `zaim-keep-alive` が自動で試みる」。手動を促さない |
+| 自動再ログイン待ち | 失効のマーカーのみ・`ZAIM_EMAIL`/`ZAIM_PASSWORD` あり | **送らない**（記録だけ残す） |
 | 自動再ログインも失敗 | `ZAIM_AUTO_RELOGIN_FAILED` が付いている | 赤。手動ログインを促す |
 | 自動再ログインの設定なし | 失効のマーカーのみ・資格情報なし（開発機・CI） | 赤。手動ログインを促す |
 
-`ZAIM_AUTO_RELOGIN_FAILED` を付けるのは `session.ts` だけで、**自動再ログインを実際に試したうえで直らなかった場合に限る**。元のメッセージは丸ごと残し、マーカーは行を分けて足す（`ZAIM_SESSION_EXPIRED` を落とすと失効として分類されなくなり、失敗理由の1行目も失われる）。**抑制の署名もこの3状態で分ける。** 同じ署名にすると、「自動で直る見込み」を送った直後に自動再ログインが失敗しても、6時間の抑制で「手動が要る」が届かない。
+`ZAIM_AUTO_RELOGIN_FAILED` を付けるのは `session.ts` だけで、**自動再ログインを実際に試したうえで直らなかった場合に限る**。**抑制の署名もこの3状態で分ける**ので、「自動再ログイン待ち」から「自動再ログインも失敗」へ悪化したときは抑制されずに届く。
 
-定期実行の成功は送らない。`zaim-keep-alive` は30分ごとなので、成功も送ると1日48件になり肝心の失敗が埋もれる。
+**通知洪水の防止は2段**。(1) 同じ理由で失敗し続けている間は6時間に1回まで。(2) 全ジョブ合計で**1時間に10件まで**（`HOURLY_SEND_LIMIT`）。超えた分は送らず、通知済みにもしないので、枠が空いた次の実行で送り直される。
 
-**同じ理由で失敗し続けている間は6時間に1回まで**に抑えている（30分ごとの `zaim-keep-alive` がセッション失効すると、抑制しないと48件/日届く）。理由が変わった場合は抑制せずに送る。抑制で黙っている状態と直った状態を区別できるように、復旧通知だけは出している。
+**配送の失敗は `data/worker/notify-delivery.json` で観測できる。** 直近の成功・失敗の時刻、失敗の種別（`HTTP 500`・`TimeoutError` など。URLは含めない）、連続失敗回数、直近1時間の送信時刻だけを持つ。同じ内容はジャーナルにも `[notify] Discordへの通知に失敗しました` として出る。`printer-watch` は送れなかったとき例外を投げ、ジョブの失敗として記録に残る。
 
 未解決の失敗は `data/worker/notify-state.json` に持つ（ジョブ名・失敗理由の署名・時刻・回数だけ。取得データも認証情報も入れない）。**通知の送信失敗でジョブを二重に失敗させない。** 送信・記録まわりの例外はすべて握りつぶし、ログに一行残すだけにする。送れなかった回は通知済みにせず、次の実行で送り直す。
-
-**3Dプリンターの状態遷移（完了・停止・エラー）も同じ Signaly へ送る**（`printer-watch`。失敗・復旧の通知とは別物で、抑制や記録も別。詳細は[コネクタ: 3Dプリンター](#コネクタ-3dプリンターmyroom経由378)）。
 
 **プロセスが起動する前に落ちるケース（node が起動しない・OOMで強制終了）は拾えない。** そこまで拾うなら systemd の `OnFailure=` が要る（ユニットは `deploy/systemd/` にある）。
 
