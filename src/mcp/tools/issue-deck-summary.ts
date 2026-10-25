@@ -1,6 +1,5 @@
 import {
   fetchDevelopmentSummary,
-  ITEMS_PATH,
   readDevelopmentSummaryConfig,
   SUMMARY_PATH,
 } from "../../core/connectors/issue-deck/development-summary.ts";
@@ -134,13 +133,13 @@ export const issueDeckItemsTool: Tool = {
     "IssueDeckのカテゴリ別の**詳細一覧**を返す。読み取り専用。aide_issue_deck_summary が返したカテゴリを指定し、" +
     "タイトル・リンク・理由・次に必要な行動（実行はしない）をページ単位で取る。" +
     "総件数は返却件数と別に維持され、`nextCursor` を cursor に渡すと続きを欠落・重複なく取れる（truncated が true の間は続きがある）。" +
-    "「予約待ちの詳細」「確認待ちの一覧」「今週完了したもの」などに使う。",
+    "「未着手のタイトル一覧（notStarted）」「予約待ちの詳細（reserved）」「確認待ちの一覧（checkUser）」「今週完了したもの（recentCompletions）」などに使う。応答は schemaVersion・category・total・items・truncated・nextCursor を保つ。",
   inputSchema: {
     type: "object",
     properties: {
       category: {
         type: "string",
-        description: "取得するカテゴリのキー（aide_issue_deck_summary の応答に載っているもの。例: 予約待ち・確認待ち・完了）。",
+        description: "取得するカテゴリのキー（aide_issue_deck_summary の応答に載っているキー。例: notStarted・inProgress・reserved・checkUser・manualStep・problems・pullRequests・deployment・recentCompletions）。",
       },
       ...SCOPE_PROPERTIES,
       cursor: { type: "string", description: "前回の応答の nextCursor。最初のページでは省略する。" },
@@ -149,5 +148,5 @@ export const issueDeckItemsTool: Tool = {
     required: ["category"],
     additionalProperties: false,
   },
-  handler: (args) => relay(args, ITEMS_PATH, true),
+  handler: (args) => relay(args, SUMMARY_PATH, true),
 };
