@@ -31,6 +31,9 @@ export const REVIEW_AGENT_WRITE_SCOPE = "review-agent:write";
 /** kurashioの月次請求（#678）。照会と登録は別の承認単位にする。 */
 export const KURASHIO_BILLS_READ_SCOPE = "kurashio-bills:read";
 export const KURASHIO_BILLS_WRITE_SCOPE = "kurashio-bills:write";
+/** kurashioの関西電力 時間別kWh（#692）。照会と登録は別の承認単位にする。 */
+export const KURASHIO_ENERGY_READ_SCOPE = "kurashio-energy:read";
+export const KURASHIO_ENERGY_WRITE_SCOPE = "kurashio-energy:write";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
@@ -40,6 +43,8 @@ const SUPPORTED_SCOPES = new Set([
   REVIEW_AGENT_WRITE_SCOPE,
   KURASHIO_BILLS_READ_SCOPE,
   KURASHIO_BILLS_WRITE_SCOPE,
+  KURASHIO_ENERGY_READ_SCOPE,
+  KURASHIO_ENERGY_WRITE_SCOPE,
 ]);
 
 /**

@@ -34,6 +34,7 @@ import {
   updateTaskTool,
 } from "./tools/tasks.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
+import { kurashioGetKepcoHourlyTool, kurashioImportKepcoHourlyTool } from "./tools/kurashio-kepco-hourly.ts";
 import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { vpsMemoryTool } from "./tools/vps-memory.ts";
 import { weatherTool } from "./tools/weather.ts";
@@ -74,6 +75,9 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(kurashioBillContractsTool);
   registry.register(kurashioGetBillTool);
   registry.register(kurashioImportBillTool);
+  // kurashioの関西電力 時間別kWh（#692）。月次請求とは別のscope・別の書込トークン。
+  registry.register(kurashioGetKepcoHourlyTool);
+  registry.register(kurashioImportKepcoHourlyTool);
   // 運用は区画ごとに分ける（#373）。ホスト指標・外形監視・残枠は別々の問い。
   registry.register(hostStatusTool);
   registry.register(uptimeMonitorsTool);

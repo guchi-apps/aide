@@ -166,7 +166,7 @@ export function toBillSource(raw: unknown): BillSource | null {
   };
 }
 
-async function readDetail(res: Response): Promise<unknown> {
+export async function readDetail(res: Response): Promise<unknown> {
   try {
     const body = (await res.json()) as Record<string, unknown>;
     return body["detail"];
@@ -179,7 +179,7 @@ async function readDetail(res: Response): Promise<unknown> {
  * HTTPの失敗を分類する。`writing` のときは、5xx（503を除く）を `unknown` に倒す。
  * kurashio は保存の失敗を rollback してから500を返すが、確定後の失敗と区別できないため。
  */
-async function classifyResponse(res: Response, writing: boolean): Promise<BillsFailure> {
+export async function classifyResponse(res: Response, writing: boolean): Promise<BillsFailure> {
   const detail = await readDetail(res);
   if (res.status === 401) return { ok: false, kind: "unauthorized", reason: "HTTP 401（トークンが kurashio 側と一致しない）" };
   if (res.status === 503) return { ok: false, kind: "not_configured", reason: "HTTP 503（kurashio 側でトークンが未設定）" };
@@ -197,7 +197,7 @@ async function classifyResponse(res: Response, writing: boolean): Promise<BillsF
   return { ok: false, kind: "failed", reason: `HTTP ${res.status}` };
 }
 
-function classifyThrown(cause: unknown, timeoutMs: number, writing: boolean): BillsFailure {
+export function classifyThrown(cause: unknown, timeoutMs: number, writing: boolean): BillsFailure {
   if (cause instanceof Error && cause.name === "TimeoutError") {
     return writing
       ? { ok: false, kind: "unknown", reason: `${timeoutMs}ms 以内に応答がありませんでした。保存されたかどうかは分かりません` }
@@ -232,7 +232,7 @@ function failedBeforeConnect(cause: unknown): boolean {
   return typeof inner?.code === "string" && PRE_CONNECT_ERROR_CODES.has(inner.code);
 }
 
-function headers(config: BillsConfig): Record<string, string> {
+export function headers(config: BillsConfig): Record<string, string> {
   return { authorization: `Bearer ${config.token}`, accept: "application/json" };
 }
 
