@@ -12,14 +12,13 @@
  *   **0件や「問題なし」へ丸めない**。
  * - エラー本文はIssueDeckの応答をそのまま出さず、HTTPステータスと種別だけに丸める。
  *
- * **APIのパス・クエリ名は issue-deck#3999 の確定までの暫定値**（`SUMMARY_PATH` / `ITEMS_PATH`）。
- * 確定したら、ここだけを直す。
+ * 契約は issue-deck の `docs/aide-development-summary-api.md`（#3999で確定）。**詳細一覧も同じ
+ * `SUMMARY_PATH` に `category`・`limit`・`cursor` を付けて取る**（別パスの `development-items` は存在せず404になる。#706）。
  */
 
 import { getSharedToken } from "./shared-tokens.ts";
 
 export const SUMMARY_PATH = "/api/integrations/aide/development-summary";
-export const ITEMS_PATH = "/api/integrations/aide/development-items";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 /** 応答の大きさの上限。想定外に巨大な本文でメモリを使わない。 */

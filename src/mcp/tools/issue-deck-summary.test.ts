@@ -78,16 +78,58 @@ describe("aide_issue_deck_summary / items", () => {
     assert.ok(!result.content[0]!.text.includes(TOKEN));
   });
 
-  it("items は別パスへ category・cursor・limit を渡す", async () => {
+  it("items は summary と同一パスへ category・repo・cursor・limit・期間を渡し、契約の封筒を保つ", async () => {
+    const body = { schemaVersion: 1, category: "notStarted", total: 15, items: [{ id: "a" }], truncated: true, nextCursor: "c2" };
     mock.method(globalThis, "fetch", async (input: string | URL) => {
       const url = new URL(String(input));
-      assert.equal(url.pathname, "/api/integrations/aide/development-items");
-      assert.equal(url.searchParams.get("category"), "reserved");
+      assert.equal(url.pathname, "/api/integrations/aide/development-summary");
+      assert.equal(url.searchParams.get("category"), "notStarted");
+      assert.equal(url.searchParams.get("repositoryFullName"), "guchi-apps/aide");
       assert.equal(url.searchParams.get("cursor"), "c1");
       assert.equal(url.searchParams.get("limit"), "20");
-      return Response.json({ schemaVersion: 1, items: [], nextCursor: null });
+      assert.equal(url.searchParams.get("from"), "2026-10-01");
+      assert.equal(url.searchParams.get("to"), "2026-10-08");
+      assert.equal(url.searchParams.get("timezone"), "Asia/Tokyo");
+      return Response.json(body);
     });
-    assert.equal(parsed(await items({ category: "reserved", cursor: "c1", limit: 20 }))["status"], "ok");
+    const out = parsed(
+      await items({ category: "notStarted", repo: "guchi-apps/aide", cursor: "c1", limit: 20, from: "2026-10-01", to: "2026-10-08", timezone: "Asia/Tokyo" }),
+    );
+    assert.equal(out["status"], "ok");
+    assert.deepEqual(out["data"], body);
+  });
+
+  it("items の404は unavailable として返し、0件にしない", async () => {
+    mock.method(globalThis, "fetch", async () => new Response("not found", { status: 404 }));
+    const out = parsed(await items({ category: "notStarted" }));
+    assert.equal(out["status"], "unavailable");
+    assert.equal(out["httpStatus"], 404);
+    assert.equal(out["data"], undefined);
+  });
+
+  it("cursorを辿ると全ページが欠落・重複なく揃う", async () => {
+    const all = Array.from({ length: 15 }, (_, i) => ({ id: `i${i}` }));
+    mock.method(globalThis, "fetch", async (input: string | URL) => {
+      const cursor = new URL(String(input)).searchParams.get("cursor");
+      const start = cursor ? Number(cursor) : 0;
+      const end = Math.min(start + 6, all.length);
+      return Response.json({
+        schemaVersion: 1, category: "notStarted", total: all.length, items: all.slice(start, end),
+        truncated: end < all.length, nextCursor: end < all.length ? String(end) : null,
+      });
+    });
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const data = parsed(await items({ category: "notStarted", limit: 6, ...(cursor ? { cursor } : {}) }))["data"] as {
+        total: number; items: { id: string }[]; nextCursor: string | null;
+      };
+      assert.equal(data.total, 15);
+      ids.push(...data.items.map((i) => i.id));
+      if (!data.nextCursor) break;
+      cursor = data.nextCursor;
+    }
+    assert.deepEqual(ids, all.map((i) => i.id));
   });
 
   it("引数不正はIssueDeckへ送らない", async () => {
