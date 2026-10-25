@@ -38,28 +38,21 @@ describe("decidePrinterEvents", () => {
     assert.equal(next?.state, "finished");
   });
 
-  it("印刷中→完了で完了を1回通知する", () => {
+  it("印刷中→完了は通知せず、基準だけ進める（異常ではない）", () => {
     const { events, next } = decidePrinterEvents(
       watch(),
       reading({ state: "finished", progressPercent: 100, layer: 200 }),
     );
 
-    assert.deepEqual(events.map((event) => event.kind), ["finished"]);
-    assert.equal(events[0]?.jobName, "benchy.3mf");
+    assert.deepEqual(events, []);
     assert.equal(next?.state, "finished");
   });
 
-  it("完了のまま続く間は通知しない", () => {
-    const { events } = decidePrinterEvents(watch({ state: "finished" }), reading({ state: "finished" }));
-    assert.deepEqual(events, []);
-  });
-
-  it("次の印刷を挟めば、同じジョブ名でもまた完了を通知する", () => {
-    const started = decidePrinterEvents(watch({ state: "finished" }), reading({ state: "printing" }));
-    assert.deepEqual(started.events, []);
-
-    const finished = decidePrinterEvents(started.next, reading({ state: "finished" }));
-    assert.deepEqual(finished.events.map((event) => event.kind), ["finished"]);
+  it("完了を挟んでも、次の印刷の失敗は通知する", () => {
+    const finished = decidePrinterEvents(watch(), reading({ state: "finished" }));
+    const started = decidePrinterEvents(finished.next, reading({ state: "printing" }));
+    const failed = decidePrinterEvents(started.next, reading({ state: "failed" }));
+    assert.deepEqual(failed.events.map((event) => event.kind), ["failed"]);
   });
 
   it("印刷中→失敗（中止を含む）で停止を通知する", () => {
@@ -124,10 +117,10 @@ describe("decidePrinterEvents", () => {
 
     assert.deepEqual(events, []);
     assert.equal(next, previous);
-    // 続けて読めた完了は、読めない値を挟んでも印刷中との比較で通知される。
+    // 続けて読めた失敗は、読めない値を挟んでも印刷中との比較で通知される。
     assert.deepEqual(
-      decidePrinterEvents(next, reading({ state: "finished" })).events.map((event) => event.kind),
-      ["finished"],
+      decidePrinterEvents(next, reading({ state: "failed" })).events.map((event) => event.kind),
+      ["failed"],
     );
   });
 
@@ -141,8 +134,7 @@ describe("buildPrinterPayload", () => {
 
   function event(overrides: Partial<PrinterEvent> = {}): PrinterEvent {
     return {
-      kind: "finished",
-      jobName: "benchy.3mf",
+      kind: "failed",
       progressPercent: 100,
       layer: 200,
       totalLayers: 200,
@@ -156,12 +148,13 @@ describe("buildPrinterPayload", () => {
     return Object.fromEntries((payload.embeds[0]?.fields ?? []).map((field) => [field.name, field.value]));
   }
 
-  it("完了はジョブ名・進捗・最終更新・検知時刻を載せる", () => {
+  it("停止は進捗・最終更新・検知時刻を載せ、印刷物の名前は載せない", () => {
     const payload = buildPrinterPayload(event(), DETECTED);
 
-    assert.match(payload.embeds[0]?.title ?? "", /印刷が完了/);
+    assert.match(payload.embeds[0]?.title ?? "", /印刷が停止/);
     const values = fields(payload);
-    assert.equal(values["ジョブ"], "benchy.3mf");
+    assert.equal(values["ジョブ"], undefined);
+    assert.ok(!JSON.stringify(payload).includes("benchy"));
     assert.equal(values["進捗"], "100% / 200/200層");
     assert.match(values["プリンターの最終更新"] ?? "", /2026-09-21 12:00:00 JST/);
     assert.match(values["検知時刻"] ?? "", /2026-09-21 12:05:00 JST/);
@@ -179,16 +172,10 @@ describe("buildPrinterPayload", () => {
     }
   });
 
-  it("完了は緑で、停止とは色も文面も違う", () => {
-    const done = buildPrinterPayload(event(), DETECTED).embeds[0];
+  it("停止とエラーは文面が違う", () => {
     const stopped = buildPrinterPayload(event({ kind: "failed" }), DETECTED).embeds[0];
-
-    assert.equal(done?.color, 5763719);
-    assert.notEqual(done?.title, stopped?.title);
-  });
-
-  it("ジョブ名が無いときは、取得できなかったと明示する", () => {
-    assert.match(fields(buildPrinterPayload(event({ jobName: null }), DETECTED))["ジョブ"] ?? "", /取得できなかった/);
+    const error = buildPrinterPayload(event({ kind: "error" }), DETECTED).embeds[0];
+    assert.notEqual(stopped?.title, error?.title);
   });
 
   it("エラーが多くてもフィールドの上限に収める", () => {

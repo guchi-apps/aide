@@ -11,15 +11,14 @@ process.env["AIDE_WORKER_STATE_DIR"] = STATE_DIR;
 
 const {
   buildFailurePayload,
-  buildRecoveryPayload,
-  buildSelfUpdateSuccessPayload,
   buildStaleAccountsPayload,
-  buildZaimSessionRecoveryPayload,
+  clearJobFailure,
+  clearZaimSessionExpiry,
   decideNotification,
+  HOURLY_SEND_LIMIT,
   notifyJobFailure,
-  notifyJobRecovered,
   notifyStaleAccounts,
-  notifyZaimSessionRecovered,
+  readDeliveryRecord,
   readState,
   staleAccountsSignature,
   summarizeFailure,
@@ -224,22 +223,6 @@ describe("通知の中身", () => {
     assert.match(embed.fields.find((f) => f.name === "連続失敗")?.value ?? "", /4回目/);
   });
 
-  it("自動で直る見込みがある失効には、手動ログインを促さない", () => {
-    // #191。実際には30分ごとの zaim-keep-alive が直すのに「手動でログインし直すまで
-    // 失敗し続けます」と送っており、受け取った側が対応の要否を判断できなかった。
-    const payload = buildFailurePayload({
-      job: "zaim-refresh",
-      summary: summarizeFailure(new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/"), WITH_CREDENTIALS),
-      occurredAt,
-      record: recordAt({ count: 1 }),
-    });
-    const [embed] = payload.embeds;
-    assert.match(embed.title, /自動再ログイン待ち/);
-    assert.match(embed.description, /zaim-keep-alive/);
-    assert.ok(!embed.description.includes("失敗し続けます"));
-    assert.match(embed.fields.find((f) => f.name === "対応")?.value ?? "", /まず待つ/);
-  });
-
   it("資格情報が無い環境の失効は、従来どおり手動ログインを促す", () => {
     const payload = buildFailurePayload({
       job: "zaim-sync",
@@ -251,50 +234,6 @@ describe("通知の中身", () => {
     assert.match(embed.title, /再ログインが必要/);
     assert.match(embed.description, /失敗し続けます/);
     assert.match(embed.fields.find((f) => f.name === "対応")?.value ?? "", /login\.mjs/);
-  });
-
-  it("ジョブ横断の回復通知に、失敗していたジョブと確認したジョブが入る", () => {
-    const payload = buildZaimSessionRecoveryPayload({
-      succeededJob: "zaim-keep-alive",
-      recovered: [
-        { job: "zaim-refresh", record: recordAt({ firstFailedAt: "2026-08-14T00:00:00.000Z", count: 2 }) },
-      ],
-      recoveredAt: occurredAt,
-    });
-    const [embed] = payload.embeds;
-    assert.match(embed.title, /セッションが回復/);
-    assert.match(embed.description, /zaim-keep-alive/);
-    assert.match(
-      embed.fields.find((f) => f.name === "失効で失敗していたジョブ")?.value ?? "",
-      /zaim-refresh.*2回/,
-    );
-  });
-
-  it("復旧通知に失敗していた期間が入る", () => {
-    const payload = buildRecoveryPayload({
-      job: "zaim-sync",
-      record: recordAt({ firstFailedAt: "2026-08-14T00:00:00.000Z", count: 5 }),
-      recoveredAt: new Date("2026-08-14T12:00:00.000Z"),
-    });
-    const [embed] = payload.embeds;
-    assert.equal(embed.title, "✅ [AIDE] zaim-sync 復旧");
-    assert.match(embed.fields.find((f) => f.name === "失敗していた期間")?.value ?? "", /12時間0分/);
-  });
-
-  it("自己更新の通知に更新前後と依存再導入の有無を載せる", () => {
-    const payload = buildSelfUpdateSuccessPayload({
-      before: "1234567890abcdef",
-      after: "abcdef1234567890",
-      dependenciesInstalled: true,
-    });
-    const [embed] = payload.embeds;
-    assert.equal(embed.title, "✅ [AIDE] 自己更新");
-    assert.match(embed.description, /受け口を再起動/);
-    assert.deepEqual(embed.fields, [
-      { name: "更新前", value: "1234567", inline: true },
-      { name: "更新後", value: "abcdef1", inline: true },
-      { name: "依存の再導入", value: "実行済み", inline: true },
-    ]);
   });
 });
 
@@ -315,11 +254,11 @@ describe("送信と記録", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (typeof address === "string" || address === null) throw new Error("ポートを取得できません");
-    process.env["AIDE_SIGNALY_WEBHOOK_URL"] = `http://127.0.0.1:${address.port}/webhook/test`;
+    process.env["AIDE_DISCORD_WEBHOOK_URL"] = `http://127.0.0.1:${address.port}/webhook/test`;
   });
 
   after(async () => {
-    delete process.env["AIDE_SIGNALY_WEBHOOK_URL"];
+    delete process.env["AIDE_DISCORD_WEBHOOK_URL"];
     await new Promise<void>((resolve, reject) =>
       server.close((err) => (err ? reject(err) : resolve())),
     );
@@ -330,6 +269,7 @@ describe("送信と記録", () => {
     received = [];
     respondWith = 200;
     await rm(join(STATE_DIR, "notify-state.json"), { force: true });
+    await rm(join(STATE_DIR, "notify-delivery.json"), { force: true });
   });
 
   it("失敗を送り、抑制の記録を残す", async () => {
@@ -353,39 +293,58 @@ describe("送信と記録", () => {
     assert.ok((await readState())["zaim-sync"]?.notifiedAt);
   });
 
-  it("未解決の失敗が無ければ復旧を通知しない", async () => {
-    await notifyJobRecovered("zaim-sync");
+  it("復旧は通知せず、失敗の記録だけ消す", async () => {
+    await clearJobFailure("zaim-sync");
     assert.equal(received.length, 0);
-  });
 
-  it("失敗の後に成功したら復旧を1回だけ通知し、記録を消す", async () => {
     await notifyJobFailure("zaim-sync", new Error("壊れました"));
-    await notifyJobRecovered("zaim-sync");
-    assert.equal(received.length, 2);
+    await clearJobFailure("zaim-sync");
+    assert.equal(received.length, 1);
     assert.equal((await readState())["zaim-sync"], undefined);
 
-    await notifyJobRecovered("zaim-sync");
+    // 記録を消したので、再発すれば抑制されずに届く。
+    await notifyJobFailure("zaim-sync", new Error("壊れました"));
     assert.equal(received.length, 2);
   });
 
-  it("Zaimのジョブが成功したら、他のジョブの失効も回復として1回だけ知らせる", async () => {
-    // #191。zaim-refresh（12時間ごと）の失効を zaim-keep-alive（30分ごと）が直しても、
-    // ジョブ単位の復旧通知では次の zaim-refresh まで失敗だけが残っていた。
-    await notifyJobFailure("zaim-refresh", new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/"));
+  it("自動で直る見込みの失効は送らず、記録だけ残す", async () => {
+    // 資格情報の有無は環境で決まるため、ここでは分類済みの署名を直接作る。
+    const env = { ZAIM_EMAIL: "someone@example.com", ZAIM_PASSWORD: "dummy" };
+    const saved = { email: process.env["ZAIM_EMAIL"], password: process.env["ZAIM_PASSWORD"] };
+    Object.assign(process.env, env);
+    try {
+      await notifyJobFailure("zaim-refresh", new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/"));
+      assert.equal(received.length, 0);
+      assert.equal((await readState())["zaim-refresh"]?.signature, "ZAIM_SESSION_EXPIRED:auto-pending");
+
+      // 自動再ログインまで失敗したら、署名が変わるので届く。
+      await notifyJobFailure(
+        "zaim-refresh",
+        new Error("ZAIM_SESSION_EXPIRED:https://zaim.net/\nZAIM_AUTO_RELOGIN_FAILED"),
+      );
+      assert.equal(received.length, 1);
+    } finally {
+      for (const [key, value] of [["ZAIM_EMAIL", saved.email], ["ZAIM_PASSWORD", saved.password]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  it("Zaimのジョブが成功したら、他のジョブの失効の記録を通知なしで消す", async () => {
+    // #191。zaim-refresh（12時間ごと）の失効を zaim-keep-alive（30分ごと）が直しても記録が残ると、
+    // 次の失効が抑制されてしまう。
+    await notifyJobFailure("zaim-refresh", new Error("ZAIM_SESSION_EXPIRED"));
     assert.equal(received.length, 1);
 
-    await notifyZaimSessionRecovered("zaim-keep-alive");
-    assert.equal(received.length, 2);
+    await clearZaimSessionExpiry("zaim-keep-alive");
+    assert.equal(received.length, 1);
     assert.equal((await readState())["zaim-refresh"], undefined);
-
-    // 記録を消したので、次に成功しても二重には送らない。
-    await notifyZaimSessionRecovered("zaim-keep-alive");
-    assert.equal(received.length, 2);
   });
 
   it("失効以外の失敗は、Zaimのジョブが成功しても消さない", async () => {
     await notifyJobFailure("zaim-refresh", new Error("Zaimの連携口座を1件も読み取れませんでした"));
-    await notifyZaimSessionRecovered("zaim-keep-alive");
+    await clearZaimSessionExpiry("zaim-keep-alive");
     // 送るのは失敗の1件だけ。原因が解消したとは限らないため記録も残す。
     assert.equal(received.length, 1);
     assert.ok((await readState())["zaim-refresh"]);
@@ -399,25 +358,25 @@ describe("送信と記録", () => {
   });
 
   it("Webhook URLが未設定なら何も送らず記録も作らない", async () => {
-    const url = process.env["AIDE_SIGNALY_WEBHOOK_URL"];
-    delete process.env["AIDE_SIGNALY_WEBHOOK_URL"];
+    const url = process.env["AIDE_DISCORD_WEBHOOK_URL"];
+    delete process.env["AIDE_DISCORD_WEBHOOK_URL"];
     try {
       await notifyJobFailure("zaim-sync", new Error("壊れました"));
       assert.equal(received.length, 0);
       assert.deepEqual(await readState(), {});
     } finally {
-      process.env["AIDE_SIGNALY_WEBHOOK_URL"] = url;
+      process.env["AIDE_DISCORD_WEBHOOK_URL"] = url;
     }
   });
 
   it("送信先が落ちていてもジョブ側へ例外を投げない", async () => {
-    const url = process.env["AIDE_SIGNALY_WEBHOOK_URL"];
-    process.env["AIDE_SIGNALY_WEBHOOK_URL"] = "http://127.0.0.1:1/webhook/test";
+    const url = process.env["AIDE_DISCORD_WEBHOOK_URL"];
+    process.env["AIDE_DISCORD_WEBHOOK_URL"] = "http://127.0.0.1:1/webhook/test";
     try {
       await notifyJobFailure("zaim-sync", new Error("壊れました"));
-      await notifyJobRecovered("zaim-sync");
+      await clearJobFailure("zaim-sync");
     } finally {
-      process.env["AIDE_SIGNALY_WEBHOOK_URL"] = url;
+      process.env["AIDE_DISCORD_WEBHOOK_URL"] = url;
     }
   });
 
@@ -431,12 +390,12 @@ describe("送信と記録", () => {
     assert.ok(state["zaim-refresh:stale-accounts"]);
 
     // ジョブ自体が成功しても、口座の更新漏れは解消していない。
-    await notifyJobRecovered("zaim-refresh");
+    await clearJobFailure("zaim-refresh");
     assert.equal((await readState())["zaim-refresh"], undefined);
     assert.ok((await readState())["zaim-refresh:stale-accounts"]);
   });
 
-  it("同じ口座が落ち続けている間は抑制し、直ったら1回だけ知らせる", async () => {
+  it("同じ口座が落ち続けている間は抑制し、直ったら黙って記録を消す", async () => {
     const accounts = [{ name: "ゆうちょ銀行", lastUpdatedAt: null }];
     await notifyStaleAccounts("zaim-refresh", accounts);
     await notifyStaleAccounts("zaim-refresh", accounts);
@@ -444,12 +403,8 @@ describe("送信と記録", () => {
     assert.equal((await readState())["zaim-refresh:stale-accounts"]?.count, 2);
 
     await notifyStaleAccounts("zaim-refresh", []);
-    assert.equal(received.length, 2);
+    assert.equal(received.length, 1);
     assert.equal((await readState())["zaim-refresh:stale-accounts"], undefined);
-
-    // 全部更新できている日常では何も送らない。
-    await notifyStaleAccounts("zaim-refresh", []);
-    assert.equal(received.length, 2);
   });
 
   it("落ちている口座の顔ぶれが変われば抑制しない", async () => {
@@ -469,6 +424,46 @@ describe("送信と記録", () => {
     respondWith = 200;
     await notifyStaleAccounts("zaim-refresh", [{ name: "ゆうちょ銀行", lastUpdatedAt: null }]);
     assert.equal(received.length, 2);
+  });
+
+  it("配送に失敗したら、種別と連続回数を記録する（URLは残さない）", async () => {
+    respondWith = 500;
+    await notifyJobFailure("zaim-sync", new Error("壊れました"));
+    await notifyJobFailure("zaim-refresh", new Error("壊れました"));
+
+    const delivery = await readDeliveryRecord();
+    assert.equal(delivery.lastFailureReason, "HTTP 500");
+    assert.equal(delivery.consecutiveFailures, 2);
+    assert.ok(delivery.lastFailureAt);
+    const raw = await readFile(join(STATE_DIR, "notify-delivery.json"), "utf8");
+    assert.ok(!raw.includes("127.0.0.1"));
+
+    respondWith = 200;
+    await notifyJobFailure("zaim-money-sync", new Error("壊れました"));
+    const recovered = await readDeliveryRecord();
+    assert.equal(recovered.consecutiveFailures, 0);
+    assert.ok(recovered.lastSuccessAt);
+  });
+
+  it("接続できない場合も配送失敗として記録する", async () => {
+    const url = process.env["AIDE_DISCORD_WEBHOOK_URL"];
+    process.env["AIDE_DISCORD_WEBHOOK_URL"] = "http://127.0.0.1:1/webhook/test";
+    try {
+      await notifyJobFailure("zaim-sync", new Error("壊れました"));
+    } finally {
+      process.env["AIDE_DISCORD_WEBHOOK_URL"] = url;
+    }
+    assert.equal((await readDeliveryRecord()).consecutiveFailures, 1);
+  });
+
+  it("複数ジョブが同時に壊れても、1時間の上限を超えては送らない（洪水防止）", async () => {
+    for (let index = 0; index < HOURLY_SEND_LIMIT + 5; index++) {
+      await notifyJobFailure(`job-${index}`, new Error("壊れました"));
+    }
+    assert.equal(received.length, HOURLY_SEND_LIMIT);
+    // 送れなかった分は通知済みにならず、枠が空けば送り直される。
+    const last = (await readState())[`job-${HOURLY_SEND_LIMIT + 4}`];
+    assert.equal(last?.notifiedAt, null);
   });
 });
 

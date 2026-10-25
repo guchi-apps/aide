@@ -94,12 +94,12 @@ export const JOB_CATALOG = [
   {
     name: "printer-watch",
     description:
-      "3Dプリンター（Bambu Lab A1 mini）の状態を myroom の内部APIから読み、印刷の完了・停止・" +
-      "エラーが出た遷移だけをSignalyへ通知する。プリンターの電源が切れているなど値が古いときは" +
+      "3Dプリンター（Bambu Lab A1 mini）の状態を myroom の内部APIから読み、印刷の停止・" +
+      "エラーが出た遷移だけをDiscordへ通知する（完了は通知しない）。プリンターの電源が切れているなど値が古いときは" +
       "何もしない（古い値から遷移を作らない）。取得は myroom の公開URL経由のため、" +
       "サブPCの .env に AIDE_MYROOM_URL と AIDE_MYROOM_TOKEN が要る。",
     interval: "2分ごと",
-    // 2分間隔なので、5回ぶん飛んだら気づけるように10分。完了の通知が遅れるほど価値が下がる。
+    // 2分間隔なので、5回ぶん飛んだら気づけるように10分。停止・エラーの通知が遅れるほど価値が下がる。
     staleAfterMinutes: 10,
   },
 ] as const satisfies readonly JobInfo[];

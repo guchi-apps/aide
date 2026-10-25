@@ -145,7 +145,7 @@ describe("接続先の設定状況", () => {
     "AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET",
     "ZAIM_EMAIL",
     "ZAIM_PASSWORD",
-    "AIDE_SIGNALY_WEBHOOK_URL",
+    "AIDE_DISCORD_WEBHOOK_URL",
   ];
 
   /** 環境変数を退避して差し替え、必ず戻す。 */
@@ -181,7 +181,7 @@ describe("接続先の設定状況", () => {
       const worker = (await readConnectors()).filter((connector) => connector.side === "worker");
       assert.deepEqual(
         worker.map((connector) => connector.key),
-        ["zaim", "signaly"],
+        ["zaim", "discord"],
       );
       assert.equal(
         worker.every((connector) => connector.configured === null),

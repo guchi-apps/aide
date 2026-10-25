@@ -5,7 +5,7 @@ import { DATA_DIR } from "../core/paths.ts";
 /**
  * MCPへのアクセスの記録。
  *
- * Claudeアプリからの呼び出しは、これまでどこにも残らなかった。ジョブの失敗は Signaly へ飛び
+ * Claudeアプリからの呼び出しは、これまでどこにも残らなかった。ジョブの失敗は Discord へ飛び
  * （`worker/notify.ts`）、実行の記録はキャッシュに残る（`worker/record.ts`）のに、**MCPだけは
  * 「いつ・どのツールが呼ばれたか」を後から確かめる手段が無かった**（#116）。
  *

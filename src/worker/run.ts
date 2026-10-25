@@ -8,9 +8,9 @@ import { runZaimMoneySync } from "./jobs/zaim-money-sync.ts";
 import { runZaimRefresh } from "./jobs/zaim-refresh.ts";
 import { runZaimSync } from "./jobs/zaim-sync.ts";
 import {
+  clearJobFailure,
+  clearZaimSessionExpiry,
   notifyJobFailure,
-  notifyJobRecovered,
-  notifyZaimSessionRecovered,
   summarizeFailure,
 } from "./notify.ts";
 import { recordJobRun } from "./record.ts";
@@ -46,8 +46,8 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
  * Zaimのログインセッションを使うジョブ。
  *
  * **成功はセッションが有効であることの証拠**なので、他のZaimジョブに残っている失効の失敗は
- * その時点で解消している。ジョブ単位の復旧通知（`notifyJobRecovered`）では、12時間ごとの
- * `zaim-refresh` の失敗が30分ごとの `zaim-keep-alive` に直された場合を伝えられない（#191）。
+ * その時点で解消している。ジョブ単位の消去（`clearJobFailure`）では、12時間ごとの
+ * `zaim-refresh` の失効の記録が30分ごとの `zaim-keep-alive` に直されても残ってしまう（#191）。
  */
 const ZAIM_JOBS: readonly JobName[] = [
   "zaim-refresh",
@@ -69,16 +69,16 @@ const elapsed = (): number => Math.round((Date.now() - startedAtMs) / 100) / 10;
 try {
   const message = await RUNNERS[name as JobName]();
   console.log(`[${name}] ${message}（${elapsed()}秒）`);
-  // 直前まで失敗していた場合だけ復旧を通知する。通常の成功では何も送らない。
-  await notifyJobRecovered(name);
+  // 成功・復旧は通知しない（#702）。再発したとき改めて通知できるよう、失敗の記録だけ消す。
+  await clearJobFailure(name);
   // Zaimのジョブが成功したなら、他のZaimジョブの失効も直っている（#191）。
-  if (ZAIM_JOBS.includes(name as JobName)) await notifyZaimSessionRecovered(name);
+  if (ZAIM_JOBS.includes(name as JobName)) await clearZaimSessionExpiry(name);
   // 通知が流れて消えるのに対し、記録は残る。動作状況（/api/status → ops-dashboard）はこちらを読む。
   await recordJobRun({ job: name, ok: true, startedAt, seconds: elapsed(), message });
 } catch (cause) {
   // 失敗は握りつぶさず終了コードに出す。スケジューラ側から検知できるようにするため。
   console.error(`[${name}] 失敗:`, cause instanceof Error ? cause.message : cause);
-  // 終了コードは systemd に残るだけで誰にも届かないため、Signalyへも送る（#26）。
+  // 終了コードは systemd に残るだけで誰にも届かないため、Discordへも送る（#26・#702）。
   // 通知側は例外を投げない作りにしてあり、送れなくてもここの終了コードは変わらない。
   await notifyJobFailure(name, cause);
   // 通知と同じ理由（1行に切り詰め済み）を記録へも残す。記録側も例外を投げない。

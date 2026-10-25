@@ -72,7 +72,7 @@ before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  process.env["AIDE_SIGNALY_WEBHOOK_URL"] = `http://127.0.0.1:${address.port}/webhook`;
+  process.env["AIDE_DISCORD_WEBHOOK_URL"] = `http://127.0.0.1:${address.port}/webhook`;
 });
 
 after(async () => {
@@ -95,15 +95,24 @@ describe("evaluatePrinterStatus", () => {
     assert.equal((await readWatchState())?.state, "finished");
   });
 
-  it("印刷中→完了で1回だけ通知し、続けて呼んでも重ねて送らない", async () => {
+  it("印刷中→完了は通知せず、記録だけ進める", async () => {
     await evaluatePrinterStatus(status("printing"), NOW);
 
     const done = await evaluatePrinterStatus(status("finished"), NOW);
-    assert.match(done, /1件を通知/);
-    assert.equal(received.length, 1);
-    assert.match(received[0] ?? "", /印刷が完了/);
+    assert.match(done, /変化なし/);
+    assert.equal(received.length, 0);
+    assert.equal((await readWatchState())?.state, "finished");
+  });
 
-    const again = await evaluatePrinterStatus(status("finished"), NOW);
+  it("印刷中→失敗で1回だけ通知し、続けて呼んでも重ねて送らない", async () => {
+    await evaluatePrinterStatus(status("printing"), NOW);
+
+    const failed = await evaluatePrinterStatus(status("failed"), NOW);
+    assert.match(failed, /1件を通知/);
+    assert.equal(received.length, 1);
+    assert.match(received[0] ?? "", /印刷が停止/);
+
+    const again = await evaluatePrinterStatus(status("failed"), NOW);
     assert.match(again, /変化なし/);
     assert.equal(received.length, 1);
   });
@@ -111,15 +120,15 @@ describe("evaluatePrinterStatus", () => {
   it("鮮度が切れている間は何もせず、記録も進めない", async () => {
     await evaluatePrinterStatus(status("printing"), NOW);
 
-    // 電源が切れて更新が止まった。最後の値が「完了」でも遷移を作らない。
+    // 電源が切れて更新が止まった。最後の値が「失敗」でも遷移を作らない。
     for (const stale of [
-      offline("finished"),
+      offline("failed"),
       summarizePrinter(
-        snapshot({ connection: "collector_stale", online: false, stale: true, printer: null, lastKnown: printer("finished") }),
+        snapshot({ connection: "collector_stale", online: false, stale: true, printer: null, lastKnown: printer("failed") }),
         NOW,
       ),
       // myroom はまだ online と言っているが、AIDEの数え直しでは収集が止まっている。
-      summarizePrinter(snapshot({ lastUpdateAt: new Date(NOW.getTime() - 60 * 60_000).toISOString(), printer: printer("finished") }), NOW),
+      summarizePrinter(snapshot({ lastUpdateAt: new Date(NOW.getTime() - 60 * 60_000).toISOString(), printer: printer("failed") }), NOW),
     ]) {
       const message = await evaluatePrinterStatus(stale, NOW);
 
@@ -129,12 +138,12 @@ describe("evaluatePrinterStatus", () => {
     }
   });
 
-  it("切れている間に印刷が終わっていれば、復帰後の新しい値で完了を通知する", async () => {
+  it("切れている間に印刷が終わっていれば、復帰後の新しい値で停止を通知する", async () => {
     await evaluatePrinterStatus(status("printing"), NOW);
     await evaluatePrinterStatus(offline("printing"), NOW);
     assert.equal(received.length, 0);
 
-    await evaluatePrinterStatus(status("finished"), NOW);
+    await evaluatePrinterStatus(status("failed"), NOW);
     assert.equal(received.length, 1);
   });
 
@@ -148,22 +157,22 @@ describe("evaluatePrinterStatus", () => {
     await evaluatePrinterStatus(status("printing"), NOW);
 
     respondWith = 500;
-    await assert.rejects(evaluatePrinterStatus(status("finished"), NOW), /送れなかった/);
+    await assert.rejects(evaluatePrinterStatus(status("failed"), NOW), /送れなかった/);
     assert.equal((await readWatchState())?.state, "printing");
 
     respondWith = 204;
-    await evaluatePrinterStatus(status("finished"), NOW);
-    assert.equal((await readWatchState())?.state, "finished");
+    await evaluatePrinterStatus(status("failed"), NOW);
+    assert.equal((await readWatchState())?.state, "failed");
   });
 
   it("通知先が未設定の環境では、基準も動かさない", async () => {
-    const saved = process.env["AIDE_SIGNALY_WEBHOOK_URL"];
-    process.env["AIDE_SIGNALY_WEBHOOK_URL"] = "";
+    const saved = process.env["AIDE_DISCORD_WEBHOOK_URL"];
+    process.env["AIDE_DISCORD_WEBHOOK_URL"] = "";
     try {
       assert.match(await evaluatePrinterStatus(status(), NOW), /未設定/);
       assert.equal(await readWatchState(), null);
     } finally {
-      process.env["AIDE_SIGNALY_WEBHOOK_URL"] = saved;
+      process.env["AIDE_DISCORD_WEBHOOK_URL"] = saved;
     }
   });
 
@@ -184,16 +193,16 @@ describe("evaluatePrinterStatus", () => {
     assert.ok(!raw.includes("secret-model"));
   });
 
-  it("通知本文にジョブ名・進捗は載るが、接続情報は載らない", async () => {
+  it("通知本文に進捗は載るが、ジョブ名も接続情報も載らない", async () => {
     await evaluatePrinterStatus(status("printing"), NOW);
     const leaky = { serial: "01P00A000000000", accessCode: "12345678", host: "192.168.0.50" };
     await evaluatePrinterStatus(
-      status("finished", leaky as Partial<MyRoomPrinter>),
+      status("failed", leaky as Partial<MyRoomPrinter>),
       NOW,
     );
 
     assert.equal(received.length, 1);
-    assert.match(received[0] ?? "", /benchy\.3mf/);
+    assert.ok(!(received[0] ?? "").includes("benchy"), "通知本文に印刷物の名前が含まれている");
     for (const secret of Object.values(leaky)) {
       assert.ok(!(received[0] ?? "").includes(secret), `通知本文に ${secret} が含まれている`);
     }

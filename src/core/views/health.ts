@@ -95,7 +95,7 @@ export interface HealthConnector {
    *
    * **`worker` のものはこのサーバーからは判定できない。** 本番では worker がサブPC、
    * サーバーがVPSで動き、`.env` が別（`deploy.yml` がVPSへ書くのは `AIDE_*` の一部だけで、
-   * `ZAIM_*` と `AIDE_SIGNALY_WEBHOOK_URL` は含まれない）。サーバー側の環境変数を見て
+   * `ZAIM_*` と `AIDE_DISCORD_WEBHOOK_URL` は含まれない）。サーバー側の環境変数を見て
    * 「未設定」と表示すると、正しく動いていても常に未設定と出る。
    */
   side: "server" | "worker";
@@ -345,12 +345,12 @@ export async function readConnectors(options: { supabase?: SupabaseAuthConfig | 
       note: "POST /api/zaim/payment/web の中継先。落ちている間、asset-manager からのZaim登録は届かない。",
     },
     {
-      key: "signaly",
-      label: "Signaly（通知）",
+      key: "discord",
+      label: "Discord（異常通知）",
       side: "worker",
       configured: null,
       probeable: false,
-      note: "ジョブの失敗と復旧の通知先。worker（サブPC）から送る。送信専用。",
+      note: "ジョブの失敗とプリンター異常の通知先。worker（サブPC）から送る。送信専用。配送の失敗は data/worker/notify-delivery.json に残る。",
     },
   ];
 }
