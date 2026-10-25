@@ -54,6 +54,8 @@ export interface CreateEventInput {
   title: string;
   /** `YYYY-MM-DD`。 */
   date: string;
+  /** `YYYY-MM-DD`。日をまたぐ時刻予定の終了日。省略時は `date` と同じ日。 */
+  endDate?: string;
   /** `HH:MM`。`endTime` とセットでのみ指定できる。両方省略で終日。 */
   startTime?: string;
   endTime?: string;
@@ -87,6 +89,17 @@ export function normalizeCreateEventInput(
     return { error: "date は YYYY-MM-DD 形式の実在する日付で指定してください" };
   }
 
+  let endDate: string | undefined;
+  if (raw["endDate"] !== undefined) {
+    if (typeof raw["endDate"] !== "string" || !isRealDate(raw["endDate"])) {
+      return { error: "endDate は YYYY-MM-DD 形式の実在する日付で指定してください" };
+    }
+    if (raw["endDate"] < date) {
+      return { error: "endDate は date 以降の日付にしてください" };
+    }
+    endDate = raw["endDate"];
+  }
+
   const startTime = typeof raw["startTime"] === "string" ? raw["startTime"] : undefined;
   const endTime = typeof raw["endTime"] === "string" ? raw["endTime"] : undefined;
   if ((startTime === undefined) !== (endTime === undefined)) {
@@ -96,14 +109,19 @@ export function normalizeCreateEventInput(
         "（片方だけでは終日か時刻ありかが決まりません）",
     };
   }
+  if (startTime === undefined && endDate !== undefined) {
+    return { error: "endDate は startTime・endTime とセットで指定してください（終日の予定では使えません）" };
+  }
   if (startTime !== undefined && endTime !== undefined) {
     if (!TIME_KEY.test(startTime) || !TIME_KEY.test(endTime)) {
       return { error: "startTime・endTime は HH:MM 形式で指定してください" };
     }
-    if (endTime <= startTime) {
+    if ((endDate === undefined || endDate === date) && endTime <= startTime) {
       return { error: "endTime は startTime より後にしてください" };
     }
   }
+  // 同日を明示した endDate は送らない（DaySpan が未対応でも従来どおり通る）。
+  if (endDate === date) endDate = undefined;
 
   const location = typeof raw["location"] === "string" ? raw["location"].trim() : "";
   const calendarId = typeof raw["calendarId"] === "string" ? raw["calendarId"].trim() : "";
@@ -112,6 +130,7 @@ export function normalizeCreateEventInput(
     input: {
       title,
       date,
+      ...(endDate === undefined ? {} : { endDate }),
       ...(startTime === undefined ? {} : { startTime }),
       ...(endTime === undefined ? {} : { endTime }),
       ...(location ? { location } : {}),

@@ -94,6 +94,61 @@ describe("normalizeCreateEventInput", () => {
     });
     assert.deepEqual(result, { input: { title: "歯医者", date: "2026-09-10", location: "渋谷歯科" } });
   });
+
+  describe("endDate（日またぎ）", () => {
+    const base = { title: "宿泊", date: "2026-11-09" };
+
+    it("終了日が後なら、終了時刻が開始時刻より前でも1件として通す", () => {
+      const result = normalizeCreateEventInput({
+        ...base,
+        endDate: "2026-11-10",
+        startTime: "20:00",
+        endTime: "08:00",
+      });
+      assert.deepEqual(result, {
+        input: { ...base, endDate: "2026-11-10", startTime: "20:00", endTime: "08:00" },
+      });
+    });
+
+    it("endDate が date と同じなら同日扱いで、送信内容から endDate を落とす", () => {
+      const result = normalizeCreateEventInput({
+        ...base,
+        endDate: "2026-11-09",
+        startTime: "10:00",
+        endTime: "11:00",
+      });
+      assert.deepEqual(result, { input: { ...base, startTime: "10:00", endTime: "11:00" } });
+    });
+
+    it("同日で終了時刻が開始時刻以前なら拒否する（endDate 省略・同日指定の両方）", () => {
+      for (const extra of [{}, { endDate: "2026-11-09" }]) {
+        const result = normalizeCreateEventInput({ ...base, ...extra, startTime: "20:00", endTime: "08:00" });
+        assert.ok("error" in result);
+      }
+    });
+
+    it("終了日が開始日より前なら拒否する", () => {
+      const result = normalizeCreateEventInput({
+        ...base,
+        endDate: "2026-11-08",
+        startTime: "08:00",
+        endTime: "20:00",
+      });
+      assert.ok("error" in result);
+    });
+
+    it("実在しない endDate は拒否する", () => {
+      for (const endDate of ["2026-11-31", "2026/11/10", 20261110]) {
+        const result = normalizeCreateEventInput({ ...base, endDate, startTime: "20:00", endTime: "08:00" });
+        assert.ok("error" in result);
+      }
+    });
+
+    it("終日の予定（時刻なし）に endDate は付けられない", () => {
+      const result = normalizeCreateEventInput({ ...base, endDate: "2026-11-10" });
+      assert.ok("error" in result);
+    });
+  });
 });
 
 describe("readDaySpanWriteConfig", () => {
