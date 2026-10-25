@@ -99,7 +99,7 @@ bash ios/scripts/check-swift-imports.sh  # 明示importの漏れ
 ```
 Deploy to Production 成功（main）
   → ios-testflight-trigger.yml（薄い起動役）
-    → ios-testflight.yml: 判定 → 署名・ビルド・アップロード → ビルド処理待ち・内部グループ配布 → 印（タグ）→ Signaly通知
+    → ios-testflight.yml: 判定 → 署名・ビルド・アップロード → ビルド処理待ち・内部グループ配布 → 印（タグ）。失敗時だけ Discord へ通知
 ```
 
 - 判定は `node ios/scripts/ios-changes.mjs`（基準は最新のタグ `ios-testflight/<ビルド番号>`。印が無ければ初回として要配布）。

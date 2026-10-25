@@ -107,7 +107,6 @@ jobs:
       AIDE_GMAIL_CLIENT_ID: ${{ secrets.AIDE_GMAIL_CLIENT_ID }}
       AIDE_GMAIL_CLIENT_SECRET: ${{ secrets.AIDE_GMAIL_CLIENT_SECRET }}
       AIDE_GMAIL_REFRESH_TOKEN: ${{ secrets.AIDE_GMAIL_REFRESH_TOKEN }}
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
       AIDE_BASE_URL: ${{ vars.AIDE_BASE_URL }}
       AIDE_ASSET_MANAGER_URL: ${{ vars.AIDE_ASSET_MANAGER_URL }}
       AIDE_BOT_URL: ${{ vars.AIDE_BOT_URL }}
@@ -329,64 +328,39 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     needs: [tag, deploy]
-    if: always()
+    # 失敗だけを通知する。成功・キャンセルは送らない（#710）。
+    if: always() && (needs.tag.result == 'failure' || needs.deploy.result == 'failure')
     env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+      AIDE_DISCORD_WEBHOOK_URL: ${{ secrets.AIDE_DISCORD_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Determine workflow status
-        id: status
-        run: |
-          tag="${{ needs.tag.result }}"
-          deploy="${{ needs.deploy.result }}"
-          if [ "$tag" = "success" ] && [ "$deploy" = "success" ]; then
-            result=success
-          elif [ "$tag" = "cancelled" ] || [ "$deploy" = "cancelled" ]; then
-            result=cancelled
-          else
-            result=failure
-          fi
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-
-      - name: Signaly に通知
+      - name: Discord に通知
         env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: aide
           NOTIFY_KIND: デプロイ
-          NOTIFY_STATUS: ${{ steps.status.outputs.result }}
-        run: bash .github/scripts/signaly-notify.sh
+          NOTIFY_STATUS: failure
+        run: bash .github/scripts/discord-notify.sh
 
-  # リリース通知はCI・デプロイとは別のチャンネルへ送る（guchi-apps/issue-deck#2391）。
-  # 上の notify ジョブが送る「デプロイ」の通知は1日に何件も流れるため、月に数回のリリースが
-  # その中に埋もれる。宛先の出し分けは signaly-notify.sh が NOTIFY_KIND で行う。
+  # リリース（GitHub Release の作成）の失敗だけを通知する。成功は送らない（#710）。
+  # デプロイ自体の失敗は上の notify ジョブが送る。
   notify-release:
     runs-on: ubuntu-latest
     needs: [tag, deploy, release]
-    # release がスキップされた場合（deployが失敗し、GitHub Releaseを作っていない場合）は
-    # 通知するリリースが無い。deployの失敗そのものは notify ジョブが送る。
-    if: always() && needs.release.result != 'skipped'
+    if: always() && needs.release.result == 'failure'
     env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+      AIDE_DISCORD_WEBHOOK_URL: ${{ secrets.AIDE_DISCORD_WEBHOOK_URL }}
 
     steps:
-      # 通知スクリプトとリリース本文（.github/release-notes.md）を読むために要る。
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Signaly に通知
-        # 通知が届かないことでリリース済みのrunを赤くしない（guchi-apps/issue-deck#2237）。
-        continue-on-error: true
+      - name: Discord に通知
         env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
-          # リリース専用チャンネルのwebhook。**organization secretが未登録のあいだは空が渡り、
-          # スクリプトが従来のCI・デプロイ用チャンネルへフォールバックする**ので、
-          # 登録の順序を気にせず足してよい（#2391）。
-          SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
           NOTIFY_APP: aide
           NOTIFY_KIND: リリース
-          NOTIFY_STATUS: ${{ needs.release.result }}
+          NOTIFY_STATUS: failure
           NOTIFY_VERSION: ${{ needs.tag.outputs.tag }}
-        run: bash .github/scripts/signaly-notify.sh
+        run: bash .github/scripts/discord-notify.sh
