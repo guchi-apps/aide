@@ -7,18 +7,21 @@ import type { ZaimOnlineAccount } from "../core/connectors/zaim/types.ts";
 import { DATA_DIR } from "../core/paths.ts";
 
 /**
- * worker ジョブの失敗を Signaly（Webhook受信＋Web Push の通知ハブ）へ送る。
+ * worker ジョブの異常を Discord の Webhook へ送る（Signaly 廃止後の経路。#702）。
+ *
+ * **送るのは対応が要る異常だけ。** 成功・復旧・自己更新・自動で直る見込みのセッション失効は
+ * 送らない（記録は黙って消す）。復旧を送らない代わりに、同じ失敗は再び起きたら必ず通知される。
  *
  * ジョブは失敗すると終了コード1を返すが、systemd timer はそれを記録するだけで誰にも伝えない。
  * 実際に `aide-zaim-sync.service` の失敗に丸一日気づけなかったため、通知経路を足している（#26）。
  *
  * 方針は3つ。
  *
- * 1. **通知するのは失敗と復旧だけ。** 成功を毎回送ると `zaim-keep-alive`（毎時）だけで
- *    1日24件になり、肝心の失敗が埋もれる。
+ * 1. **通知するのは対応が要る失敗だけ。** 成功や復旧を送ると `zaim-keep-alive`（30分ごと）
+ *    だけで通知が溢れ、肝心の失敗が埋もれる。
  * 2. **同じ理由の連続失敗は6時間に1回まで。** セッション失効は手動ログインをやり直すまで
- *    直らないため、抑制しないと毎時同じ通知が届く。抑制で黙っていた障害が直ったときだけ
- *    「復旧」を1回送り、静かになった理由が復旧なのか抑制なのかを分かるようにする。
+ *    直らないため、抑制しないと毎回同じ通知が届く。さらに**全体で1時間に`HOURLY_SEND_LIMIT`件まで**
+ *    にして、複数ジョブが同時に壊れても通知洪水にしない（超えた分は送らず、次の実行で送り直す）。
  * 3. **通知の失敗でジョブを二重に失敗させない。** ここでの例外はすべて握りつぶし、
  *    ログに一行残すだけにする。Webhook URL は `channel_id` を含む認証情報なのでログに出さない。
  * 4. **通知に書く対応は、受け取った時点の実態と一致させる。** セッション失効はかつて手動
@@ -54,9 +57,8 @@ const SESSION_EXPIRED_SIGNATURE = "ZAIM_SESSION_EXPIRED";
  */
 export type SessionExpiryKind = "auto-pending" | "auto-failed" | "manual-only";
 
-// Signalyの色指定は10進整数（Discord形式）。docs/webhook.md 参照。
+// Discord の embed の色は10進整数。
 export const COLOR_FAILURE = 15548997; // #ed4245
-export const COLOR_RECOVERY = 5763719; // #57f287
 export const COLOR_WARNING = 16705372; // #fee75c
 
 /**
@@ -68,7 +70,7 @@ const PARTIAL_STATE_SUFFIX = ":stale-accounts";
 /** 通知に並べる口座名の上限。1フィールドの文字数制限に収める。 */
 const LISTED_ACCOUNTS_MAX = 20;
 
-/** ジョブごとの未解決の失敗。復旧通知を出したら消す。 */
+/** ジョブごとの未解決の失敗。成功したら消す。 */
 export interface FailureRecord {
   /** 失敗理由の署名。変わったら抑制せずに通知する。 */
   signature: string;
@@ -82,40 +84,14 @@ export interface FailureRecord {
 
 export type NotifyState = Record<string, FailureRecord>;
 
-interface SignalyField {
+interface DiscordField {
   name: string;
   value: string;
   inline?: boolean;
 }
 
-export interface SignalyPayload {
-  embeds: [{ title: string; description: string; color: number; fields: SignalyField[] }];
-}
-
-/** aide の自己更新が実際にあったときだけ送る成功通知。 */
-export function buildSelfUpdateSuccessPayload({
-  before,
-  after,
-  dependenciesInstalled,
-}: {
-  before: string;
-  after: string;
-  dependenciesInstalled: boolean;
-}): SignalyPayload {
-  return {
-    embeds: [
-      {
-        title: "✅ [AIDE] 自己更新",
-        description: "サブPCの aide を origin/develop へ更新し、Zaim Web版の受け口を再起動しました。",
-        color: COLOR_RECOVERY,
-        fields: [
-          { name: "更新前", value: before.slice(0, 7), inline: true },
-          { name: "更新後", value: after.slice(0, 7), inline: true },
-          { name: "依存の再導入", value: dependenciesInstalled ? "実行済み" : "不要", inline: true },
-        ],
-      },
-    ],
-  };
+export interface DiscordPayload {
+  embeds: [{ title: string; description: string; color: number; fields: DiscordField[] }];
 }
 
 export interface FailureSummary {
@@ -230,33 +206,15 @@ export function formatJst(at: Date): string {
   return `${formatted} JST`;
 }
 
-function formatDuration(ms: number): string {
-  const minutes = Math.max(0, Math.round(ms / 60_000));
-  if (minutes < 60) return `${minutes}分`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}時間${minutes % 60}分`;
-  return `${Math.floor(hours / 24)}日${hours % 24}時間`;
-}
-
 /** 手動ログインのやり直し方。文面を1か所に持つ。 */
 const MANUAL_LOGIN_ACTION =
   "サブPCの `~/apps/aide` で `node src/core/connectors/zaim/scripts/login.mjs` を実行し、手動でログインし直す";
 
-/** 失効の行き先ごとの、タイトル・本文・対応欄。 */
+/** 失効の行き先ごとの、タイトル・本文・対応欄。`auto-pending` は通知しないので持たない。 */
 const SESSION_EXPIRY_TEXT: Record<
-  SessionExpiryKind,
+  Exclude<SessionExpiryKind, "auto-pending">,
   { titleSuffix: string; description: string; action: string }
 > = {
-  "auto-pending": {
-    titleSuffix: "Zaimのセッションが失効（自動再ログイン待ち）",
-    description:
-      "Zaimのログインセッションが失効しています。**30分ごとの `zaim-keep-alive` が自動で" +
-      "再ログインを試みます。**直れば「Zaimのセッションが回復しました」が届くので、" +
-      "それまで手動の対応は要りません。",
-    action:
-      "まず待つ（次の `zaim-keep-alive` まで最大32分）。" +
-      `回復の通知が届かない、または再ログインの失敗が通知されたら、${MANUAL_LOGIN_ACTION}`,
-  },
   "auto-failed": {
     titleSuffix: "Zaimの再ログインが必要",
     description:
@@ -279,10 +237,10 @@ export function buildFailurePayload(input: {
   summary: FailureSummary;
   occurredAt: Date;
   record: FailureRecord;
-}): SignalyPayload {
+}): DiscordPayload {
   const { job, summary, occurredAt, record } = input;
 
-  const fields: SignalyField[] = [
+  const fields: DiscordField[] = [
     { name: "ジョブ", value: `\`${job}\``, inline: true },
     { name: "発生時刻", value: formatJst(occurredAt), inline: true },
     { name: "実行ホスト", value: hostname(), inline: true },
@@ -294,7 +252,10 @@ export function buildFailurePayload(input: {
       inline: false,
     });
   }
-  const expiry = summary.sessionExpiry ? SESSION_EXPIRY_TEXT[summary.sessionExpiry] : null;
+  const expiry =
+    summary.sessionExpiry && summary.sessionExpiry !== "auto-pending"
+      ? SESSION_EXPIRY_TEXT[summary.sessionExpiry]
+      : null;
   if (expiry) {
     // 何をすれば直るかまで書く。通知を見た時点で対応が決まるようにするため。
     fields.push({ name: "対応", value: expiry.action, inline: false });
@@ -308,41 +269,8 @@ export function buildFailurePayload(input: {
       {
         title: expiry ? `🔑 [AIDE] ${job}: ${expiry.titleSuffix}` : `❌ [AIDE] ${job} 失敗`,
         description: expiry ? expiry.description : summary.reason,
-        // 自動で直る見込みがあるものは赤で出さない。手動対応が要るものと同じ色にすると、
-        // どちらも「いま動くべき失敗」に見えてしまう。
-        color: summary.sessionExpiry === "auto-pending" ? COLOR_WARNING : COLOR_FAILURE,
+        color: COLOR_FAILURE,
         fields,
-      },
-    ],
-  };
-}
-
-export function buildRecoveryPayload(input: {
-  job: string;
-  record: FailureRecord;
-  recoveredAt: Date;
-}): SignalyPayload {
-  const { job, record, recoveredAt } = input;
-  const failedSince = new Date(record.firstFailedAt);
-
-  return {
-    embeds: [
-      {
-        title: `✅ [AIDE] ${job} 復旧`,
-        description: "失敗が続いていたジョブが成功しました。手動の対応は要りません。",
-        color: COLOR_RECOVERY,
-        fields: [
-          { name: "ジョブ", value: `\`${job}\``, inline: true },
-          { name: "復旧時刻", value: formatJst(recoveredAt), inline: true },
-          { name: "実行ホスト", value: hostname(), inline: true },
-          {
-            name: "失敗していた期間",
-            value: `${formatJst(failedSince)} から ${formatDuration(
-              recoveredAt.getTime() - failedSince.getTime(),
-            )}（${record.count}回）`,
-            inline: false,
-          },
-        ],
       },
     ],
   };
@@ -382,12 +310,89 @@ async function writeState(state: NotifyState): Promise<void> {
 }
 
 export function webhookUrl(): string | undefined {
-  const url = process.env["AIDE_SIGNALY_WEBHOOK_URL"]?.trim();
+  const url = process.env["AIDE_DISCORD_WEBHOOK_URL"]?.trim();
   return url ? url : undefined;
 }
 
-/** 送信できたかを返す。URLは `channel_id` を含む認証情報なのでログに出さない。 */
-export async function send(url: string, payload: SignalyPayload): Promise<boolean> {
+/**
+ * 配送の記録。**配送に失敗していることを、通知以外の経路で観測できるようにする**ためのもの
+ * （通知先が落ちていると、失敗を知らせる手段そのものが無い）。中身は時刻・件数・HTTPステータスだけで、
+ * Webhook URLも本文も残さない。`/api/status` のジョブ記録とは別に、ジャーナルの行と合わせて読む。
+ */
+export interface DeliveryRecord {
+  /** 直近1時間に送れた通知の時刻（ISO8601）。洪水防止の数え上げに使う。 */
+  sentAt: string[];
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  /** 直近の失敗の種別（`HTTP 500`・`TimeoutError` など）。URLは含めない。 */
+  lastFailureReason: string | null;
+  /** 成功を挟まない連続失敗の回数。 */
+  consecutiveFailures: number;
+}
+
+/** 全ジョブ合計で1時間に送る通知の上限。複数ジョブが同時に壊れたときの洪水を防ぐ。 */
+export const HOURLY_SEND_LIMIT = 10;
+
+const HOUR_MS = 60 * 60 * 1000;
+
+const EMPTY_DELIVERY: DeliveryRecord = {
+  sentAt: [],
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastFailureReason: null,
+  consecutiveFailures: 0,
+};
+
+export async function readDeliveryRecord(): Promise<DeliveryRecord> {
+  try {
+    const parsed = JSON.parse(await readFile(workerStatePath("notify-delivery.json"), "utf8")) as Partial<DeliveryRecord>;
+    return {
+      sentAt: Array.isArray(parsed.sentAt) ? parsed.sentAt.filter((at) => typeof at === "string") : [],
+      lastSuccessAt: parsed.lastSuccessAt ?? null,
+      lastFailureAt: parsed.lastFailureAt ?? null,
+      lastFailureReason: parsed.lastFailureReason ?? null,
+      consecutiveFailures: Number(parsed.consecutiveFailures) || 0,
+    };
+  } catch {
+    return { ...EMPTY_DELIVERY };
+  }
+}
+
+async function writeDeliveryRecord(record: DeliveryRecord): Promise<void> {
+  const path = workerStatePath("notify-delivery.json");
+  await mkdir(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  await writeFile(tmp, JSON.stringify(record, null, 2), "utf8");
+  await rename(tmp, path);
+}
+
+async function recordDelivery(update: (record: DeliveryRecord) => void): Promise<void> {
+  try {
+    const record = await readDeliveryRecord();
+    update(record);
+    await writeDeliveryRecord(record);
+  } catch {
+    // 記録の失敗で通知まで巻き込まない。
+  }
+}
+
+/**
+ * 送信できたかを返す。URLは認証情報なのでログに出さない。
+ *
+ * 1時間の上限（`HOURLY_SEND_LIMIT`）に達していたら**送らずに false を返す**。呼び出し側は
+ * 「送れなかった」として扱うので、通知済みにならず、枠が空いた次の実行で送り直される。
+ */
+export async function send(url: string, payload: DiscordPayload): Promise<boolean> {
+  const now = new Date();
+  const recent = (await readDeliveryRecord()).sentAt.filter(
+    (at) => now.getTime() - new Date(at).getTime() < HOUR_MS,
+  );
+  if (recent.length >= HOURLY_SEND_LIMIT) {
+    console.error(`[notify] 1時間あたりの通知上限（${HOURLY_SEND_LIMIT}件）に達したため送信を見送りました`);
+    return false;
+  }
+
+  let failure: string | null = null;
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -395,33 +400,32 @@ export async function send(url: string, payload: SignalyPayload): Promise<boolea
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
-    if (!response.ok) {
-      console.error(`[notify] Signalyへの通知に失敗しました: ${response.status}`);
-      return false;
-    }
-    return true;
+    if (!response.ok) failure = `HTTP ${response.status}`;
   } catch (cause) {
-    console.error(
-      `[notify] Signalyへの通知に失敗しました: ${cause instanceof Error ? cause.message : cause}`,
-    );
+    failure = cause instanceof Error ? cause.name : "Error";
+  }
+
+  if (failure !== null) {
+    console.error(`[notify] Discordへの通知に失敗しました: ${failure}`);
+    await recordDelivery((record) => {
+      record.sentAt = recent;
+      record.lastFailureAt = now.toISOString();
+      record.lastFailureReason = failure;
+      record.consecutiveFailures += 1;
+    });
     return false;
   }
-}
-
-/** 更新があったことだけを通知する。更新なしの毎時実行は通知しない。 */
-export async function notifySelfUpdateSuccess(args: {
-  before: string;
-  after: string;
-  dependenciesInstalled: boolean;
-}): Promise<void> {
-  const url = webhookUrl();
-  if (!url) return;
-  await send(url, buildSelfUpdateSuccessPayload(args));
+  await recordDelivery((record) => {
+    record.sentAt = [...recent, now.toISOString()];
+    record.lastSuccessAt = now.toISOString();
+    record.consecutiveFailures = 0;
+  });
+  return true;
 }
 
 /**
  * ジョブの失敗を通知する。**呼び出し側は失敗させない**（例外を投げない）。
- * `AIDE_SIGNALY_WEBHOOK_URL` が未設定なら何もしない（開発機で余計な通知を出さないため）。
+ * `AIDE_DISCORD_WEBHOOK_URL` が未設定なら何もしない（開発機で余計な通知を出さないため）。
  */
 export async function notifyJobFailure(job: string, cause: unknown): Promise<void> {
   const url = webhookUrl();
@@ -433,7 +437,9 @@ export async function notifyJobFailure(job: string, cause: unknown): Promise<voi
     const state = await readState();
     const { shouldNotify, record } = decideNotification(state[job], summary.signature, now);
 
-    if (shouldNotify) {
+    // 自動再ログインで直る見込みのセッション失効は、人の対応が要らないので送らない。
+    // 記録は残すので、直らずに `auto-failed` へ悪化したとき（署名が変わる）は届く。
+    if (shouldNotify && summary.sessionExpiry !== "auto-pending") {
       const sent = await send(url, buildFailurePayload({ job, summary, occurredAt: now, record }));
       // 送れなかったときは notifiedAt を進めない。次の実行で送り直す。
       if (sent) record.notifiedAt = now.toISOString();
@@ -470,7 +476,7 @@ export function buildStaleAccountsPayload(input: {
   accounts: readonly ZaimOnlineAccount[];
   occurredAt: Date;
   record: FailureRecord;
-}): SignalyPayload {
+}): DiscordPayload {
   const { job, accounts, occurredAt, record } = input;
 
   const listed = accounts.slice(0, LISTED_ACCOUNTS_MAX).map(formatLastUpdated);
@@ -478,7 +484,7 @@ export function buildStaleAccountsPayload(input: {
     listed.push(`ほか${accounts.length - listed.length}件`);
   }
 
-  const fields: SignalyField[] = [
+  const fields: DiscordField[] = [
     { name: "ジョブ", value: `\`${job}\``, inline: true },
     { name: "確認時刻", value: formatJst(occurredAt), inline: true },
     { name: "実行ホスト", value: hostname(), inline: true },
@@ -514,47 +520,19 @@ export function buildStaleAccountsPayload(input: {
   };
 }
 
-export function buildStaleAccountsRecoveryPayload(input: {
-  job: string;
-  record: FailureRecord;
-  recoveredAt: Date;
-}): SignalyPayload {
-  const { job, record, recoveredAt } = input;
-
-  return {
-    embeds: [
-      {
-        title: `✅ [AIDE] ${job}: 全口座が更新できました`,
-        description: "更新できていなかった口座が最新化されました。手動の対応は要りません。",
-        color: COLOR_RECOVERY,
-        fields: [
-          { name: "ジョブ", value: `\`${job}\``, inline: true },
-          { name: "確認時刻", value: formatJst(recoveredAt), inline: true },
-          { name: "実行ホスト", value: hostname(), inline: true },
-          {
-            name: "更新できていなかった口座",
-            value: `${record.signature}（${formatJst(new Date(record.firstFailedAt))}から${record.count}回）`,
-            inline: false,
-          },
-        ],
-      },
-    ],
-  };
-}
-
 /**
  * 一部の口座だけ更新できなかったことを通知する。**ジョブは成功扱いのまま。**
  *
  * ジョブ全体の失敗（`notifyJobFailure`）では拾えない。更新ボタンは押せているのに
  * 特定の口座だけ古い残高が残る状態は、Zaim側の連携設定を直すまで続くため、
- * 抑制の仕組みはそのまま流用する（同じ顔ぶれなら6時間に1回、直ったら1回だけ復旧を送る）。
+ * 抑制の仕組みはそのまま流用する（同じ顔ぶれなら6時間に1回。直ったら記録を消すだけで復旧は送らない）。
  *
  * **呼ぶかどうかは呼び出し側が決める。** `zaim-sync` はその日の最後の巡回でしか呼ばない
  * （#165 / #178。理由は `jobs/zaim-sync.ts` の `decideStaleAccountCheck`）。
  *
  * **判定していないときは呼んではいけない。** 空の配列は「更新漏れ0件」の意味で、記録があれば
- * 復旧として送って消してしまう。連携口座を1件も読めなかった場合を空配列として渡すと、
- * 直っていないのに「復旧しました」が届く（#178）。
+ * 記録を消してしまう。連携口座を1件も読めなかった場合を空配列として渡すと、
+ * 直っていないのに記録が消え、次の巡回で同じ通知がもう一度届く（#178）。
  *
  * 呼び出し側は失敗させない（例外を投げない）。
  */
@@ -572,10 +550,8 @@ export async function notifyStaleAccounts(
     const previous = state[key];
 
     if (accounts.length === 0) {
-      // 直ったときだけ1回送る。日常の「全部更新できた」では何も送らない。
+      // 直った。復旧は送らず、記録だけ消す（再発したら改めて通知する）。
       if (!previous) return;
-      if (!(await send(url, buildStaleAccountsRecoveryPayload({ job, record: previous, recoveredAt: now }))))
-        return;
       delete state[key];
       await writeState(state);
       return;
@@ -597,109 +573,45 @@ export async function notifyStaleAccounts(
   }
 }
 
-export function buildZaimSessionRecoveryPayload(input: {
-  succeededJob: string;
-  recovered: readonly { job: string; record: FailureRecord }[];
-  recoveredAt: Date;
-}): SignalyPayload {
-  const { succeededJob, recovered, recoveredAt } = input;
-
-  return {
-    embeds: [
-      {
-        title: "✅ [AIDE] Zaimのセッションが回復しました",
-        description:
-          `\`${succeededJob}\` が成功したため、失効していたZaimのログインセッションは回復しています。` +
-          "**手動でのログインし直しは要りません。**",
-        color: COLOR_RECOVERY,
-        fields: [
-          { name: "回復を確認したジョブ", value: `\`${succeededJob}\``, inline: true },
-          { name: "確認時刻", value: formatJst(recoveredAt), inline: true },
-          { name: "実行ホスト", value: hostname(), inline: true },
-          {
-            name: "失効で失敗していたジョブ",
-            value: recovered
-              .map(
-                ({ job, record }) =>
-                  `\`${job}\`: ${formatJst(new Date(record.firstFailedAt))} から${record.count}回`,
-              )
-              .join("\n"),
-            inline: false,
-          },
-          {
-            // 「回復した」だけだと、失敗していたジョブの結果まで取り戻せたように読める。
-            name: "補足",
-            value: "上のジョブ自体は次回の定期実行でやり直される（その回の結果は取得できていない）。",
-            inline: false,
-          },
-        ],
-      },
-    ],
-  };
-}
-
 /**
- * **ジョブをまたいでZaimのセッション回復を伝える。**
+ * **ジョブをまたいでZaimのセッション失効の記録を消す。** 通知は送らない。
  *
- * 復旧通知（`notifyJobRecovered`）はジョブ単位なので、`zaim-refresh`（12時間ごと）が失効で
- * 失敗し、その直後に `zaim-keep-alive`（30分ごと）が自動再ログインで直しても、`zaim-refresh`
- * の復旧は12時間後まで出ない。その間、通知を見た側には失敗だけが残る（#191）。
- *
- * Zaimのジョブが成功した時点でセッションは有効なので、**他のジョブに残っている失効の失敗は
- * 原因が解消済み**とみなして1回だけ回復を送り、記録を消す。消すのは失効の記録だけで、
- * 別の理由で失敗しているジョブの記録は残す。
+ * Zaimのジョブが成功した時点でセッションは有効なので、他のジョブに残っている失効の失敗は
+ * 原因が解消済み（#191）。記録を消しておけば、再び失効したときに抑制されず通知される。
+ * 消すのは失効の記録だけで、別の理由で失敗しているジョブの記録は残す。
  *
  * 呼び出し側は失敗させない（例外を投げない）。
  */
-export async function notifyZaimSessionRecovered(succeededJob: string): Promise<void> {
-  const url = webhookUrl();
-  if (!url) return;
-
+export async function clearZaimSessionExpiry(succeededJob: string): Promise<void> {
   try {
     const state = await readState();
-    const recovered = Object.entries(state)
-      .filter(([job]) => job !== succeededJob && !job.endsWith(PARTIAL_STATE_SUFFIX))
-      .filter(([, record]) => isSessionExpirySignature(record.signature))
-      .map(([job, record]) => ({ job, record }));
-    if (recovered.length === 0) return;
-
-    // 送れなかったら記録を残す。次にZaimのジョブが成功したときに送り直せる。
-    const sent = await send(
-      url,
-      buildZaimSessionRecoveryPayload({ succeededJob, recovered, recoveredAt: new Date() }),
+    const cleared = Object.entries(state).filter(
+      ([job, record]) =>
+        job !== succeededJob && !job.endsWith(PARTIAL_STATE_SUFFIX) && isSessionExpirySignature(record.signature),
     );
-    if (!sent) return;
-
-    for (const { job } of recovered) delete state[job];
+    if (cleared.length === 0) return;
+    for (const [job] of cleared) delete state[job];
     await writeState(state);
   } catch (cause) {
     console.error(
-      `[notify] セッション回復の通知でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
+      `[notify] セッション失効の記録の消去でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
     );
   }
 }
 
 /**
- * 未解決の失敗があった場合だけ復旧を通知する。日常の成功では何も送らない。
+ * ジョブが成功したので、そのジョブの未解決の失敗の記録を消す。**復旧は通知しない。**
  * 失敗時と同じく、ここでの問題でジョブを失敗させない。
  */
-export async function notifyJobRecovered(job: string): Promise<void> {
-  const url = webhookUrl();
-  if (!url) return;
-
+export async function clearJobFailure(job: string): Promise<void> {
   try {
     const state = await readState();
-    const record = state[job];
-    if (!record) return;
-
-    // 送れなかったら記録を残す。次に成功したときに送り直せる。
-    if (!(await send(url, buildRecoveryPayload({ job, record, recoveredAt: new Date() })))) return;
-
+    if (!state[job]) return;
     delete state[job];
     await writeState(state);
   } catch (cause) {
     console.error(
-      `[notify] 復旧通知の処理でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
+      `[notify] 失敗の記録の消去でエラーが出ました: ${cause instanceof Error ? cause.message : cause}`,
     );
   }
 }

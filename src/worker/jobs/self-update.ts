@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
-import { notifySelfUpdateSuccess } from "../notify.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,7 +72,6 @@ export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<Se
   // unit の配置と daemon-reload は配布元である subpc が一元管理する。
   await execute(setupScript, ["--only", "systemd"]);
   await execute("systemctl", ["--user", "restart", "aide-zaim-web.service"]);
-  await notifySelfUpdateSuccess({ before, after, dependenciesInstalled });
 
   return { updated: true, before, after, dependenciesInstalled };
 }
