@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { after, beforeEach, describe, it } from "node:test";
 import type { McpAccessEntry } from "./access-log.ts";
 import { issueDeckReviewAgentTools } from "./tools/issue-deck-review-agent.ts";
+import { kurashioGetKepcoHourlyTool, kurashioImportKepcoHourlyTool } from "./tools/kurashio-kepco-hourly.ts";
 import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { parseSupportedScopes } from "../auth/oauth.ts";
 
@@ -116,6 +117,27 @@ describe("MCPのやり取りの記録", () => {
       registry.register({ ...tool, handler: () => { calls++; return { content: [{ type: "text", text: "called" }] }; } });
       const instance = new McpTransport(registry, { name: "aide", version: "test" });
       for (const scopes of [[], [other], ["tasks:write"]]) {
+        const res = response();
+        await instance.handle(request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name } }), res, BASE_URL, scopes);
+        assert.match(res.body, /"isError":true/);
+        assert.equal(calls, 0, tool.name);
+      }
+      await instance.handle(request({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: tool.name } }), response(), BASE_URL, [required]);
+      assert.equal(calls, 1, tool.name);
+    }
+  });
+
+  it("kurashioの時間別kWhツールは読み取りscopeで登録できず、登録scopeで照会できない", async () => {
+    assert.deepEqual(parseSupportedScopes("kurashio-energy:read kurashio-energy:write kurashio-energy:admin"),
+      ["kurashio-energy:read", "kurashio-energy:write"]);
+    for (const tool of [kurashioGetKepcoHourlyTool, kurashioImportKepcoHourlyTool]) {
+      const required = tool.name === "kurashio_import_kepco_hourly" ? "kurashio-energy:write" : "kurashio-energy:read";
+      const other = required === "kurashio-energy:read" ? "kurashio-energy:write" : "kurashio-energy:read";
+      let calls = 0;
+      const registry = new ToolRegistry();
+      registry.register({ ...tool, handler: () => { calls++; return { content: [{ type: "text", text: "called" }] }; } });
+      const instance = new McpTransport(registry, { name: "aide", version: "test" });
+      for (const scopes of [[], [other], ["kurashio-bills:write"]]) {
         const res = response();
         await instance.handle(request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name } }), res, BASE_URL, scopes);
         assert.match(res.body, /"isError":true/);

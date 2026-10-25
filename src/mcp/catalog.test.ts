@@ -80,6 +80,7 @@ describe("MCPツールの登録簿", () => {
       "aide_room_press",
       "aide_aircon_control",
       "kurashio_import_utility_bill",
+      "kurashio_import_kepco_hourly",
     ]) {
       const properties = tool(name).inputSchema["properties"] as Record<string, unknown>;
       assert.ok(properties["dryRun"], `dryRun が無い: ${name}`);
@@ -101,6 +102,12 @@ describe("MCPツールの登録簿", () => {
       assert.deepEqual(registry.get(name)?.requiredScopes, ["kurashio-bills:read"], name);
     }
     assert.deepEqual(registry.get("kurashio_import_utility_bill")?.requiredScopes, ["kurashio-bills:write"]);
+  });
+
+  it("kurashioの時間別kWhの照会と登録はOAuth scopeでも分離する", () => {
+    const registry = buildToolRegistry();
+    assert.deepEqual(registry.get("kurashio_get_kepco_hourly")?.requiredScopes, ["kurashio-energy:read"]);
+    assert.deepEqual(registry.get("kurashio_import_kepco_hourly")?.requiredScopes, ["kurashio-energy:write"]);
   });
 
   it("分けた相手を説明文で名指ししている", () => {
