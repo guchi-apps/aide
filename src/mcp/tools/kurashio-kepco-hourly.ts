@@ -9,6 +9,7 @@ import {
   type KepcoHourlyRecord,
   type KepcoHourlyView,
   type KepcoImportPayload,
+  type KepcoMissingDay,
 } from "../../core/connectors/myroom/kepco-hourly.ts";
 import type { Tool, ToolResult } from "../types.ts";
 
@@ -23,6 +24,7 @@ import type { Tool, ToolResult } from "../types.ts";
  * - 空欄（公開前）の時間は送らない。0で埋めない
  * - 既存の値は書き換えない（kurashio が `conflict` を返す。訂正は本人が kurashio の画面で行う）
  * - 登録後に照会で読み戻し、送った全時間が一致したときだけ `created` を返す
+ * - 期間内に記録の無い時間が残れば `created` / `unchanged` にせず `incomplete` を返す（#690。必要な件数がそろうまで「登録済み」としない）
  * - 応答待ちが切れたら `unknown` と照会方法を返す（同じ内容の再送は `unchanged` で無害だが、先に確かめる）
  * - 結果には日付・時間・kWh・件数だけを載せる（トークンも個人情報も出さない）
  */
@@ -164,6 +166,36 @@ export function verifyRecords(view: KepcoHourlyView, sent: KepcoHourlyRecord[]):
   return mismatched;
 }
 
+function missingHours(missing: KepcoMissingDay[]): number {
+  return missing.reduce((sum, day) => sum + day.hours.length, 0);
+}
+
+/** 期間内に記録の無い時間が残っている。送った分が保存済みでも、期間としては登録済みにしない。 */
+function incomplete(
+  payload: KepcoImportPayload,
+  written: boolean,
+  missing: KepcoMissingDay[],
+  stored: { count: number; expectedCount: number } | null,
+): ToolResult {
+  return result(
+    {
+      status: "incomplete",
+      reason: written
+        ? "送った時間は保存・照合済みですが、抽出対象期間に記録の無い時間が残っています。登録済みとして扱わず、公開後に期間全体を送り直してください（保存済みの時間は unchanged になります）"
+        : "送った時間は既に保存済みで何も変更していませんが、抽出対象期間に記録の無い時間が残っています。登録済みとして扱わず、公開後に期間全体を送り直してください",
+      written,
+      periodStart: payload.period_start,
+      periodEnd: payload.period_end,
+      received: payload.records.length,
+      ...(stored ? { stored } : {}),
+      missingCount: missingHours(missing),
+      missing: missing.slice(0, 62),
+      lookup: lookupHint(payload),
+    },
+    true,
+  );
+}
+
 function lookupHint(payload: KepcoImportPayload) {
   return {
     tool: "kurashio_get_kepco_hourly",
@@ -210,7 +242,8 @@ export function createKurashioImportKepcoHourlyTool(deps: KurashioKepcoDeps = DE
       "入力は抽出対象期間（periodStart / periodEnd）と日別の24時間値（days）だけ。**CSVの先頭行（お客さま番号・住所・契約種別）は渡さない。** " +
       "date は CSV の MM/DD のままでよく、年は抽出対象期間から復元する。空欄（公開前）の時間は 0 にせず null にする（送られない）。" +
       "**既にある値は書き換えない。** 既存と違う時間が1つでもあれば conflict（何も書かず、既存値と送った値を返す。訂正は本人が kurashio の画面で手動CSV取込を行う）。" +
-      "全て同じなら unchanged、新しい時間があれば追加して照会で読み戻し、全時間が一致したときだけ created を返す（確かめられなければ unverified）。" +
+      "全て同じなら unchanged、新しい時間があれば追加して照会で読み戻し、全時間が一致し、期間内の全時間がそろったときだけ created を返す（確かめられなければ unverified。" +
+      "期間内に記録の無い時間が残れば、送った分が保存済みでも incomplete を返す。登録済みとして通知しない）。" +
       "unknown が返ったら再送せず、kurashio_get_kepco_hourly で件数・値を確かめる。" +
       "dryRun:true で登録せずに、送る件数と既存値との差を確かめられる。月次の確定請求の登録（kurashio_import_utility_bill）とは別。",
     requiredScopes: KURASHIO_ENERGY_WRITE,
@@ -296,6 +329,7 @@ export function createKurashioImportKepcoHourlyTool(deps: KurashioKepcoDeps = DE
         );
       }
       if (imported.status === "unchanged") {
+        if (missingHours(imported.missing) > 0) return incomplete(payload, false, imported.missing, null);
         return result({ status: "unchanged", reason: "同じ内容が既に登録されています。何も変更していません", received: payload.records.length, missing: imported.missing });
       }
 
@@ -320,13 +354,16 @@ export function createKurashioImportKepcoHourlyTool(deps: KurashioKepcoDeps = DE
           true,
         );
       }
+      const stored = { count: saved.view.count, expectedCount: saved.view.expectedCount, totalKwh: saved.view.totalKwh };
+      if (missingHours(saved.view.missing) > 0 || saved.view.count < saved.view.expectedCount) {
+        return incomplete(payload, true, saved.view.missing, stored);
+      }
       return result({
         status: "created",
         verified: true,
         created: imported.created,
         unchanged: imported.unchanged,
-        stored: { count: saved.view.count, expectedCount: saved.view.expectedCount, totalKwh: saved.view.totalKwh },
-        missing: imported.missing,
+        stored,
       });
     },
   };

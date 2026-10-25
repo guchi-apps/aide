@@ -525,7 +525,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `kurashio_utility_bill_contracts` | kurashio に記録済みの電気・ガスの契約候補（不透明な契約キー・契約種別・最新の請求月）。お客さま番号は返さない。scope `kurashio-bills:read`（詳細は[kurashioの月次請求の照会と登録](#kurashioの月次請求の照会と登録678)） |
 | `kurashio_get_utility_bill` | kurashio に保存済みの月次請求を1件、請求月か元メールの messageId で読む（found / not_found を区別）。scope `kurashio-bills:read` |
 | `kurashio_get_kepco_hourly` | kurashio に保存済みの関西電力の時間別kWhを期間で読む（件数・日別合計・各時間の値・`missing`）。scope `kurashio-energy:read`（詳細は[kurashioの関西電力 時間別kWhの照会と登録](#kurashioの関西電力-時間別kwhの照会と登録692)） |
-| `kurashio_import_kepco_hourly` | 時間別kWhを kurashio へ登録する。**書き込みツール**（既存の値は書き換えない。空欄は送らない。読み戻して全時間一致したときだけ created。`dryRun` で登録せず確認できる）。scope `kurashio-energy:write` |
+| `kurashio_import_kepco_hourly` | 時間別kWhを kurashio へ登録する。**書き込みツール**（既存の値は書き換えない。空欄は送らない。読み戻して全時間一致し、期間内の全時間がそろったときだけ created。欠けが残れば incomplete。`dryRun` で登録せず確認できる）。scope `kurashio-energy:write` |
 | `kurashio_import_utility_bill` | 電気・ガスの月次確定請求を1件 kurashio へ登録する。**書き込みツール**（既存の行は書き換えない。登録後に読み戻して一致したときだけ created。`dryRun` で登録せず確認できる）。scope `kurashio-bills:write` |
 | `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
@@ -1702,7 +1702,8 @@ src/core/views/printer.ts    3Dプリンターの正規化と鮮度判定（後�
 
 - **入力は抽出対象期間と日別24時間値だけ。** CSVの先頭行（お客さま番号・住所・契約種別）は受けず、ログにも出さない。`MM/DD` の年は抽出対象期間から復元する
 - **空欄（公開前）の時間は `null` にして送らない。** 0で埋めない。期間内で記録の無い時間は kurashio が `missing` で返す
-- 結果は `created`（読み戻しで全時間一致）／`unchanged`／`conflict`（何も書かれない）／`unverified`／`unknown`（保存されたか不明。再送せず `kurashio_get_kepco_hourly` で確かめる）。期間は最長62日・未来日不可・1時間0〜100kWh
+- 結果は `created`（読み戻しで全時間一致し、期間内の全時間がそろった）／`unchanged`／`incomplete`／`conflict`（何も書かれない）／`unverified`／`unknown`（保存されたか不明。再送せず `kurashio_get_kepco_hourly` で確かめる）。期間は最長62日・未来日不可・1時間0〜100kWh
+- **期間内に記録の無い時間が残れば `incomplete`**（#690）。送った分が保存済みでも、`created` / `unchanged` とせず `isError` にする。必要な件数が kurashio でそろうまで「登録済み」と通知しないため。公開後に期間全体を送り直せば、保存済みの時間は書き換えられず（`unchanged` の件数に入る）、欠けていた時間だけが入る
 - **リリース順:** kurashio#823 は kurashio の `develop` にあり、`main` には未反映の場合がある。未反映の間は `unsupported`（404）を返すだけで書き込まない。kurashio を先に本番へ出してから AIDE を出す
 
 ### kurashioの月次請求の照会と登録（#678）
