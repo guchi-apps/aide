@@ -38,6 +38,7 @@ final class LocationSharing: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     private static let enabledKey = "aide.location.enabled"
+    private static let hasSharedKey = "aide.location.hasShared"
     private static let lastSuccessKey = "aide.location.lastSuccessAt"
     private static let queueFile = "location-queue.json"
 
@@ -163,9 +164,36 @@ final class LocationSharing: NSObject, ObservableObject, CLLocationManagerDelega
             // 権限が足りない間は測位も送信も止め、「共有中」と見せない。
             stopMonitoring()
             status = .needsPermission(issue)
+            if Self.isRevocation(issue, hadSharing: UserDefaults.standard.bool(forKey: Self.hasSharedKey)) {
+                handlePermissionLost()
+            }
         } else {
+            UserDefaults.standard.set(true, forKey: Self.hasSharedKey)
             startMonitoring()
             status = .sharing
+        }
+    }
+
+    /// 有効化の途中（未決定・「使用中のみ」から「常に許可」への昇格待ち）は取り消しではない。
+    /// 拒否・制限・おおよその位置は常に取り消し、「使用中のみ」は一度でも共有できた後の降格だけを取り消しとみなす。
+    private static func isRevocation(_ issue: PermissionIssue, hadSharing: Bool) -> Bool {
+        switch issue {
+        case .notDetermined: return false
+        case .denied, .restricted, .approximateOnly: return true
+        case .whenInUseOnly: return hadSharing
+        }
+    }
+
+    /// OS側で権限が共有要件を満たさなくなった。端末側を止めたうえで、サーバーの保存位置とトークンの失効を依頼する。
+    /// 通信できなかったときはトークンを残し、通信が戻り次第あらためて依頼する（`flushOrRevoke`）。
+    private func handlePermissionLost() {
+        logger.error("位置の権限が共有に足りなくなったため停止しました")
+        stopLocally()
+        Task { @MainActor in
+            await revokeOnServer(keepTokenOnTransientFailure: true)
+            if tokens.load() == nil {
+                message = "位置情報の権限が取り消されたため、位置共有を停止し、サーバー側の位置を削除しました。"
+            }
         }
     }
 
@@ -293,6 +321,7 @@ final class LocationSharing: NSObject, ObservableObject, CLLocationManagerDelega
     /// 測位・送信を止め、再送キューを消す。トークンはサーバーへの失効依頼のために残す。
     private func stopLocally() {
         isEnabled = false
+        UserDefaults.standard.set(false, forKey: Self.hasSharedKey)
         stopMonitoring()
         queue.removeAll()
         Self.deleteQueueFile()
