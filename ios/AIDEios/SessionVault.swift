@@ -74,6 +74,8 @@ final class SessionVault: NSObject, WKHTTPCookieStoreObserver {
 
     /// ログアウト・失効時の全消去。Keychain・Cookie・localStorage等のサイトデータを残さない。
     func endSession() async {
+        // 位置共有はログインに紐づく。Cookieは既に無いので、位置専用の端末トークンでサーバー側の失効を依頼する。
+        await LocationSharing.shared.sessionEnded()
         removeStoredSession()
         hasSeenSession = false
         lastSavedValue = nil

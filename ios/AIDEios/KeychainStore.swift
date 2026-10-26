@@ -71,6 +71,47 @@ struct KeychainStore {
         }
     }
 
+    /// 端末ロック中のバックグラウンド実行からも読める保存（初回ロック解除後〜）。認証は要らず、バックアップ・他端末への移行には含まれない。
+    /// セッションCookieのような強い権限の値には使わない（位置送信専用トークン用）。
+    func saveReadableInBackground(_ data: Data, account: String) throws {
+        try delete(account: account)
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: data,
+        ]
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// `saveReadableInBackground`で保存した値を、認証なしで読む。項目が無いときは`nil`。
+    func loadReadableInBackground(account: String) throws -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else { throw KeychainError.invalidData }
+            return data
+        case errSecItemNotFound:
+            return nil
+        default:
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
     /// 項目が無くても成功扱い。削除に認証は要らない。
     func delete(account: String) throws {
         let query: [String: Any] = [

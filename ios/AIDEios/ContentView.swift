@@ -27,6 +27,8 @@ struct ContentView: View {
     @EnvironmentObject private var router: DeepLinkRouter
     @State private var authenticationError = ""
     @State private var showsAuthenticationError = false
+    @ObservedObject private var location = LocationSharing.shared
+    @State private var showsLocationSettings = false
 
     var body: some View {
         ZStack {
@@ -46,6 +48,26 @@ struct ContentView: View {
                 Text(authenticationError)
             }
 
+            // 位置共有の設定を開く小さなボタン。ロック解除後だけ出す。
+            if lock.isUnlocked {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Button {
+                            showsLocationSettings = true
+                        } label: {
+                            Image(systemName: location.status == .sharing ? "location.fill" : "location")
+                                .padding(10)
+                                .background(.regularMaterial, in: Circle())
+                        }
+                        .accessibilityLabel("位置共有の設定")
+                        Spacer()
+                    }
+                    .padding(.leading, 12)
+                    .padding(.bottom, 80)
+                }
+            }
+
             // ロック中と、アプリ切り替え画面に映る間（非アクティブ時）はAIDEの画面を隠す。
             if !lock.isUnlocked || scenePhase != .active {
                 LockView(
@@ -61,8 +83,12 @@ struct ContentView: View {
         .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
             if let url = activity.webpageURL { router.handle(url) }
         }
+        .sheet(isPresented: $showsLocationSettings) {
+            LocationSettingsView(sharing: location)
+        }
         .onChange(of: scenePhase) { _, phase in
             lock.scenePhaseChanged(phase)
+            if phase == .active { location.becameActive() }
         }
     }
 }

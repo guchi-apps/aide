@@ -43,6 +43,14 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>AIDEを開くときの本人確認にFace IDを使用します。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>位置共有をオンにしている間、移動を検知したときにこのiPhoneの位置をAIDEへ送ります。アプリを開いていなくても送るため「常に許可」が必要です。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>位置共有をオンにすると、このiPhoneの位置をAIDEへ送ります。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
