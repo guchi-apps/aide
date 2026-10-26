@@ -11,6 +11,11 @@ import SwiftUI
 struct AIDEiosApp: App {
     private let router = DeepLinkRouter.shared
 
+    init() {
+        // 移動イベントによるバックグラウンド再起動でも、ここで監視を張り直す。
+        LocationSharing.shared.resume()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
