@@ -2,7 +2,8 @@
 //  LocationAPI.swift
 //  AIDEios
 //
-//  位置共有のHTTPS呼び出し（#715の契約）と、位置専用トークンの保存。
+//  位置共有のHTTPS呼び出し（#715の契約。`src/api/location.ts`）と、位置専用トークンの保存。
+//  送信本文は latitude / longitude / horizontalAccuracyM（メートル）/ measuredAt（タイムゾーン付きISO 8601）の4項目だけ。
 //    POST /api/location/enable   ログインCookieで認証。位置送信専用の端末トークンを1回だけ返す
 //    POST /api/location          端末トークン（Bearer）で認証。座標・水平精度・測位時刻を受け取る
 //    POST /api/location/disable  端末トークンで認証。トークンの失効と保存済み位置の削除
@@ -56,13 +57,13 @@ struct LocationAPI {
         struct Body: Encodable {
             let latitude: Double
             let longitude: Double
-            let horizontalAccuracy: Double
+            let horizontalAccuracyM: Double
             let measuredAt: String
         }
         let body = Body(
             latitude: fix.latitude,
             longitude: fix.longitude,
-            horizontalAccuracy: fix.horizontalAccuracy,
+            horizontalAccuracyM: fix.horizontalAccuracy,
             measuredAt: Self.timestamp(fix.measuredAt)
         )
         request.httpBody = try JSONEncoder().encode(body)
