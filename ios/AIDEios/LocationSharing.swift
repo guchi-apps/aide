@@ -174,14 +174,11 @@ final class LocationSharing: NSObject, ObservableObject, CLLocationManagerDelega
         }
     }
 
-    /// 有効化の途中（未決定・「使用中のみ」から「常に許可」への昇格待ち）は取り消しではない。
-    /// 拒否・制限・おおよその位置は常に取り消し、「使用中のみ」は一度でも共有できた後の降格だけを取り消しとみなす。
+    /// 有効化の途中（未決定・拒否・「使用中のみ」からの昇格待ち）は取り消しではない。
+    /// 一度でも共有できた（＝サーバーに位置が残りうる）後で権限が足りなくなった場合だけ取り消しとみなす。
     private static func isRevocation(_ issue: PermissionIssue, hadSharing: Bool) -> Bool {
-        switch issue {
-        case .notDetermined: return false
-        case .denied, .restricted, .approximateOnly: return true
-        case .whenInUseOnly: return hadSharing
-        }
+        guard hadSharing else { return false }
+        return issue != .notDetermined
     }
 
     /// OS側で権限が共有要件を満たさなくなった。端末側を止めたうえで、サーバーの保存位置とトークンの失効を依頼する。
@@ -189,7 +186,11 @@ final class LocationSharing: NSObject, ObservableObject, CLLocationManagerDelega
     private func handlePermissionLost() {
         logger.error("位置の権限が共有に足りなくなったため停止しました")
         stopLocally()
+        // disable() や enable() の最中は、その処理側が後始末するので並行して失効を送らない。
+        guard !isWorking else { return }
+        isWorking = true
         Task { @MainActor in
+            defer { isWorking = false }
             await revokeOnServer(keepTokenOnTransientFailure: true)
             if tokens.load() == nil {
                 message = "位置情報の権限が取り消されたため、位置共有を停止し、サーバー側の位置を削除しました。"
