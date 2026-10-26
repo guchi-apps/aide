@@ -105,6 +105,7 @@ export const CALLERS: Caller[] = [
       "aide_room_press",
       "aide_aircon_control",
       "aide_weather",
+      "aide_current_location",
       "aide_schedule",
       "aide_tasks",
       "aide_get_task",
@@ -159,6 +160,13 @@ export const CALLERS: Caller[] = [
       "aide_save_daily_brief",
       "aide_research_desk_import_weekly_report",
     ],
+  },
+  {
+    id: "aide-ios",
+    name: "AIDE iOS",
+    via: "API",
+    what: "iPhoneの位置を共有する（共有オン時だけ・最新の1件）",
+    uses: ["/api/location", "/api/location/enable", "/api/location/disable"],
   },
   {
     id: "dot",

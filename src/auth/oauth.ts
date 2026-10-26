@@ -37,6 +37,8 @@ export const KURASHIO_ENERGY_WRITE_SCOPE = "kurashio-energy:write";
 /** YoteiFlowの移動（#707）。読戻しと登録は別の承認単位にする。 */
 export const TRAVEL_READ_SCOPE = "travel:read";
 export const TRAVEL_WRITE_SCOPE = "travel:write";
+/** 現在地の最終測位（#715）。読み取り専用。位置は書き込みscopeを持たず、端末トークンだけが書ける。 */
+export const LOCATION_READ_SCOPE = "location:read";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
@@ -50,6 +52,7 @@ const SUPPORTED_SCOPES = new Set([
   KURASHIO_ENERGY_WRITE_SCOPE,
   TRAVEL_READ_SCOPE,
   TRAVEL_WRITE_SCOPE,
+  LOCATION_READ_SCOPE,
 ]);
 
 /**
