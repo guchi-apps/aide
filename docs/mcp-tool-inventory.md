@@ -60,6 +60,7 @@
 | `aide_delete_event` | 予定を消す | C B | **書** | DaySpan | DaySpan | 未実測 | 小 | 新設（#493）。dryRun・タイトル一致を保つ |
 | `aide_create_travel` | YoteiFlowの移動を登録 | C B | **書** | YoteiFlow | YoteiFlow | 未実測 | 小 | 新設（#707）。scope `travel:write`。idempotencyKey必須・dryRunあり。通常予定は作らない |
 | `aide_get_travel` | 移動を読み戻す | C B | 読 | YoteiFlow | YoteiFlow | 未実測 | 小 | 新設（#707）。scope `travel:read` |
+| `aide_current_location` | iPhoneが最後に共有した位置 | C B | 読 | AIDE（data/location.json） | AIDE iOS | 未実測 | 小 | 新設（#715）。scope `location:read`。fresh/stale/unavailable を返し、未共有・期限切れは座標なし |
 | `aide_dev_status` | 開発の俯瞰 | C B | 読 | GitHub | GitHub | 1.3KB | 約9KB（20リポジトリ） | 維持。1リポジトリ約0.45KB。`aide_repo_status` と問いを分けてあり、絞り込みは呼び出し側の選択で足りる |
 | `aide_repo_status` | 1リポジトリの詳細 | C B | 読 | GitHub | GitHub | 1.1KB | 約1.8KB | 維持 |
 | `aide_repo_labels` | 起票用ラベル | C B | 読 | GitHub | GitHub | 0.8KB | 未実測 | 維持（`aide_create_issue` の候補） |

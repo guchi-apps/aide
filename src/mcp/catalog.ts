@@ -18,6 +18,7 @@ import {
 } from "./tools/notifications.ts";
 import { hostStatusTool, serviceQuotasTool, uptimeMonitorsTool } from "./tools/ops.ts";
 import { connectionPermissionsTool } from "./tools/connection-permissions.ts";
+import { currentLocationTool } from "./tools/location.ts";
 import { pingTool } from "./tools/ping.ts";
 import { printerStatusTool } from "./tools/printer.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
@@ -93,6 +94,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(roomPressTool);
   // エアコンの操作（#316）。読み取り（aide_aircon_status）と分けている（照明・Zaimと同じ理由）。
   registry.register(airconControlTool);
+  // 現在地の最終測位（#715）。専用scope `location:read`。保存位置の書き込みはMCPには置かない。
+  registry.register(currentLocationTool);
   registry.register(weatherTool);
   registry.register(scheduleTool);
   // 正式なNotionタスクはYoteiFlowの専用APIだけを通す。読み取りと書き込みはOAuth scopeも別。

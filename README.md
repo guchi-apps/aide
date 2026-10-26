@@ -3416,3 +3416,43 @@ Claudeは `Anthropic/Toolbox` と `Anthropic/ClaudeAI` の2クライアントで
 `` `process.env["AIDE_GMAIL_*"]` `` のように `process.env["..."]` の形で書くと、正規表現が
 `*` の手前までを1つの名前として拾い、存在しない `AIDE_GMAIL_` の配線漏れとして誤検出する。
 コメントでは `AIDE_GMAIL_*` を直接参照する、のように地の文で書く。
+
+## 位置共有（iOS → AIDE → MCP、#715）
+
+iPhoneの AIDE iOS が測位を送り、AIDEは**最新の1件だけ**を `data/location.json`（0600・gitignore済み）へ置く。
+Discord等で「現在地は？」と聞かれたとき、MCP `aide_current_location` が**最後に測定された位置**を返す。
+履歴・移動経路・通知・他者への共有は持たない。**共有は初期オフ**で、端末が明示的にオンにしたときだけ動く。
+
+### 契約（iOS側の実装は #716）
+
+| 操作 | 呼び方 | 認証 |
+|---|---|---|
+| オン | `POST /api/location/enable`（JSON） | 画面ログインのセッション。応答の `token`（`aloc_...`）は**この1回だけ**。Keychainへ保存する。以前のトークンと保存位置は破棄される |
+| 送信 | `POST /api/location` | `Authorization: Bearer <端末トークン>` |
+| オフ | `POST /api/location/disable`（JSON） | 端末トークンまたは画面ログインのセッション |
+
+送信本文: `{"latitude": 35.0, "longitude": 135.0, "horizontalAccuracyM": 20, "measuredAt": "2026-11-01T02:59:00+09:00"}`（`measuredAt` はタイムゾーン付きISO 8601。これ以外の項目は400）。
+応答は `{"ok":true,"applied":true}`。**測位時刻**で新旧を決めるため、古い測位・同じ測位の再送は `applied:false`（`reason`: `older` / `duplicate`）で200になる（オフライン後の再送で詰まらない）。
+400 = 範囲外・未来（2分超）・24時間より古い・精度が不正、401 = トークン不正または共有オフ、413 = 2KB超、415 = JSON以外、429 = 1分30回超またはロック中。
+
+### 保存期間・鮮度（仮の既定値。`src/core/location/types.ts` の定数）
+
+- 保存期間 `RETENTION_MS` = 24時間（測位時刻から）。超えた位置は読み出し時に削除し、座標を返さない
+- 鮮度 `FRESH_MS` = 15分。以内は `fresh`、超えて保存期間内は `stale`（経過秒つきで返す）、それ以外は `unavailable`
+- **これらは利用者の確認前の仮置き。有効化の前に確認して定数を直す**
+
+### MCP と権限
+
+`aide_current_location` は専用 scope `location:read` が要る。既存の接続は再同意しても、クライアントが `location:read` を明示して要求しない限り付与されない（`parseSupportedScopes`）。書き込み用scopeはMCPに無く、位置を書けるのは端末トークンだけ。接続の権限は `aide_connection_permissions` で確かめられる。
+
+### 停止・失効の手順
+
+- 端末から: アプリが `POST /api/location/disable` を呼ぶ（トークン失効と保存位置の削除が同時に起きる）
+- 手元から: 画面にログインした状態で `disable` を呼ぶか、サーバーで `data/location.json` を削除する（削除すると共有は「オフ」に戻り、トークンも使えなくなる）
+- 再度オンにするとトークンが作り直され、古いトークンは使えなくなる
+
+### ログ・保存の扱い
+
+- 座標・トークンはアクセスログ・例外・テストの出力に出さない（失敗は固定の文言だけを記録する。トークンはSHA-256のみ保存）
+- 通信はHTTPS（本番のApache/Cloudflare配下）。保存は平文のJSON（`data/` は gitignore 済み）。**VPS側のバックアップに `data/` が含まれるかは、このリポジトリからは確認できていない（未確認）。有効化の前に vps リポジトリ側で確かめ、含まれるなら除外する**
+- 実機から送信→保存→MCPで読み戻す実証は、Xcodeのある環境で行う（このリポジトリのCIでは実施しない）。端末が送らない間はリアルタイム性を保証しない
