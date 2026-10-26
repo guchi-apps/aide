@@ -5,6 +5,7 @@ import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { DEV_AUTH_DISABLED_CLIENT_ID } from "./mcp/types.ts";
+import { handleLocation } from "./api/location.ts";
 import { handleWorkReports } from "./api/work-reports.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
@@ -36,6 +37,7 @@ import { handleAasa } from "./web/aasa.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
 import {
+  currentSession,
   handleStatusAppAuthConsume,
   handleStatusAppAuthStart,
   handleStatusAuthCallback,
@@ -227,6 +229,13 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
+  // ---- 位置共有（#715） ----
+  // iOSアプリが端末トークンで測位を送る口と、共有の有効化・停止。MCPのOAuthとは別系統。
+  if (path === "/api/location" || path === "/api/location/enable" || path === "/api/location/disable") {
+    await handleLocation(req, res, { hasSession: async (r) => (await currentSession(r, loginOptions)) !== null });
+    return;
+  }
+
   // ---- dotの作業報告の読み取りAPI（#609） ----
   // StatusHubが保存済みの報告を読む。MCPの aide_work_reports と同じ正本。専用シークレットで認証する。
   if (path === "/api/work-reports") {
@@ -317,7 +326,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       res,
       baseUrl,
       access === "disabled"
-        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write"]
+        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read"]
         : (access.scopes ?? []),
       access === "disabled" ? DEV_AUTH_DISABLED_CLIENT_ID : access.clientId,
     );

@@ -211,6 +211,22 @@ export const ENDPOINTS: FeatureItem[] = [
       "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/api/status と同じ共有シークレットで認証する。",
   },
   {
+    name: "/api/location",
+    meta: "POST",
+    description:
+      "AIDE iOSが測位（緯度経度・水平精度・測位時刻）を送る口。位置共有の端末トークンだけで認証し、最新の1件だけ保存する。古い測位・同じ測位の再送は無視（200）。本文は2KBまで、1分30回まで。座標はログに出さない。",
+  },
+  {
+    name: "/api/location/enable",
+    meta: "POST",
+    description: "位置共有をオンにして端末トークンを1回だけ返す。画面ログインのセッションが要る。以前のトークンと保存位置は破棄する。",
+  },
+  {
+    name: "/api/location/disable",
+    meta: "POST",
+    description: "位置共有をオフにする。端末トークンまたは画面ログインで認証し、トークン失効と保存位置の削除を同時に行う。",
+  },
+  {
     name: "/api/work-reports",
     meta: "GET",
     description:

@@ -18,6 +18,7 @@ import {
 } from "./tools/notifications.ts";
 import { hostStatusTool, serviceQuotasTool, uptimeMonitorsTool } from "./tools/ops.ts";
 import { connectionPermissionsTool } from "./tools/connection-permissions.ts";
+import { currentLocationTool } from "./tools/location.ts";
 import { pingTool } from "./tools/ping.ts";
 import { printerStatusTool } from "./tools/printer.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
@@ -33,6 +34,7 @@ import {
   unskipTaskTool,
   updateTaskTool,
 } from "./tools/tasks.ts";
+import { createTravelTool, getTravelTool } from "./tools/travels.ts";
 import { utilityBillsTool } from "./tools/utility-bills.ts";
 import { kurashioGetKepcoHourlyTool, kurashioImportKepcoHourlyTool } from "./tools/kurashio-kepco-hourly.ts";
 import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
@@ -92,6 +94,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(roomPressTool);
   // エアコンの操作（#316）。読み取り（aide_aircon_status）と分けている（照明・Zaimと同じ理由）。
   registry.register(airconControlTool);
+  // 現在地の最終測位（#715）。専用scope `location:read`。保存位置の書き込みはMCPには置かない。
+  registry.register(currentLocationTool);
   registry.register(weatherTool);
   registry.register(scheduleTool);
   // 正式なNotionタスクはYoteiFlowの専用APIだけを通す。読み取りと書き込みはOAuth scopeも別。
@@ -108,6 +112,9 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(createEventTool);
   registry.register(updateEventTool);
   registry.register(deleteEventTool);
+  // YoteiFlowの移動（#707）。通常予定の作成では代替しない。読戻しと登録はscopeも別。
+  registry.register(createTravelTool);
+  registry.register(getTravelTool);
   // 開発状況は俯瞰・1リポジトリの詳細・起票用ラベルで分ける（#373）。
   registry.register(devStatusTool);
   registry.register(repoStatusTool);
