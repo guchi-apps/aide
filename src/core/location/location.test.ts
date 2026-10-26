@@ -90,7 +90,10 @@ describe("LocationStore", () => {
     assert.equal((await store.current(new Date(NOW.getTime() + FRESH_MS + 60_000))).status, "stale");
     const later = new Date(NOW.getTime() + RETENTION_MS + 120_000);
     assert.deepEqual(await store.current(later), { status: "unavailable", reason: "expired" });
-    assert.ok(!(await readFile(path, "utf8")).includes("35"));
+    // ランダムなハッシュやIDに "35" が偶然含まれうるため、文字列検索ではなく構造で確かめる。
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    assert.equal(saved.location, null);
+    assert.ok(!/"latitude"|"longitude"/.test(JSON.stringify(saved)));
   });
   it("disable でファイルごと消え、座標が残らず、トークンも失効する", async () => {
     const { store, path } = await tempStore();
