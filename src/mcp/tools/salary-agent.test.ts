@@ -56,7 +56,7 @@ describe("入力の検証", () => {
   it("PDFでないもの・大きすぎるもの・base64でないものは送らない", () => {
     assert.equal(parsePdf(Buffer.from("hello world!").toString("base64")).ok, false);
     assert.equal(parsePdf("not base64!!").ok, false);
-    assert.equal(parsePdf(Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(1_000_001)]).toString("base64")).ok, false);
+    assert.equal(parsePdf(Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(700_000)]).toString("base64")).ok, false);
     assert.equal(parsePdf(PDF).ok, true);
   });
 

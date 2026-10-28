@@ -25,8 +25,12 @@ import type { Tool, ToolResult } from "../types.ts";
 export const SALARY_AGENT_READ = ["salary-agent:read"] as const;
 export const SALARY_AGENT_WRITE = ["salary-agent:write"] as const;
 
-/** PDF本体の上限（デコード後）。給与明細は数十〜数百KBで、これを超えるものは明細ではないとみなす。 */
-export const MAX_PDF_BYTES = 1_000_000;
+/**
+ * PDF本体の上限（デコード後）。MCPの受け口はリクエスト全体を1 MiBで打ち切り（`transport.ts` の `MAX_BODY_BYTES`）、
+ * base64は約1.33倍になる。700KBなら base64 で約933KBで、トークンなどの他の引数を足しても収まる。
+ * 超えるPDFはツールに届く前に弾かれるので、ここで先に断って手動画面へ案内する。
+ */
+export const MAX_PDF_BYTES = 700_000;
 const MAX_ID_LENGTH = 255;
 const MAX_TOKEN_LENGTH = 4096;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -95,7 +99,7 @@ export function parsePdf(value: unknown): { ok: true; pdfBase64: string } | { ok
   if (!pdfBase64) return { ok: false, reason: "pdfBase64 は必須です（取得した添付PDFをbase64で渡してください）" };
   if (!BASE64.test(pdfBase64) || pdfBase64.length % 4 !== 0) return { ok: false, reason: "pdfBase64 が正しいbase64ではありません" };
   const bytes = Buffer.from(pdfBase64, "base64");
-  if (bytes.length > MAX_PDF_BYTES) return { ok: false, reason: `PDFが大きすぎます（上限${MAX_PDF_BYTES}バイト）。給与明細の添付か確かめてください` };
+  if (bytes.length > MAX_PDF_BYTES) return { ok: false, reason: `PDFが大きすぎます（上限${MAX_PDF_BYTES}バイト）。給与明細の添付か確かめ、大きい場合はAsset Managerの手動画面（/salaries/new）で取り込んでください` };
   if (bytes.subarray(0, 5).toString("latin1") !== "%PDF-") return { ok: false, reason: "添付がPDFではありません。給与明細のPDFか確かめてください" };
   return { ok: true, pdfBase64 };
 }
