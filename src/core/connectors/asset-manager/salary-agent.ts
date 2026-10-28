@@ -6,10 +6,12 @@ import { DEFAULT_ASSET_MANAGER_URL } from "./index.ts";
  *
  * | Asset Manager のAPI | 用途 |
  * |---|---|
- * | `POST /api/salaries/agent/preview` | PDFを解析して確認情報を返す（保存しない） |
- * | `POST /api/salaries/agent/commit` | 本人の承認後に1件だけ保存する |
+ * | `POST /api/salaries/agent/preview` | PDFを解析して確認情報を返す（保存しない）。同じメールの取込済みも `existing` で返す |
+ * | `POST /api/salaries/agent/commit` | 本人の承認後に1件だけ保存する（201 `created` / 200 `already_imported`） |
  * | `GET /api/salaries/agent/:id` | 保存された実レコードの読み戻し |
- * | `GET /api/salaries/agent?sourceKey=` | 元メールから登録先を照会する（タイムアウト後の再送前に使う） |
+ *
+ * 元メールは `source: { mailbox, messageId }` で渡す。向こうがメールボックス＋Message-IDをハッシュにして同一メールを判定する。
+ * 元メールだけで登録の有無を引く口は無く、タイムアウト後は同じPDFでプレビューを引き直して `existing` を見る。
  *
  * **認証は給与専用の共有トークン `ASSET_MANAGER_SALARY_AGENT_SECRET` だけ**で、支出・Zaim向けの
  * `ZAIM_SYNC_SECRET` は使わない。環境変数へのフォールバックも持たない（kurashio の書込トークンと同じ方針）。

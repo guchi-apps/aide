@@ -3,11 +3,11 @@ import { describe, it } from "node:test";
 
 import type { Tool, ToolResult } from "../types.ts";
 import {
-  buildSourceKey,
   createSalaryCommitTool,
   createSalaryLookupTool,
   createSalaryPreviewTool,
   parsePdf,
+  parseSource,
   type SalaryAgentDeps,
 } from "./salary-agent.ts";
 
@@ -60,15 +60,17 @@ describe("入力の検証", () => {
     assert.equal(parsePdf(PDF).ok, true);
   });
 
-  it("元メールの安定IDにメールボックスを含める", () => {
-    assert.equal(buildSourceKey("a@x.com", "m1"), "gmail:a@x.com:m1");
-    assert.notEqual(buildSourceKey("a@x.com", "m1"), buildSourceKey("b@x.com", "m1"));
+  it("元メールの識別にメールボックスを含め、正規化して送る", () => {
+    const a = parseSource({ mailbox: " Me@Example.com ", gmailMessageId: " m1 " });
+    assert.deepEqual(a.ok && a.source, { mailbox: "me@example.com", messageId: "m1" });
+    assert.equal(parseSource({ mailbox: "not-an-address", gmailMessageId: "m1" }).ok, false);
+    assert.equal(parseSource({ mailbox: "a@x.com", gmailMessageId: "m 1" }).ok, false);
   });
 });
 
 describe("asset_manager_salary_preview", () => {
   it("給与専用トークンで解析を依頼し、保存していないと明示する", async () => {
-    const { deps, calls } = fake(() => json(200, { blockers: [], dateConfirmed: false, previewToken: "tok" }));
+    const { deps, calls } = fake(() => json(200, { status: "ok", blockers: [], canSave: true, previewToken: "tok" }));
     const r = await run(createSalaryPreviewTool(deps), BASE);
     const body = parse(r);
     assert.equal(r.isError, false);
@@ -76,7 +78,7 @@ describe("asset_manager_salary_preview", () => {
     assert.equal(body["previewToken"], "tok");
     assert.equal(calls[0]?.path, "/api/salaries/agent/preview");
     assert.equal(calls[0]?.auth, "Bearer secret-token");
-    assert.equal(calls[0]?.body?.["sourceKey"], "gmail:me@example.com:msg-1");
+    assert.deepEqual(calls[0]?.body?.["source"], { mailbox: "me@example.com", messageId: "msg-1" });
   });
 
   it("トークン未設定なら送らず未登録と返す", async () => {
@@ -115,48 +117,64 @@ describe("asset_manager_salary_commit", () => {
   });
 
   it("保存できたときは未検証で返し、読み戻しを促す", async () => {
-    const { deps, calls } = fake(() => json(200, { status: "created", salaryId: 42 }));
+    const { deps, calls } = fake(() => json(201, { status: "created", salaryId: "clx1abc", readPath: "/api/salaries/agent/clx1abc" }));
     const r = await run(createSalaryCommitTool(deps), COMMIT);
     const body = parse(r);
     assert.equal(r.isError, false);
     assert.equal(body["registered"], true);
     assert.equal(body["verified"], false);
-    assert.equal(body["salaryId"], 42);
+    assert.equal(body["salaryId"], "clx1abc");
     assert.equal(calls[0]?.body?.["approved"], true);
     assert.equal(calls[0]?.body?.["salaryDate"], "2026-10-25");
+    assert.deepEqual(calls[0]?.body?.["source"], { mailbox: "me@example.com", messageId: "msg-1" });
   });
 
-  it("blockers・duplicate・needsReview・ID無しは成功扱いにしない", async () => {
-    const cases: unknown[] = [
-      { status: "created", salaryId: 5, blockers: ["未割当の項目"] },
-      { status: "conflict", reason: "同日の明細があります", salaryId: 9 },
-      { status: "needsReview" },
-      { status: "created" },
+  it("created の形をしていない2xxや、IDが無い応答は登録できたとしない", async () => {
+    const cases: [number, unknown][] = [
+      [200, { status: "created", salaryId: "clx1abc" }],
+      [201, { status: "created" }],
+      [201, { status: "created", salaryId: 42 }],
+      [200, { status: "ok" }],
     ];
-    for (const payload of cases) {
-      const { deps } = fake(() => json(200, payload));
+    for (const [httpStatus, payload] of cases) {
+      const { deps } = fake(() => json(httpStatus, payload));
       const r = await run(createSalaryCommitTool(deps), COMMIT);
       assert.equal(r.isError, true, JSON.stringify(payload));
-      assert.notEqual(parse(r)["registered"], true, JSON.stringify(payload));
+      assert.equal(parse(r)["registered"], "unknown", JSON.stringify(payload));
+      assert.equal("salaryId" in parse(r), false);
     }
   });
 
   it("同じメールの再実行は新規登録ではなく既存IDを示す", async () => {
-    const { deps } = fake(() => json(200, { status: "duplicate", salaryId: 7 }));
-    const body = parse(await run(createSalaryCommitTool(deps), COMMIT));
-    assert.equal(body["status"], "already_registered");
-    assert.equal(body["registered"], false);
-    assert.equal(body["existingSalaryId"], 7);
-  });
-
-  it("拒否(4xx)は未登録で、IDを作らない", async () => {
-    const { deps } = fake(() => json(409, { reason: "同日の明細があります" }));
+    const { deps } = fake(() => json(200, { status: "already_imported", message: "すでに登録済みです", salaryId: "clx7" }));
     const r = await run(createSalaryCommitTool(deps), COMMIT);
     const body = parse(r);
     assert.equal(r.isError, true);
+    assert.equal(body["status"], "already_registered");
     assert.equal(body["registered"], false);
-    assert.equal(body["reason"], "同日の明細があります");
+    assert.equal(body["existingSalaryId"], "clx7");
     assert.equal("salaryId" in body, false);
+  });
+
+  it("blockers・期限切れ・同日の既存明細などの拒否は未登録で、既存IDを登録IDと取り違えさせない", async () => {
+    const cases: [number, Record<string, unknown>][] = [
+      [422, { status: "blocked", message: "この明細は代理登録できません", blockers: [{ code: "unassigned", message: "未割当" }] }],
+      [409, { status: "preview_expired", message: "プレビューの有効期限が切れました" }],
+      [409, { status: "date_conflict", message: "同じ支給日の給与明細がすでにあります", salaryId: "clx9" }],
+      [422, { status: "needs_password", message: "パスワード付きのPDFは代理登録できません", manualImportPath: "/salaries/new" }],
+    ];
+    for (const [httpStatus, payload] of cases) {
+      const { deps } = fake(() => json(httpStatus, payload));
+      const r = await run(createSalaryCommitTool(deps), COMMIT);
+      const body = parse(r);
+      assert.equal(r.isError, true);
+      assert.equal(body["registered"], false);
+      assert.equal(body["reason"], payload["message"]);
+      assert.equal("salaryId" in body, false, JSON.stringify(payload));
+      assert.equal(body["httpStatus"], httpStatus);
+    }
+    const { deps } = fake(() => json(409, { status: "date_conflict", message: "m", salaryId: "clx9" }));
+    assert.equal(parse(await run(createSalaryCommitTool(deps), COMMIT))["existingSalaryId"], "clx9");
   });
 
   it("タイムアウトは unknown で、再送せず先に照会させる", async () => {
@@ -167,7 +185,8 @@ describe("asset_manager_salary_commit", () => {
     assert.equal(r.isError, true);
     assert.equal(body["status"], "unknown");
     assert.equal(body["registered"], "unknown");
-    assert.match(String(body["nextStep"]), /asset_manager_salary_lookup/);
+    assert.match(String(body["nextStep"]), /asset_manager_salary_preview/);
+    assert.match(String(body["nextStep"]), /alreadyImportedSalaryId/);
   });
 
   it("エラー文にPDFやトークンを含めない", async () => {
@@ -180,31 +199,33 @@ describe("asset_manager_salary_commit", () => {
 
 describe("asset_manager_salary_lookup", () => {
   it("Salary ID で読み戻す", async () => {
-    const { deps, calls } = fake(() => json(200, { id: 42 }));
-    const body = parse(await run(createSalaryLookupTool(deps), { salaryId: 42 }));
+    const { deps, calls } = fake(() => json(200, { status: "ok", salary: { id: "clx1abc", salaryDate: "2026-10-25" } }));
+    const body = parse(await run(createSalaryLookupTool(deps), { salaryId: "clx1abc" }));
     assert.equal(body["status"], "found");
-    assert.equal(calls[0]?.path, "/api/salaries/agent/42");
+    assert.equal(calls[0]?.path, "/api/salaries/agent/clx1abc");
     assert.equal(calls[0]?.method, "GET");
+    assert.equal(calls[0]?.auth, "Bearer secret-token");
   });
 
-  it("元メールで照会できる", async () => {
-    const { deps, calls } = fake(() => json(200, { id: 42 }));
-    await run(createSalaryLookupTool(deps), { mailbox: "me@example.com", gmailMessageId: "msg-1" });
-    assert.equal(calls[0]?.path, `/api/salaries/agent?sourceKey=${encodeURIComponent("gmail:me@example.com:msg-1")}`);
-  });
-
-  it("IDと元メールの両方・どちらも無いは拒否する", async () => {
+  it("IDの形が違うものは送らない（パス区切りを持ち込ませない）", async () => {
     const { deps, calls } = fake(() => json(200, {}));
-    assert.equal((await run(createSalaryLookupTool(deps), {})).isError, true);
-    assert.equal((await run(createSalaryLookupTool(deps), { salaryId: 1, ...BASE })).isError, true);
+    for (const salaryId of [undefined, "", "../preview", 42, "a b"]) {
+      assert.equal((await run(createSalaryLookupTool(deps), { salaryId })).isError, true);
+    }
     assert.equal(calls.length, 0);
   });
 
-  it("404 は not_found で、元メール照会では未登録と断定しない", async () => {
-    const { deps } = fake(() => json(404, {}));
-    const byId = parse(await run(createSalaryLookupTool(deps), { salaryId: 9 }));
-    assert.equal(byId["status"], "not_found");
-    const bySource = parse(await run(createSalaryLookupTool(deps), { mailbox: "me@example.com", gmailMessageId: "m" }));
-    assert.match(String(bySource["reason"]), /断定せず/);
+  it("404 は not_found で、IDを作らない", async () => {
+    const { deps } = fake(() => json(404, { status: "not_found", message: "見つかりません" }));
+    const r = await run(createSalaryLookupTool(deps), { salaryId: "clx9" });
+    assert.equal(parse(r)["status"], "not_found");
+    assert.equal("salaryId" in parse(r), false);
+  });
+
+  it("401 は連携の失敗として返す", async () => {
+    const { deps } = fake(() => json(401, { status: "unauthorized", message: "Unauthorized" }));
+    const r = await run(createSalaryLookupTool(deps), { salaryId: "clx9" });
+    assert.equal(r.isError, true);
+    assert.equal(parse(r)["httpStatus"], 401);
   });
 });

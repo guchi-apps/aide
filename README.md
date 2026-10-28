@@ -312,17 +312,17 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 #### 給与明細メールの代理登録は3条件を満たす（#725）
 
 - **条件1**: 給与の台帳（Asset Manager の Salary）へは画面の手動取り込みしか入口が無く、メール添付を会話で確かめて入れる経路は他に無い。
-  Asset Manager 側の契約は asset-manager#791（`/api/salaries/agent/{preview,commit,:id}`）。AIDEは中継だけで、解析・照合・重複判定は向こうが持つ
+  Asset Manager 側の契約は asset-manager#791（`/api/salaries/agent/{preview,commit,:id}`）。AIDEは中継だけで、解析・照合・重複判定は向こうが持つ（develop にマージ済み。本番反映は未確認）
 - **条件2**: 給与専用の共有トークン `ASSET_MANAGER_SALARY_AGENT_SECRET` だけで認証する。支出・Zaim向けの `ZAIM_SYNC_SECRET` は流用せず、
   環境変数へのフォールバックも持たない。OAuth scope も `salary-agent:read`（プレビュー・読み戻し）と `salary-agent:write`（保存）に分け、接続時に本人が承認したときだけ付く
-- **条件3**: 作成のみ。同じ元メール（`gmail:<メールボックス>:<messageId>`）の再実行は既存のSalary IDを返すだけで、同日の既存明細は上書きしない（向こうが拒否）
+- **条件3**: 作成のみ。同じ元メール（`source: { mailbox, messageId }`。メールボックスを含むので別アカウントの同じ messageId と衝突しない）の再実行は既存のSalary IDを返すだけで、同日の既存明細は上書きしない（向こうが拒否）
 - **本人承認の担保**: 保存は `approved: true`・本人が確認した支給日・プレビューのトークン・同じPDFが揃わないと通らず、Asset Manager が内容ハッシュの一致まで確かめる。
   ただし AIDE から見ると LLM が `approved` を付けられるため、**承認を機械的に証明する仕組みではない**。当面は書き込みツールの分離・専用scope・
   クライアント側の個別承認（「常に許可」にしない）で守る。Asset Manager の認証済み画面で承認する案と、信頼できる会話ゲートウェイが署名付き承認を発行する案は別Issueで評価する。**それが整うまで、本番の初回登録は本人が各ステップを確認する運用に限る**（承認状態を取得するツールは、Asset Manager側にその契約ができてから追加する）
 - **機微情報**: PDFは引数で渡すため**会話履歴・クライアント側のログに残る**（#791の契約がPDF受け取りのため。元PDFは700KBまで。base64後にMCPのリクエスト上限1 MiBへ収めるための値）。PDF・パスワード・明細の金額はMCPのアクセス記録（呼んだ事実だけを残す）にも、エラー文にも出さない。結果は本人との私的な会話でだけ提示する。
   パスワード付きPDFはツールで受け付けず、Asset Manager の手動画面（`/salaries/new`）へ案内して止める。メールの取得は既存の認可済みの経路で行い、AIDE側でGmail権限は足さない
 - **失敗の扱い**: 2xx以外・`blockers` が残る・重複・IDが返らない場合は成功にせず、未登録と明示する。保存後は `verified: false` で返し、
-  `asset_manager_salary_lookup` でSalary IDを読み戻してから報告する。応答待ちが切れたら `unknown` を返し、再送する前に元メールで照会する
+  `asset_manager_salary_lookup` でSalary IDを読み戻してから報告する。応答待ちが切れたら `unknown` を返し、再送せず、同じメール・同じPDFでプレビューを引き直して `existing.alreadyImportedSalaryId` で登録の有無を判定する（Asset Manager に元メールだけで引く口は無い）
 
 #### kurashioへの時間別kWhの登録は3条件を満たす（#692）
 
