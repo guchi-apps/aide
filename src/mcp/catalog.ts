@@ -73,7 +73,7 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(fixedCostsTool);
   // 電気代・ガス代（#324）。種類と期間を取るため固定費・残高へは畳まない。
   registry.register(utilityBillsTool);
-  // kurashioの月次請求（#678）。Zaim由来の aide_utility_bills とは保存先が別。読み取りと書き込みは別ツール・別scope。
+  // kurashioの月次請求（#678）。aide_utility_bills も同じ請求を推移として読む（#714）。読み取りと書き込みは別ツール・別scope。
   registry.register(kurashioBillContractsTool);
   registry.register(kurashioGetBillTool);
   registry.register(kurashioImportBillTool);

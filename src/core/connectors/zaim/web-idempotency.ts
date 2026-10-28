@@ -5,7 +5,7 @@ import { createRecordFile } from "../../record-file.ts";
 /**
  * Web版の入力画面から登録したかどうかの記録（#214）。
  *
- * 役割は公式API経由の `idempotency.ts` と同じで、**同じ明細を二重にZaimへ登録しない**ため
+ * 役割は公式API経由の `idempotency.ts`（aide#714 で撤去済み）と同じで、**同じ明細を二重にZaimへ登録しない**ため
  * だけに持つ。分けているのは、記録に持てるものが違うから。
  *
  * | | 公式API経由（`idempotency.ts`） | Web版の入力画面経由（ここ） |

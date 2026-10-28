@@ -9,12 +9,12 @@ import { handleLocation } from "./api/location.ts";
 import { handleWorkReports } from "./api/work-reports.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
-  handleZaimMaster,
   handleZaimReceiptRefresh,
-  handleZaimPayment,
+  handleZaimRetiredApi,
   handleZaimWebGenreEdit,
   handleZaimWebMemoEdit,
   handleZaimWebPayment,
+  isRetiredZaimApiPath,
 } from "./api/zaim.ts";
 import { receiptRefreshJobId } from "./core/connectors/zaim/receipt-refresh-forward.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
@@ -246,8 +246,9 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // ---- 個人アプリ向けのZaim登録API ----
   // Zaimの資格情報をAIDEだけに持たせるための口（#37）。上の2つとはさらに別のシークレットで、
   // 残高を読みたいだけのアプリへZaimへの書き込み権限を渡さない。
-  if (path === "/api/zaim/payment") {
-    await handleZaimPayment(req, res);
+  // 公式APIで動いていた口（`/api/zaim/payment`・`/api/zaim/master`）は廃止し、410を返す（#714）。
+  if (isRetiredZaimApiPath(path)) {
+    handleZaimRetiredApi(path, res);
     return;
   }
   // Web版の入力画面を操作して登録する口（#214）。公式APIで作った明細はZaimの
@@ -282,10 +283,6 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       return;
     }
     await handleZaimReceiptRefresh(req, res, jobId);
-    return;
-  }
-  if (path === "/api/zaim/master") {
-    await handleZaimMaster(req, res);
     return;
   }
 

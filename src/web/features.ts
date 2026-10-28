@@ -232,22 +232,12 @@ export const ENDPOINTS: FeatureItem[] = [
     description:
       "dotが報告した作業状況の読み取りAPI（StatusHub向け）。作業ID・適用版・状態・結果と鮮度（fresh / stale / final）をJSONで返し、無報告（reportState: none）・更新途絶・取得失敗（503）を区別できる。作業報告専用の共有シークレットで認証する。",
   },
-  {
-    name: "/api/zaim/payment",
-    meta: "POST",
-    description:
-      "個人アプリ向けのZaim登録API。支出を1件Zaimへ登録し、Zaim側のレコードID（money_id）を返す。requestId が同じ再送はZaimへ送らず前回の結果を返す。Zaim書き込み専用の共有シークレットで認証する。",
-    detail: {
-      request: "POST /api/zaim/payment\nAuthorization: Bearer <AIDE_ZAIM_WRITE_SECRET>\nContent-Type: application/json\n\n金額・日付・カテゴリ等と requestId をJSONで送る。",
-      success: "200: ok、moneyId、requestIdを返す。再送が既存結果なら duplicated がtrueになる。",
-      errors: ["400: JSONまたは入力項目が不正。", "401: 認証情報が無い、または一致しない。", "409: 前回の登録結果が確定しておらず、再送不可。", "422: Zaimが登録内容を拒否。", "502: Zaimとの通信・処理に失敗。", "503: AIDE側のZaim OAuth設定が未設定。"],
-    },
-  },
+
   {
     name: "/api/zaim/payment/web",
     meta: "POST",
     description:
-      "Zaim Web版の入力画面を操作して品目明細を1件登録する。公式APIで作った明細は「レシート置き換え」の候補にならないため、置き換えに載せたいものはこちらを通す。応答まで数十秒かかり、レコードIDは返らない。画面の操作が成立するのはログイン状態のあるサブPCだけなので、VPSのサーバーはそこへ中継する。",
+      "Zaim Web版の入力画面を操作して品目明細を1件登録する。Zaimへ支出を登録する唯一の口（公式API経由の /api/zaim/payment は廃止）。応答まで数十秒かかり、レコードIDは返らない。画面の操作が成立するのはログイン状態のあるサブPCだけなので、VPSのサーバーはそこへ中継する。",
   },
   {
     name: "/api/zaim/payment/web/genre",
@@ -261,12 +251,7 @@ export const ENDPOINTS: FeatureItem[] = [
     description:
       "Zaim Web版の編集画面を操作して、既存明細（自動連携明細を含む）のメモだけを書き換える。銀行口座・デビットカードの連携明細はZaimの「置き換え」の対象外なので、代わりに買った物をメモへ直接書く。空文字ならメモを消す。カテゴリ・金額・日付・口座などは変えず、開いた明細の日付・金額が本文と一致しなければ何も変えずに止める。応答まで数十秒かかり、渡した moneyId をそのまま返す。画面の操作が成立するのはログイン状態のあるサブPCだけなので、VPSのサーバーはそこへ中継する。",
   },
-  {
-    name: "/api/zaim/master",
-    meta: "GET",
-    description:
-      "Zaimの口座・カテゴリ・ジャンルのID一覧。登録時に渡すIDを呼び出し元が引くための口で、/api/zaim/payment と同じシークレットで認証する。",
-  },
+
   {
     name: "/api/image-mail/send",
     meta: "POST",

@@ -183,18 +183,10 @@ export const CALLERS: Caller[] = [
     uses: [
       "/api/money/summary",
       "/api/money/transactions",
-      "/api/zaim/payment",
       "/api/zaim/payment/web",
       "/api/zaim/payment/web/genre",
       "/api/zaim/payment/web/memo",
     ],
-  },
-  {
-    id: "car-care",
-    name: "Car Care",
-    via: "API",
-    what: "給油をZaimへ登録",
-    uses: ["/api/zaim/payment", "/api/zaim/master"],
   },
   {
     id: "research-desk",

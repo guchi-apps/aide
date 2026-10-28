@@ -15,8 +15,8 @@ const MONEY_LIST_SCRIPT = zaimScriptPath("money-list.mjs");
 /**
  * Zaim Web版の家計簿明細一覧を、指定した月ぶん取得する（aide#244）。
  *
- * **公式API（`GET /v2/home/money`）は自動連携が作った明細を返さない**（`write.ts` 参照。
- * guchi-apps/asset-manager#379 で実測）。この経路はPlaywrightでWeb版の一覧画面をそのまま読むため、
+ * **公式API（`GET /v2/home/money`）は自動連携が作った明細を返さない**（guchi-apps/asset-manager#379 で実測。
+ * 公式APIは aide#714 で撤去済み）。この経路はPlaywrightでWeb版の一覧画面をそのまま読むため、
  * スマートレシート等の自動連携明細も公式APIと同じように取得できる。
  *
  * Playwrightでヘッドレスブラウザを起動するため重い。MCPやAPIの同期リクエストから

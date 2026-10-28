@@ -93,7 +93,7 @@ const NAME_TRUNCATION_NOTE =
  * Zaim Web版の家計簿明細一覧の横断ビュー。
  *
  * **公式API（`GET /v2/home/money`）が返さない自動連携明細（スマートレシート等）も含む**
- * （aide#244。`src/core/connectors/zaim/write.ts` 参照）。
+ * （aide#244）。
  *
  * `src/core/views/money.ts`（残高・保有銘柄・固定費）とは情報源も粒度も別物のため分けている。
  *

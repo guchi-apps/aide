@@ -95,7 +95,7 @@ export function monthsBetween(from, to) {
     return (to.year - from.year) * 12 + (to.month - from.month)
 }
 
-/** `YYYY-MM-DD` を年・月・日に割る。形は `write.ts` の `isValidDate()` を通った前提。 */
+/** `YYYY-MM-DD` を年・月・日に割る。形は `input.ts` の `isValidDate()` を通った前提。 */
 export function splitDate(date) {
     const [year, month, day] = date.split("-").map(Number)
     return { year, month, day }
@@ -174,7 +174,7 @@ export function composeComment(comment, requestId, maxLength) {
     return { text }
 }
 
-/** 電卓へ打ち込む数字列。金額は1以上の整数である前提（`write.ts` が検査済み）。 */
+/** 電卓へ打ち込む数字列。金額は1以上の整数である前提（`input.ts` の検査済み）。 */
 export function amountDigits(amount) {
     return String(amount)
 }

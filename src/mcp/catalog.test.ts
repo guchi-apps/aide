@@ -71,7 +71,6 @@ describe("MCPツールの登録簿", () => {
   it("書き込みツールは dryRun を持つ", () => {
     // **どれも取り消せない経路。** 送る前に内容を確かめる口を必ず残す。
     for (const name of [
-      "aide_zaim_payment",
       "aide_create_issue",
       "issue_deck_upload_image",
       "aide_create_event",
