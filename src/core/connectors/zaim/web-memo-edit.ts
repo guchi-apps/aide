@@ -1,6 +1,6 @@
 import { isZaimAutoReloginFailed, isZaimSessionExpired, zaimSessionExpiredMessage } from "./errors.ts";
 import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
-import { normalizeText } from "./write.ts";
+import { normalizeText } from "./input.ts";
 import { acquireZaimWebScreenLock, releaseZaimWebScreenLock } from "./web-screen-lock.ts";
 import {
   abandonWebGenreEdit,
@@ -23,7 +23,7 @@ import {
  * Zaimの「置き換え」はカード・電子マネーの連携明細にしか効かず、銀行口座・デビットカードの
  * 連携明細は置き換えられない。asset-manager の家計簿連携（asset-manager#514）は、代わりに
  * **その連携明細のメモへ買った物を直接書き込む**。自動連携明細は公式APIから編集できず
- * （`write.ts` 冒頭）、既存の `web-genre-edit.ts`（#273）はカテゴリ・内訳しか触らないため、
+ * （Zaim APIの仕様。公式APIは aide#714 で撤去済み）、既存の `web-genre-edit.ts`（#273）はカテゴリ・内訳しか触らないため、
  * 同じ編集モーダル（一覧の鉛筆アイコンから開く。#409）を操作してメモ（`input[name="comment"]`）だけを書き換える。
  *
  * ## カテゴリの変更（`web-genre-edit.ts`）との違い

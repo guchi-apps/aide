@@ -4,7 +4,7 @@ import { recordImageMailLog } from "./log.ts";
 
 /**
  * 冪等性チェック→Gmail送信→記録、をまとめるオーケストレーション層（aide#230）。
- * `src/core/connectors/zaim/write.ts` の `createZaimPayment()` と同じ構図。
+ * Zaim公式APIでの登録（`createZaimPayment()`。aide#714 で撤去済み）と同じ構図。
  */
 
 export interface SendImageMailInput {

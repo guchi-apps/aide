@@ -6,7 +6,7 @@ import {
   zaimSessionExpiredMessage,
 } from "./errors.ts";
 import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
-import { MAX_AMOUNT, MAX_REQUEST_ID_LENGTH, isValidDate, normalizeId, normalizeText } from "./write.ts";
+import { MAX_AMOUNT, MAX_REQUEST_ID_LENGTH, isValidDate, normalizeId, normalizeText } from "./input.ts";
 import { acquireZaimWebScreenLock, releaseZaimWebScreenLock } from "./web-screen-lock.ts";
 import {
   abandonWebGenreEdit,
@@ -23,8 +23,8 @@ import {
  * （`money-list.ts`・#244）から自動連携明細（カード・スマートレシート等）の内訳を提案するように
  * なった。しかし提案をZaimへ書き戻す口が無かった。
  *
- * - 公式API（`write.ts`）は自動連携明細を編集できない（Zaim APIの仕様。`write.ts` 冒頭）
- * - `write.ts`（新規登録）・`web-payment.ts`（Web版での新規登録）はどちらも**新規作成だけ**で、
+ * - 公式APIは自動連携明細を編集できなかった（Zaim APIの仕様。公式APIは aide#714 で撤去済み）
+ * - `web-payment.ts`（Web版での新規登録）は**新規作成だけ**で、
  *   既存明細を編集する口を持たない
  *
  * そこでWeb版の編集モーダル（一覧の鉛筆アイコンから開く。`/money/<moneyId>/edit` を直接開いても編集UIは出ない。#409）をPlaywrightで操作し、**カテゴリ・内訳だけ**を
@@ -93,7 +93,7 @@ export interface ZaimWebEditTarget {
  * 対象の明細を指す `requestId`・`moneyId`・`date`・`amount` を検査する。
  *
  * カテゴリの変更（ここ）とメモの変更（`web-memo-edit.ts`・#354）で共用する。**経路によって
- * 受け付ける値の範囲を変えない**ためで、`write.ts` の `normalizeId` / `isValidDate` を再利用する
+ * 受け付ける値の範囲を変えない**ためで、`input.ts` の `normalizeId` / `isValidDate` を再利用する
  * （`web-payment.ts` と同じ方針）。
  */
 export function normalizeWebEditTarget(
@@ -127,7 +127,7 @@ export function normalizeWebEditTarget(
 /**
  * 受け取ったJSONを検査して入力へ変換する。
  *
- * `write.ts` の `normalizeText` を再利用する。対象の明細を指す項目は `normalizeWebEditTarget()`。
+ * `input.ts` の `normalizeText` を再利用する。対象の明細を指す項目は `normalizeWebEditTarget()`。
  */
 export function normalizeWebGenreEditInput(
   raw: unknown,

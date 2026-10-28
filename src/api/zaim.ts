@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
-import { loadZaimOAuthCredentials } from "../core/connectors/zaim/oauth.ts";
 import {
   ZAIM_WEB_FORWARDED_HEADER,
   forwardZaimWebGenreEdit,
@@ -26,19 +25,17 @@ import {
 import { normalizeReceiptRefreshInput } from "../core/connectors/zaim/receipt-refresh.ts";
 import { forwardReceiptRefresh } from "../core/connectors/zaim/receipt-refresh-forward.ts";
 import { receiptRefreshJobs } from "../worker/receipt-refresh-jobs.ts";
-import {
-  createZaimPayment,
-  fetchZaimMaster,
-  normalizePaymentInput,
-  type CreatePaymentOutcome,
-} from "../core/connectors/zaim/write.ts";
 import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
 /**
  * 個人アプリ向けのZaim登録API（aide#37）。
  *
- * car-care（給油記録）・asset-manager（レシート由来の支出）が「Zaimへ支出を登録する」ための口。
+ * **Zaim公式APIを使っていた `POST /api/zaim/payment`・`GET /api/zaim/master` は、公式APIの終了
+ * （2026-12-07）に伴い410で廃止した（aide#714。`docs/zaim-api-shutdown.md`）。** 残る口はすべて
+ * Web版の画面を操作する経路で、Zaimのログイン状態（storage state）だけを使う。
+ *
+ * asset-manager（レシート由来の支出）が「Zaimへ支出を登録する」ための口。
  * **Zaimの資格情報を持つのはAIDEだけ**にして、各アプリがそれぞれZaimクライアントと
  * 認証情報を抱える状態（asset-manager#191 が読み取り側で起きた重複）を書き込み側で作らない。
  *
@@ -153,61 +150,37 @@ async function readBody(req: IncomingMessage, res: ServerResponse): Promise<unkn
  * **`conflict`（409）だけは呼び出し元が再送してはいけない。** 前回の結果が確定しておらず、
  * 送り直すと同じ支出が二重に登録されうるため、人がZaimを確認するまで止める。
  */
-function statusFor(kind: Exclude<CreatePaymentOutcome, { ok: true }>["kind"]): number {
+function statusFor(kind: "invalid" | "conflict" | "rejected" | "failed"): number {
   if (kind === "invalid") return 400;
   if (kind === "conflict") return 409;
   if (kind === "rejected") return 422;
   return 502;
 }
 
+/** 公式APIで動いていた口の移行先。410の本文に載せる。 */
+const RETIRED_ZAIM_API: Record<string, string> = {
+  "/api/zaim/payment": "POST /api/zaim/payment/web（分類は名前で指定。moneyId は返らない）",
+  "/api/zaim/master": "代替の口はありません。口座・分類はZaimの画面で確認してください",
+};
+
+/** 廃止した口か。`src/server.ts` の振り分けが使う。 */
+export function isRetiredZaimApiPath(path: string): boolean {
+  return Object.hasOwn(RETIRED_ZAIM_API, path);
+}
+
 /**
- * `POST /api/zaim/payment`
+ * `POST /api/zaim/payment`・`GET /api/zaim/master`（**廃止。410 Gone**）
  *
- * 支出を1件登録し、Zaim側のレコードID（`moneyId`）を返す。呼び出し元はこれを自分のレコードへ
- * 保存して、登録済みかどうかを持つ。`requestId` が同じ再送はZaimへ送らず、前回の
- * `moneyId` を `duplicated: true` で返す。
+ * Zaim公式APIの終了（aide#714）で、OAuthの資格情報ごと撤去した。**認証より先に410を返す**——
+ * 何も読み書きしない応答で、古いシークレットのまま呼び続けている呼び出し元にも廃止が伝わるように
+ * する。黙って404にすると、URLの打ち間違いと区別できない。
  */
-export async function handleZaimPayment(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // 認証の前にメソッドを見る（読み取りAPIと同じ理由。叩き方の誤りを401で隠さない）。
-  if (req.method !== "POST") {
-    res
-      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" })
-      .end(JSON.stringify({ error: "method not allowed" }));
-    return;
-  }
-  if (!(await authorize(req, res, "POST /api/zaim/payment"))) return;
-
-  const credentials = loadZaimOAuthCredentials();
-  if (!credentials) {
-    json(res, 503, { error: "ZaimのOAuth設定（AIDE_ZAIM_*）が揃っていないため利用できません" });
-    return;
-  }
-
-  const body = await readBody(req, res);
-  if (body === null) return;
-
-  const normalized = normalizePaymentInput(body);
-  if ("error" in normalized) {
-    json(res, 400, { ok: false, error: normalized.error });
-    return;
-  }
-
-  const outcome = await createZaimPayment(credentials, normalized.input);
-  if (!outcome.ok) {
-    json(res, statusFor(outcome.kind), {
-      ok: false,
-      kind: outcome.kind,
-      error: outcome.reason,
-      requestId: normalized.input.requestId,
-    });
-    return;
-  }
-
-  json(res, 200, {
-    ok: true,
-    moneyId: outcome.moneyId,
-    duplicated: outcome.duplicated,
-    requestId: normalized.input.requestId,
+export function handleZaimRetiredApi(path: string, res: ServerResponse): void {
+  json(res, 410, {
+    ok: false,
+    kind: "retired",
+    error: "Zaim公式APIの提供終了（2026-12-07）に伴い、この口は廃止しました（aide#714）。",
+    alternative: RETIRED_ZAIM_API[path] ?? null,
   });
 }
 
@@ -249,9 +222,9 @@ async function runOrForwardWebPayment(
  *
  * 上の `POST /api/zaim/payment` との違い。
  *
- * | | `/api/zaim/payment` | `/api/zaim/payment/web` |
+ * | | `/api/zaim/payment`（廃止） | `/api/zaim/payment/web` |
  * |---|---|---|
- * | 資格情報 | ZaimのOAuth（`AIDE_ZAIM_*`） | ログイン状態（storage state） |
+ * | 資格情報 | ZaimのOAuth（撤去済み） | ログイン状態（storage state） |
  * | 分類の指定 | `categoryId` / `genreId` | `categoryName` / `genreName` |
  * | 返す `moneyId` | Zaimのレコードid | **常に null**（画面にidが出ない） |
  * | 応答までの時間 | 1秒未満 | **数十秒**（ヘッドレスChromiumを起動する） |
@@ -275,8 +248,6 @@ export async function handleZaimWebPayment(req: IncomingMessage, res: ServerResp
   }
   if (!(await authorize(req, res, "POST /api/zaim/payment/web"))) return;
 
-  // **OAuthの設定は見ない。** この経路が使うのはログイン状態だけで、`AIDE_ZAIM_*` は要らない。
-  // ここで503にすると、Zaimへ書ける環境なのに口が開かないことになる。
   const body = await readBody(req, res);
   if (body === null) return;
 
@@ -445,39 +416,6 @@ export async function handleZaimWebMemoEdit(req: IncomingMessage, res: ServerRes
     createZaimWebMemoEdit,
     forwardZaimWebMemoEdit,
   );
-}
-
-/**
- * `GET /api/zaim/master`
- *
- * 口座・カテゴリ・ジャンルのID一覧。登録時に渡す `categoryId` / `genreId` / `fromAccountId` を
- * 呼び出し元が引くための口で、**連携先の設定時に使うことを想定している**（毎回は叩かない）。
- *
- * **この口はキャッシュを挟まない。** 設定時にしか呼ばれないので毎回Zaimを叩いてよい。
- * MCP経由（`aide_zaim_master`）は登録のたびに引かれるため24時間キャッシュしており、
- * **経路によって鮮度が違う**（aide#135）。
- */
-export async function handleZaimMaster(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res
-      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "GET, HEAD" })
-      .end(JSON.stringify({ error: "method not allowed" }));
-    return;
-  }
-  if (!(await authorize(req, res, "GET /api/zaim/master"))) return;
-
-  const credentials = loadZaimOAuthCredentials();
-  if (!credentials) {
-    json(res, 503, { error: "ZaimのOAuth設定（AIDE_ZAIM_*）が揃っていないため利用できません" });
-    return;
-  }
-
-  const outcome = await fetchZaimMaster(credentials);
-  if (!outcome.ok) {
-    json(res, 502, { ok: false, error: outcome.reason });
-    return;
-  }
-  json(res, 200, { ok: true, ...outcome.master });
 }
 
 /**

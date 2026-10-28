@@ -60,7 +60,6 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
     "天気予報の地点の名前（#673）。サブPCのworkerが予報と一緒にキャッシュへ載せ、VPSはそれを読むだけ",
   AIDE_ZAIM_WRITE_SECRET:
     "VPSの本体サーバーは issue-deck の共有トークンAPIから取得する（aide#665）。環境変数は共有トークンAPIの接続先を持たないサブPCの中継（aide-zaim-web）だけが読み、サブPCの .env に置く",
-  AIDE_ZAIM_PAYMENT_LOG_PATH: "Zaim登録の冪等記録の置き場。既定（data/zaim-payments.json）で足りる",
   AIDE_ZAIM_WEB_PAYMENT_LOG_PATH:
     "Web版の入力画面からの登録の冪等記録の置き場（#214）。既定（data/zaim-web-payments.json）で足りる。" +
     "そもそもこの経路が動くのは storage state と Playwright があるサブPCだけで、VPSでは使わない",

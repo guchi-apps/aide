@@ -6,7 +6,7 @@ import { DATA_DIR } from "../../paths.ts";
  * `idempotencyKey` による二重送信防止（aide#230）。
  *
  * Research Deskが再送してきたときに、同じ画像を2通送らないための記録。
- * 形は `src/core/connectors/zaim/idempotency.ts` をそのまま写している——違いは
+ * 形は Zaim公式API経由の冪等記録（`zaim/idempotency.ts`。aide#714 で撤去済み）をそのまま写している——違いは
  * ZaimのレコードID（数値）の代わりにGmailのmessageId（文字列）を持つだけ。
  *
  * **中身は `idempotencyKey`・`messageId`・時刻の3つだけ。** タイトルや宛先は書かない

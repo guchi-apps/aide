@@ -5,14 +5,14 @@ import { createRecordFile } from "../../record-file.ts";
 /**
  * Web版の入力画面から登録したかどうかの記録（#214）。
  *
- * 役割は公式API経由の `idempotency.ts` と同じで、**同じ明細を二重にZaimへ登録しない**ため
+ * 役割は公式API経由の `idempotency.ts`（aide#714 で撤去済み）と同じで、**同じ明細を二重にZaimへ登録しない**ため
  * だけに持つ。分けているのは、記録に持てるものが違うから。
  *
  * | | 公式API経由（`idempotency.ts`） | Web版の入力画面経由（ここ） |
  * |---|---|---|
  * | ZaimのレコードID | 応答の `money.id` を持てる | **持てない**（画面にIDが出ない） |
  * | 「確定した」の印 | `moneyId` が入っていること | `state: "done"` |
- * | ファイル | `data/zaim-payments.json` | `data/zaim-web-payments.json` |
+ * | ファイル | `data/zaim-payments.json`（撤去済み。本番に残る分は #726 で削除） | `data/zaim-web-payments.json` |
  *
  * **1つのファイルに混ぜない。** あちらは「`moneyId` が null ＝ 結果が確定していない」という
  * 読み方をしており、IDを持てないこちらの記録を混ぜると、登録できた明細まで

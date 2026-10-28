@@ -19,7 +19,7 @@ import { dateMatches, parseAmountValue } from "./receipt-form.mjs"
  * **メモだけ**を書き換える（#354・#409）。
  *
  * 銀行口座・デビットカードの連携明細はZaimの「置き換え」の対象外で、公式APIも自動連携明細を
- * 編集できない（`write.ts` 冒頭）。asset-manager の家計簿連携（asset-manager#514）が買った物を
+ * 編集できない（Zaim APIの仕様。公式APIは aide#714 で撤去済み）。asset-manager の家計簿連携（asset-manager#514）が買った物を
  * メモへ直接書き込むため、この画面を人と同じように操作する。
  *
  * **編集UIは `/money/<moneyId>/edit` ではなく、一覧（`/money?month=YYYYMM`）の鉛筆アイコンから

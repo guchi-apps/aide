@@ -42,9 +42,9 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 |---|---|---|---|---|
 | `aide_create_issue`（aide#50） | ClaudeアプリからのGitHub Issue起票 | 満たす | `AIDE_GITHUB_ISSUE_TOKEN`（取得用とは別のPAT） | 作成のみ |
 | `POST /map/issue`（#355） | アプリ連携画面の「機能を同期」で見つけた差から、図を直すGitHub Issueを起票 | **例外**（下記） | `AIDE_GITHUB_ISSUE_TOKEN`（`aide_create_issue` と共用。取得用とは別のPAT） | 作成のみ |
-| `POST /api/zaim/payment`（aide#37） | 個人アプリからZaimへの支出登録 | **例外**（下記） | Zaim APIの OAuth 1.0a（巡回の storage state とは別） | 作成のみ |
+| ~~`POST /api/zaim/payment`（aide#37）~~ | **廃止**（Zaim公式APIの終了。aide#714。410を返す） | — | — | — |
 | `issue_deck_upload_image`（#449） | ChatGPT・ClaudeからIssueDeckの画像置き場への画像アップロード | 満たす（下記） | `AIDE_ISSUE_DECK_UPLOAD_TOKEN`（IssueDeck専用の新しいシークレット。進捗報告・ディスパッチのものは流用しない） | 作成のみ（下記） |
-| `aide_zaim_payment`（aide#135） | 外部のClaude CodeからZaimへの支出登録 | 満たす（下記） | 同上（OAuth 1.0a） | 作成のみ |
+| ~~`aide_zaim_payment`（aide#135）~~ | **廃止**（Zaim公式APIの終了。aide#714。廃止の理由を返す） | — | — | — |
 | `POST /api/zaim/payment/web`（aide#214） | 個人アプリからZaim **Web版の入力画面**への品目明細の登録 | **満たす**（下記） | ログイン状態（storage state） | 作成のみ |
 | `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
 | `POST /api/zaim/payment/web/memo`（aide#354） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のメモの書き換え | **満たす**（下記） | ログイン状態（storage state。新規登録・カテゴリ変更と共用） | **例外**（下記。メモの書き換えのみ） |
@@ -79,7 +79,9 @@ AIDEだけ**だから。差を見つけた画面から、そのまま図を直�
 
 詳細は[機能の同期](#機能の同期アプリ連携ページ)。
 
-#### Zaimへの登録は条件1の例外（aide#37）
+#### Zaimへの登録は条件1の例外（aide#37・廃止済み）
+
+**この経路は Zaim公式APIの終了に伴い廃止した（aide#714）。** 判断の経緯として残している。
 
 Zaim の `POST /v2/home/money/payment` は**公開APIで、car-care / asset-manager から直接叩ける**。
 「他のどこからも塞がっている経路」ではないため、条件1は文言どおりには満たしていない。
@@ -109,7 +111,9 @@ Research DeskのブラウザからGmail APIを直接叩くことも技術的に�
 
 詳細は[個人アプリ向けの業界ニュース週報メール送信API](#個人アプリ向けの業界ニュース週報メール送信api)。
 
-#### MCP経由のZaim登録は条件1を満たす（aide#135）
+#### MCP経由のZaim登録は条件1を満たす（aide#135・廃止済み）
+
+**このツールは Zaim公式APIの終了に伴い廃止した（aide#714）。** 判断の経緯として残している。
 
 `aide_zaim_payment` は同じZaimへの登録だが、**上の例外を根拠にしていない**（「前例として使わない」と
 書いてあるとおり、aide#135 で改めて判断した）。
@@ -145,7 +149,7 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 `normalizeWebGenreEditInput()` がそもそもこれらの項目を受け取らない）。
 
 例外にした理由は、公式APIには**自動連携明細（カード・スマートレシート等）を編集する手段が
-そもそも無い**こと（Zaim APIの仕様。`write.ts` 冒頭のコメント）。asset-manager の「内訳の提案」
+そもそも無い**こと（Zaim APIの仕様）。asset-manager の「内訳の提案」
 （asset-manager#420）が算出した内訳を書き戻す先が無いと、提案機能そのものが「反映」を持てない。
 条件1（他に無い経路）・条件2（ログイン状態は新規登録と同じで、権限を広げていない）は #214 と
 同じ理由で満たす。
@@ -369,7 +373,7 @@ Core をフルスコープで作っておけば、MCP層で「出す／出さな
 
 ### 読み取りと書き込みは必ず分ける
 
-`aide_zaim_master` / `aide_zaim_payment`（aide#135）、`aide_room_buttons` / `aide_room_press`（#317）、
+`aide_room_buttons` / `aide_room_press`（#317）、
 `aide_aircon_status` / `aide_aircon_control`（#316）、`aide_schedule` / `aide_create_event`（#243）、`asset_manager_subscriptions` /
 `asset_manager_create_subscription`（#345・#346）はいずれもこの理由で2本になっている。
 **1本に畳むと、クライアント側で「常に許可」にしたときに書き込みまで素通しになる。**
@@ -467,7 +471,7 @@ src/
     ingest.ts          worker からの取得結果の受け口（POST /api/cache/:key）
     read.ts            個人アプリ向けの読み取りAPI（GET /api/money/summary, GET /api/money/transactions）
     status.ts          ops-dashboard向けの動作状況API（GET /api/status, POST /api/status/checks。#276）
-    zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment）
+    zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment/web ほか）
     image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
     news-mail.ts       業界ニュース週報メール送信API（POST /api/news-mail/send。#257）
     multipart.ts       multipart/form-data の最小パーサー
@@ -532,7 +536,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_connection_permissions` | 現在のMCP接続に付与されたOAuth scopeの診断（読み取り専用・scope不要）。**そのリクエストの認証結果**から `authMode`（`oauth` / `auth-disabled`）・付与済み `scopes`・`work-reports:read`/`write` 等の有無（`checks`）を返す。サーバーの対応scope一覧や要求scope、別接続の権限は返さず、入力も取らない。`authMode=auth-disabled` は開発用の認証無効起動で、全権限を仮置きしているだけでOAuthの付与ではない。scopeを判定できないときは `status=indeterminate` かつ `isError` で返し、未許可とは区別する。ツールが一覧に出ないのにscopeがある場合は、ツール公開・登録情報側の問題と切り分けられる |
 | `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
 | `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
-| `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。Zaim公式APIを都度叩く（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
+| `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。kurashio の月次請求を都度読む（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `kurashio_utility_bill_contracts` | kurashio に記録済みの電気・ガスの契約候補（不透明な契約キー・契約種別・最新の請求月）。お客さま番号は返さない。scope `kurashio-bills:read`（詳細は[kurashioの月次請求の照会と登録](#kurashioの月次請求の照会と登録678)） |
 | `kurashio_get_utility_bill` | kurashio に保存済みの月次請求を1件、請求月か元メールの messageId で読む（found / not_found を区別）。scope `kurashio-bills:read` |
 | `kurashio_get_kepco_hourly` | kurashio に保存済みの関西電力の時間別kWhを期間で読む（件数・日別合計・各時間の値・`missing`）。scope `kurashio-energy:read`（詳細は[kurashioの関西電力 時間別kWhの照会と登録](#kurashioの関西電力-時間別kwhの照会と登録692)） |
@@ -564,8 +568,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_vps_memory` | 本番VPS上の issue-deck のメモリ計測結果（最新・最後に取得できた時刻・経過秒・PID/起動時刻ごとの区間、`history` で採取サンプル）を返す。**読み取り専用**。計測・集計はIssueDeck側（`/api/integrations/vps-memory`）で、AIDEは中継のみ。取得不可は `reason` のまま返し0MBにしない（#608） |
 | `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`（`notStarted`・`reserved` 等のキー）・`repo`・`cursor`・`limit` でページングする。summary と同じエンドポイントに中継する。読み取り専用（#569） |
 | `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
-| `aide_zaim_master` | Zaimへ登録するときに渡すID（口座・カテゴリ・ジャンル）の候補。24時間キャッシュし、一覧に無いものを使いたいときだけ `refresh: true` で引き直す |
-| `aide_zaim_payment` | Zaimへ支出を1件登録する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる） |
+| `aide_zaim_master` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返す |
+| `aide_zaim_payment` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返し、Zaimへは登録しない |
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_create_task_candidate` | aide-botへ対応が必要なタスク候補を登録する。**ChatGPTスケジュール向けの書き込みツール** |
 | `aide_save_daily_brief` | aide-botへ日次ブリーフを登録する。**ChatGPTスケジュール向けの書き込みツール** |
@@ -1093,12 +1097,12 @@ asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読�
 同じZaimでも、**読む経路と書く経路はまったく別**にしている。混同すると、片方の資格情報で
 もう片方を動かそうとして詰まる。さらに書く側も**公式APIとWeb版の画面の2本**ある（#214）。
 
-| | 取得（残高・保有銘柄） | 登録: 公式API | 登録: Web版の入力画面 |
+| | 取得（残高・保有銘柄） | 登録: 公式API（**廃止**） | 登録: Web版の入力画面 |
 |---|---|---|---|
 | 手段 | Playwrightでの画面巡回 | `POST /v2/home/money/payment` | Playwrightでの画面操作 |
 | 資格情報 | ログイン状態（storage state） | OAuth 1.0a（`AIDE_ZAIM_*`） | ログイン状態（storage state） |
 | 動く場所 | サブPCの worker | VPSのサーバー（同期リクエスト内） | **サブPC**（storage state がある側。VPSは中継する） |
-| 実装 | `scrape.ts` / `parse.ts` / `session.ts` | `oauth.ts` / `write.ts` | `web-payment.ts` / `scripts/web-payment.mjs` |
+| 実装 | `scrape.ts` / `parse.ts` / `session.ts` | （撤去済み。aide#714） | `web-payment.ts` / `scripts/web-payment.mjs` |
 | 置き換えの候補になるか | — | **ならない** | **なる** |
 
 **Zaim APIで扱えるのは利用者が手入力したレコードだけ**という制約があり、残高も取れない。
@@ -1124,11 +1128,11 @@ asset-manager は巡回結果を[読み取りAPI](#個人アプリ向けの読�
 
 #### 呼び出し方
 
-登録に使う値は**呼び出し元が決めて渡す**（`write.ts` と同じ方針で、アプリ固有のドメイン知識は
+登録に使う値は**呼び出し元が決めて渡す**（廃止した公式API経由と同じ方針で、アプリ固有のドメイン知識は
 AIDEへ持ち込まない）。公式API経由との違いは3つ。
 
 - **カテゴリはIDではなく名前で渡す**（`categoryName` / `genreName`）。画面がIDを受け取る欄を
-  持っていないため。名前は `GET /api/zaim/master` で引ける
+  持っていないため。`GET /api/zaim/master` は公式APIの終了で廃止したので、名前はZaimの画面の表記をそのまま使う
 - **`name`（品目名）・`place`（店舗名）・`fromAccountId`（出金元）は必須。** 置き換えの成立条件が
   「品目・出金元・日付・金額の一致」なので、欠けた明細を作っても目的を果たさない。
   `fromAccountId` には**自動連携しているクレジットカード**を指定する（どの口座が自動連携かは
@@ -1254,10 +1258,9 @@ node --env-file-if-exists=.env src/core/connectors/zaim/scripts/web-payment.mjs
 
 #### 二重登録を止める
 
-記録は `data/zaim-web-payments.json`（`web-idempotency.ts`）。**公式API経由の
-`data/zaim-payments.json` とは別ファイル**にしている——あちらは「`money_id` が入っていること」を
-確定の印にしており、idを持てないこちらの記録を混ぜると、登録できた明細まで「結果不明」として
-扱われる。
+記録は `data/zaim-web-payments.json`（`web-idempotency.ts`）。撤去した公式API経由の記録
+（`data/zaim-payments.json`。aide#714）とは別ファイルにしていた——あちらは「`money_id` が入っていること」を
+確定の印にしており、idを持てないこちらの記録を混ぜると、登録できた明細まで「結果不明」として扱われるため。
 
 失敗したときに**Zaimへ何が残っているか**で扱いが割れる。ここが二重登録の分かれ目になる。
 
@@ -1276,7 +1279,7 @@ node --env-file-if-exists=.env src/core/connectors/zaim/scripts/web-payment.mjs
 asset-manager の「内訳の提案」（asset-manager#420）は、AIDEが巡回したZaim Web版の一覧
 （`money-list.ts`・#244）から自動連携明細（カード・スマートレシート等）の内訳が決まっていない
 ものを提案する。しかし提案をZaimへ書き戻す口が無かった。**公式APIは自動連携明細を編集できず**
-（`write.ts` 冒頭）、上の新規登録（`web-payment.ts`）も含め、既存明細を編集する経路がAIDEに
+（Zaim APIの仕様）、上の新規登録（`web-payment.ts`）も含め、既存明細を編集する経路がAIDEに
 無かったため。
 
 `POST /api/zaim/payment/web/genre` は、Web版の**編集モーダル**（一覧の鉛筆アイコンから開く
@@ -1377,7 +1380,7 @@ curl -sS -X POST http://127.0.0.1:4747/api/zaim/payment/web/memo \
 
 - `comment` は**必須**。**空文字ならメモを消す**。省略・`null`・文字列以外は400（項目名の取り違えで
   メモが黙って消えるのを防ぐ）
-- 上限は `write.ts` の `MAX_TEXT_LENGTH`（100文字）。**超えたら切らずに400**で返す（呼び出し側も
+- 上限は `input.ts` の `MAX_TEXT_LENGTH`（100文字）。**超えたら切らずに400**で返す（呼び出し側も
   同じ値で切っている）。メモ欄は1行の入力なので、改行・タブ・制御文字も400
 - **`requestId` はメモ本文へ混ぜない。** 新規登録の `composeComment` は二重登録を探す手掛かりとして
   混ぜているが、ここでは利用者が読むメモが汚れるだけで、冪等は記録で足りる
@@ -2656,7 +2659,7 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 ### Zaim Web版の家計簿明細一覧（aide#244）
 
 `GET /v2/home/money`（公式API）は、**銀行・カード・スマートレシート由来の自動連携レコードを
-返さない**（`src/core/connectors/zaim/write.ts:13-15` を参照。guchi-apps/asset-manager#379 で実測）。
+返さない**（guchi-apps/asset-manager#379 で実測。公式APIは aide#714 で撤去済み）。
 `GET /api/money/transactions` は、Zaim Web版の家計簿一覧画面（`https://zaim.net/money?month=YYYYMM`）を
 Playwrightで読むため、公式APIに現れない明細もここでは取得できる。一覧はDOMを仮想スクロールで描くため
 （最初の23行ほどしか出ない）、DOMではなく画面が裏で読む `/money/details?month=YYYYMM` のJSONを読む（#481）。
@@ -2835,71 +2838,26 @@ Zaimの画面を操作する権限なので登録口と同じ側に置いた）�
 
 ## 個人アプリ向けのZaim登録API
 
-car-care（給油記録）・asset-manager（レシート由来の支出）がZaimへ支出を登録するための口。実装は `src/api/zaim.ts`。
+asset-manager（レシート由来の支出・家計簿連携）がZaimへ登録・編集するための口。実装は `src/api/zaim.ts`。
+**残っている口はすべてWeb版の画面を操作する経路**（[Web版の入力画面からの登録](#web版の入力画面からの登録置き換えに載せるため)・
+[既存明細のカテゴリ・内訳の変更](#既存明細のカテゴリ内訳の変更aide273)・[既存明細のメモの書き換え](#既存明細のメモの書き換えaide354)）。
 
-**この口はVPS内のアプリ専用のまま据え置く。** 外（VPS外）のClaude Code・Claudeアプリからの登録は
-MCPツールで受ける（[外部のClaude CodeからのZaim登録](#外部のclaude-codeからのzaim登録mcp)）。
+**Zaim公式APIで動いていた `POST /api/zaim/payment`・`GET /api/zaim/master` は廃止した**（aide#714）。
+公式APIは2026-12-07に全エンドポイントが停止し、後継APIは提供されない。2本とも認証より先に
+**410 Gone**（`kind: "retired"` と移行先）を返し、Zaimへは何も送らない。OAuthクライアント・
+資格情報（`AIDE_ZAIM_CONSUMER_*` / `AIDE_ZAIM_ACCESS_*`）・冪等記録（`data/zaim-payments.json`）・
+マスタのキャッシュ（`zaim-master`）もコードから撤去した。棚卸し・判断・残る削除作業は
+[docs/zaim-api-shutdown.md](docs/zaim-api-shutdown.md)。
 
 | | |
 |---|---|
-| エンドポイント | `POST /api/zaim/payment` / `GET /api/zaim/master` |
-| 認証 | `Authorization: Bearer $AIDE_ZAIM_WRITE_SECRET` |
-| 必要な設定 | 上のシークレットと、Zaim OAuthの4つ（`AIDE_ZAIM_CONSUMER_KEY` ほか）。**1つでも欠ければ503** |
-
-```bash
-curl -s -X POST -H "Authorization: Bearer $AIDE_ZAIM_WRITE_SECRET" \
-  -H "Content-Type: application/json" http://127.0.0.1:3114/api/zaim/payment \
-  -d '{"requestId":"car-care:fuel-log:1234","amount":6800,"date":"2026-08-19",
-       "categoryId":101,"genreId":10101,"fromAccountId":12345,"place":"〇〇SS"}'
-# => {"ok":true,"moneyId":987654321,"duplicated":false,"requestId":"car-care:fuel-log:1234"}
-```
-
-### 呼び出しの向きは「アプリ → AIDE」
-
-読み取り（`GET /api/money/summary`）はアプリがAIDEから引くが、登録も**アプリからのpush**にしている。
-登録済みかどうかの状態（Zaimの `money_id`）を持つのは各アプリのレコードで、登録の起点も画面操作だから。
-AIDEがアプリを巡回して「未登録の支出」を集める形にすると、アプリごとに取得APIを生やすことになる。
-
-### カテゴリ・ジャンルはAIDEが決めない
-
-`categoryId` / `genreId` / `fromAccountId` は**呼び出し元がIDで指定する**。「ガソリン代 → 自動車費/ガソリン」
-のような対応はアプリ側のドメイン知識で、AIDEに持ち込むとアプリが増えるたびにここが太る。
-IDは `GET /api/zaim/master`（口座・カテゴリ・ジャンルの一覧）で引ける。連携先の設定時に一度引いて、
-アプリ側の設定として持つ想定。
-（MCP経由の呼び出し元はClaudeで状態を持たないため、そちらだけ24時間キャッシュを挟む。
-[外部のClaude CodeからのZaim登録](#外部のclaude-codeからのzaim登録mcp)）
-
-### 二重登録を止める
-
-**同じ支出をZaimへ2回登録しても、この経路からは取り消せない**（作成だけを持ち、削除は持たない）。
-呼び出し元が自分のレコードごとに一意な `requestId` を付け、AIDE側は
-`data/zaim-payments.json` に `requestId` → `money_id` を記録する（直近500件）。
-
-- **Zaimへ送る前に記録する。** 送った後に記録すると、応答が届かなかった場合に何も残らず、再送で二重登録になる
-- 登録済みの `requestId` はZaimへ送らず、前回の `money_id` を `duplicated: true` で返す
-- **前回の結果が確定していない `requestId` は 409 で止める。** 打ち切り・Zaim側の障害では登録された
-  可能性が残るため、機械的な再送を許さない（人がZaimを確認し、未登録なら別の `requestId` で送り直す）
-- Zaimが内容を拒んだ（4xx）ときだけ記録を消し、直してからの再送を許す
-
-記録に書くのは `requestId`・`money_id`・時刻の3つだけで、**金額・店名・コメントは持たない**。
-二重登録を防ぐのに要らないうえ、支出の中身そのものを持つのは取得・整形という責務から外れる。
-
-### 応答の意味
-
-| 状態 | 意味 |
-|---|---|
-| 200 | 登録できた（`duplicated: true` なら再送で、Zaimへは送っていない） |
-| 400 | 入力が不正。直して送り直す |
-| 409 | 前回の結果が不明。**再送しない**。Zaimを確認する |
-| 422 | Zaimが内容を拒んだ。登録はされていない |
-| 502 | Zaimへ届かない・打ち切り。登録されたかは不明 |
-| 503 | `AIDE_ZAIM_*` が揃っておらず、口が開いていない |
+| 認証 | `Authorization: Bearer $AIDE_ZAIM_WRITE_SECRET`（未設定なら503） |
+| 廃止した口 | `POST /api/zaim/payment`（移行先 `POST /api/zaim/payment/web`）・`GET /api/zaim/master`（代替なし） |
 
 ### 公開範囲と、アプリ側の守り
 
 呼び出し元は同じVPS上のアプリなので `http://127.0.0.1:3114` で叩く。ただし上記のとおり
 **`/api` を丸ごと外部から遮断できない**ため、遮断が入るまではこの2本も公開URL上に出ている。
-晒されるのは「書き込む口」だけでなく、`GET /api/zaim/master` が返す**口座名の一覧**も含む。
 
 - 公開URLからの遮断はVPSのApache側で行う（[公開URLからの遮断](#公開urlからの遮断)）
 - **遮断が入った後も、シークレットと総当たり対策は外さない。** Apacheを通らない
@@ -2929,20 +2887,6 @@ IDは `GET /api/zaim/master`（口座・カテゴリ・ジャンルの一覧）�
 
 設定の反映は vps 側のIssue（[guchi-apps/vps#101](https://github.com/guchi-apps/vps/issues/101)）で行う。
 **このリポジトリのデプロイでは反映されない。**
-
-### アクセストークンの取得
-
-consumer key / secret は [dev.zaim.net](https://dev.zaim.net/) でのアプリ登録で発行する。
-アクセストークンはブラウザでの認可が要るため、実行時ではなく次のスクリプトで1回だけ取る。
-
-```bash
-AIDE_ZAIM_CONSUMER_KEY=xxx AIDE_ZAIM_CONSUMER_SECRET=yyy \
-  node src/core/connectors/zaim/scripts/oauth-token.mjs
-```
-
-認可の画面は手元のPCのブラウザで開き、戻り先URLに付く `oauth_verifier` を貼り付ける。
-取れた値は本番の `.env`（GitHubのsecret経由）と1Passwordにだけ置く。
-
 
 ## 個人アプリ向けの画像メール送信API
 
@@ -3191,111 +3135,39 @@ Asset Manager 側の受け口は `PATCH /api/subscriptions/:id`（本文 `{ expe
 
 「今月の電気代」「先月のガス使用量」「最近の推移」に答えるための読み取りツール
 `aide_utility_bills`（#324）。実装は `src/core/views/utility-bills.ts`（集計）と
-`src/core/connectors/zaim/read.ts`（Zaim公式APIの `GET /v2/home/money`）。引数は `kind`
-（`electricity` / `gas` / `all`）と `months`（今月を含めて遡る月数。既定13・上限36）。
+`src/core/connectors/myroom/bills.ts`（kurashio の月次請求の内部API）。引数は `kind`
+（`electricity` / `gas` / `all`）と `months`（今月を含めて遡る請求月の数。既定13・上限36）。
 
-### 情報源はZaim公式API
+### 情報源は kurashio の月次請求
 
-電気・ガスの請求メールは、上の `asset_manager_import_payment` で Asset Manager へ取り込まれ、
-Asset Manager が**Zaim APIで**支出として登録する。そのため公式APIで期間を指定して読める。
-ほかの経路は推移に使えないので採っていない。
+もとはZaim公式APIの支出をジャンル名で拾っていたが、公式APIの終了（2026-12-07）に伴い
+**kurashio の月次請求へ移した**（aide#714）。kurashio は請求を契約・請求月ごとに1件で持ち、
+金額・使用量も請求そのものの値なので、品名から使用量を読む必要が無くなった。
 
-- **Asset Manager には電気・ガスの請求を読める口が無い**（読み取りは `GET /api/subscriptions` のサブスクだけで、レシート・明細は返さない）
-- **Web版の一覧のキャッシュ（`zaim-money-snapshot`）は当月＋先月ぶんしか持たない**。巡回はPlaywrightで重く、月を増やせない
+- 契約は `GET /api/internal/bills/contracts`、請求は `GET /api/internal/bills/record`（契約・請求月ごとに1件）で読む。
+  トークンは `kurashio_get_utility_bill` と同じ読み取り用（`MYROOM_INTERNAL_API_KEY`）
+- 契約の最新の請求月より先の月は問い合わせない。それ以外は契約ごとに期間の月数ぶん逐次で引く
+- **途中の月で取得に失敗したら、その種類ごと `unavailable` にする。** 一部の月だけ欠けた推移を出すと、
+  無い月を「請求が無かった」と読まれるため
+- kurashio に取り込まれていない月は `monthly` に出てこない。請求が無いという意味ではない
 
-公式APIは**自動連携（カード等）の明細を返さない**。電気・ガスがカード払いで、請求メールからの
-取り込みを経ずに自動連携の明細だけがある月は、この経路からは見えない。
+### 使用量と月
 
-鮮度は呼び出しのたびに引くので常に最新。ジャンルの対応表は `aide_zaim_master` と同じ24時間キャッシュ
-（`src/core/views/zaim-master.ts`）を使う。Zaimへの問い合わせは種類ごとにジャンルの数だけ（通常は電気・ガスで2本）。
+- **月は請求月（メールの「◯月分」）。** 検針期間・受信日ではない
+- 使用量は kurashio に値と単位の両方があるときだけ入れる（`kWh` と `m3` に寄せる）。無ければ `null` で、推測しない
+- 前月比・前年同月比は、請求のある最新の月から**暦の**前月・前年同月を見る。その月に請求が無ければ `null`
+  （請求のある直前の月へずらさない）
 
-### どれを電気・ガスとみなすか
+## 外部のClaude CodeからのZaim登録（MCP・廃止）
 
-**Zaimのジャンル名に「電気」「ガス」を含むもの。** 品名・店名では拾わない（「ガス」を含む飲食店名などを
-拾うため）。該当するジャンルが無いときは、その種類だけ `unavailable` に理由を入れて返す。
+`aide_zaim_master`（口座・カテゴリ・ジャンルの一覧）と `aide_zaim_payment`（支出の登録。aide#135）は、
+Zaim公式APIで動いていたため**公式APIの終了に伴い廃止した**（aide#714）。ツール自体は残し、呼ばれたら
+`kind: "retired"` と廃止の理由・代わりの手段（Zaimの画面で登録する）を返す。カタログから消すと
+Claudeには「ツールが無い」としか見えず、なぜ登録できないのかが利用者へ伝わらないため。
 
-### 使用量と日付
-
-- **使用量は品名から読む。** Asset Manager は `usage` を品名の末尾へ足して登録する（「電気料金 258kWh」。
-  asset-manager#307）。`kWh` と `m3`（`㎥`・`m³`・`立方メートル` を寄せる）だけを読み、書かれていない月は `null`
-- **検針期間（対象期間）は持っていない。** Zaimの明細は日付を1つしか持たず、それは請求・支払の日。
-  月ごとの集計（`monthly`）もこの日付の月で束ねる
-- 前月比・前年同月比は、明細のある最新の月から**暦の**前月・前年同月を見る。その月に明細が無ければ `null`
-  （明細のある直前の月へずらさない）
-
-## 外部のClaude CodeからのZaim登録（MCP）
-
-上のHTTP APIは**VPS内のアプリ専用のまま据え置く**。外（VPS外）のClaude Code・Claudeアプリから
-登録するための口は、OAuth Bearerで守られている `/mcp` の側にMCPツールとして持つ（aide#135）。
-実装は `src/mcp/tools/zaim.ts` と `src/core/views/zaim-master.ts` で、Zaimを叩く本体
-（`src/core/connectors/zaim/write.ts`）はHTTP APIと共用している。
-
-| ツール | 役割 |
-|---|---|
-| `aide_zaim_master` | 口座・カテゴリ・ジャンルの候補（IDと名前）を返す。読み取りのみ |
-| `aide_zaim_payment` | 支出を1件登録し、`moneyId` と登録された内容を返す |
-
-**1本に畳んでいない。** `aide_dev_status` のように読み取りを1本へ畳む前例はあるが、ここは
-読みと書きなので、畳むとClaude Code側で「常に許可」にしたときに書き込みまで素通しになる。
-承認の粒度が変わるので分ける。
-
-### マスタは24時間キャッシュする
-
-`GET /api/zaim/master` は「連携先の設定時に一度引く」前提で**キャッシュを持たない**。
-呼び出し元がアプリならアプリ側の設定として持てるが、**Claudeは状態を持たないので登録のたびに引く**。
-そのまま通すとZaimのAPIが1回の登録で3本飛ぶため、キャッシュ（`data/cache/zaim-master.json`）を挟む。
-
-- 鮮度の基準は**24時間**。`src/core/views/money.ts` と同じ値で、Zaim由来のデータに対する既存の基準に揃えた。
-  口座の新設・カテゴリのカスタマイズは月に1回あるかどうかの操作なので、これで十分短い
-- **workerジョブにはしない。** Playwright巡回ではなくOAuthのHTTP GET 3本で、
-  [「重い取得」の基準](#どこまでを重い取得とみなすか)では「都度叩く」側に近い。
-  ジョブにすると口座を作った直後に次の同期まで候補へ出てこない
-- **古いキャッシュを掴んだときの逃げ道を持つ。** `aide_zaim_master` の `refresh: true` のほか、
-  `aide_zaim_payment` は渡されたIDがマスタに無ければ**自動で一度だけ引き直す**
-- キャッシュのキーは `POST /api/cache/:key` の許可キー（`src/api/ingest.ts`）へ**足さない**。
-  書くのはこのサーバー自身だけで、受け口から「どのIDがどの口座か」を差し替えられる理由が無い
-- **`GET /api/zaim/master` にはキャッシュを挟まない。** 設定時にしか呼ばれないため毎回叩いてよく、
-  **経路によって鮮度が違う**（`fetchZaimMaster()` は素のまま、鮮度の扱いは呼び出し側が持つ）
-
-### 冪等キーは支出の内容から作る
-
-HTTP APIの `requestId` は「呼び出し元のレコードを指す文字列」（`car-care:fuel-log:1234`）だが、
-**Claudeには対応するレコードが無い。** 毎回新しい値を作らせると、同じ支出を2回言うだけで2件登録され、
-この経路からは取り消せない。そこでAIDE側が内容から決める。
-
-- キーは `mcp:<SHA-256の先頭16桁>`。材料は**日付・金額・カテゴリ・ジャンル・口座・店名・品名**
-- **`comment` は材料に混ぜない。** メモを書き換えただけで別の支出とみなされ、判定をすり抜けるため
-- **キーを平文にはしない。** `data/zaim-payments.json` は「`requestId`・`money_id`・時刻の3つだけ」
-  という方針で、内容をそのまま並べた値を置くと支出の一覧そのものになる
-- **ただし「復元できないから安全」ではない。** 材料の取りうる範囲は狭く（金額は上限30万円、
-  日付は数十通り、カテゴリ・ジャンルはマスタから既知）、総当たりで元の値へ戻せる。
-  安全側の根拠は復元の難しさではなく、**この値を `data/` とサーバーログの外へ出さないこと**に置く。
-  MCPの応答に `requestId` は載せない（返すのは `moneyId` と登録内容だけ）。
-  固定のsaltを混ぜる案は採らない——saltが変われば同じ支出が別の鍵になり、判定そのものが効かなくなる
-- 既に同じキーの記録があれば**登録せずに止め**、既存の `moneyId` を返す。同じ日・同じ店・同じ金額の
-  **正当な2件目**は、利用者に確認したうえで `allowDuplicate: true` を付けると `mcp:...#2` として通る
-- **前回の結果が確定していない記録（`money_id` が null）は `allowDuplicate` でも跨がせない。**
-  `createZaimPayment()` の `conflict` 判定は `requestId` の完全一致なので、連番で別の鍵にすると
-  素通りしてしまう。同じ系列に1件でもあれば `conflict` のまま止め、Zaimの画面で確認してもらう
-- 連番は件数ではなく**空き番号**で決める。古い記録は500件で落ちるため、件数から作ると
-  残っている番号と衝突し、別の支出が「登録済み」として素通りする
-
-### 会話由来の入力に対する歯止め
-
-`write.ts` の `MAX_AMOUNT`（1億円）は「アプリが桁を1つ間違えた」を止めるためのもので、
-**会話からの入力には緩い。** MCP経由だけ次を足している。
-
-- **1件30万円まで**（`MCP_MAX_AMOUNT`）。超えるものはZaimの画面から登録してもらう
-- **未来の日付は登録しない**（日本時間の暦日で判定）
-- **カテゴリ・ジャンル・口座のIDがマスタに実在するかを、Zaimへ送る前に確かめる。**
-  ジャンルが指定カテゴリのものかまで見る（Zaimは `mapping=1` で両方をIDで受け取るため、
-  噛み合わない組み合わせは意図しない分類になる）
-- 登録できたら `moneyId` と併せて、**解決後の口座名・カテゴリ名・ジャンル名を含む登録内容**を返す。
-  桁違い・日付の取り違えに、利用者がその応答で気づけるようにするため
-
-**カテゴリ・ジャンルの名寄せは持たない。** 「ガソリン代 → 自動車費/ガソリン」の対応はここでも作らず、
-Claudeが `aide_zaim_master` の一覧から選ぶ。AIDEにドメイン知識を持ち込まない方針はHTTP APIと同じ。
-
+Web版の画面を操作する経路（`/api/zaim/payment/web`）へは付け替えていない。分類を名前で受け取り、
+口座・分類の一覧を返す手段も持たないため、会話から安全に登録できる形にするには新しい実装が要る。
+判断の記録は [docs/zaim-api-shutdown.md](docs/zaim-api-shutdown.md)。
 
 ## 認証
 

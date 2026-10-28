@@ -13,14 +13,14 @@ import {
   isValidDate,
   normalizeId,
   normalizeText,
-} from "./write.ts";
+} from "./input.ts";
 import { acquireZaimWebScreenLock, releaseZaimWebScreenLock } from "./web-screen-lock.ts";
 import { abandonWebPayment, beginWebPayment, completeWebPayment } from "./web-idempotency.ts";
 
 /**
  * Zaim Web版の入力画面からの品目明細の登録（#214）。
  *
- * ## なぜ公式API（`write.ts`）と別に要るのか
+ * ## なぜ公式APIではなく画面操作なのか
  *
  * Zaimの「レシート置き換え」（カード明細と手入力を突き合わせて1件にまとめる機能）の候補に
  * なるのは、**Web版の入力画面で作った明細だけ**。品目・出金元・日付・金額がまったく同じでも、
@@ -29,23 +29,23 @@ import { abandonWebPayment, beginWebPayment, completeWebPayment } from "./web-id
  *
  * したがって、置き換えに載せたい明細だけはブラウザで画面を操作して作る。
  * 置き換えの操作そのものはスマートフォンアプリ限定なので、**ここは登録までを担い、
- * 置き換えは人が行う**。
+ * 置き換えは人が行う**。公式APIは2026-12-07に停止し、AIDEからも撤去した（aide#714）ため、
+ * いまはZaimへ登録する唯一の経路でもある。
  *
- * ## 公式API経由との違い
+ * ## 公式API経由（撤去済み）との違い
  *
- * | | 公式API（`write.ts`） | Web版の入力画面（ここ） |
+ * | | 公式API（撤去済み） | Web版の入力画面（ここ） |
  * |---|---|---|
  * | 手段 | OAuth 1.0a でのHTTP | Playwrightでの画面操作 |
- * | 資格情報 | `AIDE_ZAIM_*` | ログイン状態（storage state。Cookieそのもの） |
+ * | 資格情報 | OAuth 1.0a | ログイン状態（storage state。Cookieそのもの） |
  * | 動く場所 | どこでも（VPSのサーバー内で完結） | **storage state と Playwright があるマシンだけ**（サブPC） |
  * | 所要 | 1秒未満 | ヘッドレスChromiumの起動を含めて数十秒 |
  * | カテゴリの指定 | `categoryId` / `genreId` | **名前**（画面がIDを受け取らない） |
  * | 返せるID | `money_id` | **返せない**（画面にIDが出ない。冪等キーをメモへ載せる） |
  * | 置き換えの候補になるか | ならない | **なる** |
  *
- * カテゴリの対応（「ガソリン代 → 交通費/ガソリン」など）は `write.ts` と同じく**持たない**。
- * 呼び出し元がカテゴリ名・ジャンル名まで決めて渡す。名前は `fetchZaimMaster()`
- * （`GET /api/zaim/master`）で引ける。
+ * カテゴリの対応（「ガソリン代 → 交通費/ガソリン」など）は**持たない**。
+ * 呼び出し元がカテゴリ名・ジャンル名まで、Zaimの画面の表記どおりに決めて渡す。
  */
 
 /**
@@ -92,7 +92,7 @@ export interface ZaimWebPaymentInput {
   /** ジャンル名（内訳。Zaimのカテゴリ設定にある表記そのまま）。 */
   genreName: string;
   /**
-   * 出金元の口座ID。`fetchZaimMaster()` の `accounts[].id` と同じ値。
+   * 出金元の口座ID。入力画面の口座の選択肢の value（Zaimの口座IDそのもの）。
    *
    * **自動連携しているクレジットカードを指定する。** 置き換えの候補になる条件で、
    * 「反映待ち」などの手動口座を指定すると登録はできても置き換えに載らない。
