@@ -12,7 +12,7 @@ import { createRecordFile } from "../../record-file.ts";
  * |---|---|---|
  * | ZaimのレコードID | 応答の `money.id` を持てる | **持てない**（画面にIDが出ない） |
  * | 「確定した」の印 | `moneyId` が入っていること | `state: "done"` |
- * | ファイル | `data/zaim-payments.json` | `data/zaim-web-payments.json` |
+ * | ファイル | `data/zaim-payments.json`（撤去済み。本番に残る分は #726 で削除） | `data/zaim-web-payments.json` |
  *
  * **1つのファイルに混ぜない。** あちらは「`moneyId` が null ＝ 結果が確定していない」という
  * 読み方をしており、IDを持てないこちらの記録を混ぜると、登録できた明細まで

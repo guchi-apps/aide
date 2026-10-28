@@ -1258,10 +1258,9 @@ node --env-file-if-exists=.env src/core/connectors/zaim/scripts/web-payment.mjs
 
 #### 二重登録を止める
 
-記録は `data/zaim-web-payments.json`（`web-idempotency.ts`）。**公式API経由の
-`data/zaim-payments.json` とは別ファイル**にしている——あちらは「`money_id` が入っていること」を
-確定の印にしており、idを持てないこちらの記録を混ぜると、登録できた明細まで「結果不明」として
-扱われる。
+記録は `data/zaim-web-payments.json`（`web-idempotency.ts`）。撤去した公式API経由の記録
+（`data/zaim-payments.json`。aide#714）とは別ファイルにしていた——あちらは「`money_id` が入っていること」を
+確定の印にしており、idを持てないこちらの記録を混ぜると、登録できた明細まで「結果不明」として扱われるため。
 
 失敗したときに**Zaimへ何が残っているか**で扱いが割れる。ここが二重登録の分かれ目になる。
 
