@@ -54,6 +54,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `aide_update_event` / `aide_delete_event`（aide#493） | DaySpan経由での既存の予定の変更・削除 | 満たす（下記） | 同上（作成と共用） | **例外**（下記。削除は現在のタイトルの一致が要る） |
 | `aide_create_task` / `aide_update_task` / 状態変更4本（#562） | YoteiFlow経由での固定タスクDBの正式操作 | **狭い例外**（下記） | `AIDE_DAYSPAN_TASKS_WRITE_TOKEN` とOAuth `tasks:write`（読取り双方から分離） | **例外**（下記。YoteiFlowが競合・冪等性・繰り返しを処理） |
 | `aide_create_travel`（#707） | YoteiFlow経由での移動（TravelPlan）の新規作成。通常予定の作成では代替しない | **狭い例外**（下記。作成専用） | `AIDE_DAYSPAN_WRITE_TOKEN`（YoteiFlowの契約が予定書込鍵を要求）とOAuth `travel:write`（読戻しの `travel:read` と分離） | 作成のみ（更新・削除の口なし。YoteiFlowが冪等性・重複検出を処理） |
+| `asset_manager_salary_commit`（#725。プレビュー `asset_manager_salary_preview`・読み戻し `asset_manager_salary_lookup` は読み取り） | ユーザーが指定した給与明細メール1件の添付PDFを、本人の承認後にAsset Managerの給与台帳へ代理登録 | **満たす**（下記） | 給与専用の共有トークン `ASSET_MANAGER_SALARY_AGENT_SECRET`（`ZAIM_SYNC_SECRET` は使わない）とOAuth `salary-agent:write`（プレビュー・読み戻しの `salary-agent:read` と分離） | 作成のみ（上書きなし。下記） |
 | `aide_room_press`（aide#317） | myroom経由での照明などの操作（Nature Remo のボタンを押す） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `aide_aircon_control`（aide#316） | myroom経由でのエアコンの電源・運転モード・設定温度・風量の変更（白くまくんへ運転指示を送る） | 満たす | `AIDE_MYROOM_CONTROL_TOKEN`（照明の操作と共用。読み取り用の `AIDE_MYROOM_TOKEN` とは別のトークン） | **例外**（下記。機器の状態を変える） |
 | `asset_manager_import_payment`（#199） | ChatGPTのスケジュールからAsset Managerへの請求情報（Gmailの請求メール1件）の取り込み | 満たす（下記） | `AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET`（サブスクの読み取り〔#345〕にも同じ値を使う。下記） | 作成のみ（下記） |
@@ -308,6 +309,21 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 - **条件3**: kurashio の取込APIは**既存の行を書き換えない**。同じ内容は `duplicate`、値が違えば `conflict` で止まり、
   訂正の経路は持たない。判定・単位の正規化・同時実行の保護（主キー／出典の一意制約）は kurashio 側
 
+#### 給与明細メールの代理登録は3条件を満たす（#725）
+
+- **条件1**: 給与の台帳（Asset Manager の Salary）へは画面の手動取り込みしか入口が無く、メール添付を会話で確かめて入れる経路は他に無い。
+  Asset Manager 側の契約は asset-manager#791（`/api/salaries/agent/{preview,commit,:id}`）。AIDEは中継だけで、解析・照合・重複判定は向こうが持つ（develop にマージ済み。本番反映は未確認）
+- **条件2**: 給与専用の共有トークン `ASSET_MANAGER_SALARY_AGENT_SECRET` だけで認証する。支出・Zaim向けの `ZAIM_SYNC_SECRET` は流用せず、
+  環境変数へのフォールバックも持たない。OAuth scope も `salary-agent:read`（プレビュー・読み戻し）と `salary-agent:write`（保存）に分け、接続時に本人が承認したときだけ付く
+- **条件3**: 作成のみ。同じ元メール（`source: { mailbox, messageId }`。メールボックスを含むので別アカウントの同じ messageId と衝突しない）の再実行は既存のSalary IDを返すだけで、同日の既存明細は上書きしない（向こうが拒否）
+- **本人承認の担保**: 保存は `approved: true`・本人が確認した支給日・プレビューのトークン・同じPDFが揃わないと通らず、Asset Manager が内容ハッシュの一致まで確かめる。
+  ただし AIDE から見ると LLM が `approved` を付けられるため、**承認を機械的に証明する仕組みではない**。当面は書き込みツールの分離・専用scope・
+  クライアント側の個別承認（「常に許可」にしない）で守る。Asset Manager の認証済み画面で承認する案と、信頼できる会話ゲートウェイが署名付き承認を発行する案は別Issueで評価する。**それが整うまで、本番の初回登録は本人が各ステップを確認する運用に限る**（承認状態を取得するツールは、Asset Manager側にその契約ができてから追加する）
+- **機微情報**: PDFは引数で渡すため**会話履歴・クライアント側のログに残る**（#791の契約がPDF受け取りのため。元PDFは700KBまで。base64後にMCPのリクエスト上限1 MiBへ収めるための値）。PDF・パスワード・明細の金額はMCPのアクセス記録（呼んだ事実だけを残す）にも、エラー文にも出さない。結果は本人との私的な会話でだけ提示する。
+  パスワード付きPDFはツールで受け付けず、Asset Manager の手動画面（`/salaries/new`）へ案内して止める。メールの取得は既存の認可済みの経路で行い、AIDE側でGmail権限は足さない
+- **失敗の扱い**: 2xx以外・`blockers` が残る・重複・IDが返らない場合は成功にせず、未登録と明示する。保存後は `verified: false` で返し、
+  `asset_manager_salary_lookup` でSalary IDを読み戻してから報告する。応答待ちが切れたら `unknown` を返し、再送せず、同じメール・同じPDFでプレビューを引き直して `existing.alreadyImportedSalaryId` で登録の有無を判定する（Asset Manager に元メールだけで引く口は無い）
+
 #### kurashioへの時間別kWhの登録は3条件を満たす（#692）
 
 - **条件1**: kurashio の既存の書き込み口は画面の手動CSV取込（ログイン必須・上書き型）だけで、無人の取得スクリプトから安全に入れる経路は他に無い
@@ -542,6 +558,9 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `kurashio_get_kepco_hourly` | kurashio に保存済みの関西電力の時間別kWhを期間で読む（件数・日別合計・各時間の値・`missing`）。scope `kurashio-energy:read`（詳細は[kurashioの関西電力 時間別kWhの照会と登録](#kurashioの関西電力-時間別kwhの照会と登録692)） |
 | `kurashio_import_kepco_hourly` | 時間別kWhを kurashio へ登録する。**書き込みツール**（既存の値は書き換えない。空欄は送らない。読み戻して全時間一致し、期間内の全時間がそろったときだけ created。欠けが残れば incomplete。`dryRun` で登録せず確認できる）。scope `kurashio-energy:write` |
 | `kurashio_import_utility_bill` | 電気・ガスの月次確定請求を1件 kurashio へ登録する。**書き込みツール**（既存の行は書き換えない。登録後に読み戻して一致したときだけ created。`dryRun` で登録せず確認できる）。scope `kurashio-bills:write` |
+| `asset_manager_salary_preview` | **給与専用**。指定した給与明細メール1件のPDFをAsset Managerで解析し、保存前の確認情報（支給日候補・総支給/手取・未割当/不一致・同日既存・blockers）を返す。**保存しない**。scope `salary-agent:read` |
+| `asset_manager_salary_commit` | **給与専用の書き込みツール**。本人が承認した給与明細1件を給与台帳へ登録する。本人承認前の呼び出し禁止。保存後も `verified: false` で、読み戻してから報告する。scope `salary-agent:write` |
+| `asset_manager_salary_lookup` | **給与専用**。Salary ID か元メールで登録済みの明細を読み戻す（保存後の照合・タイムアウト後の再送前の照会）。scope `salary-agent:read` |
 | `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
 | `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻・枠の長さ・取得時刻 |
