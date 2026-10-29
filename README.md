@@ -560,7 +560,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `kurashio_import_utility_bill` | 電気・ガスの月次確定請求を1件 kurashio へ登録する。**書き込みツール**（既存の行は書き換えない。登録後に読み戻して一致したときだけ created。`dryRun` で登録せず確認できる）。scope `kurashio-bills:write` |
 | `asset_manager_salary_preview` | **給与専用**。指定した給与明細メール1件のPDFをAsset Managerで解析し、保存前の確認情報（支給日候補・総支給/手取・未割当/不一致・同日既存・blockers）を返す。**保存しない**。scope `salary-agent:read` |
 | `asset_manager_salary_commit` | **給与専用の書き込みツール**。本人が承認した給与明細1件を給与台帳へ登録する。本人承認前の呼び出し禁止。保存後も `verified: false` で、読み戻してから報告する。scope `salary-agent:write` |
-| `asset_manager_salary_lookup` | **給与専用**。Salary ID か元メールで登録済みの明細を読み戻す（保存後の照合・タイムアウト後の再送前の照会）。scope `salary-agent:read` |
+| `asset_manager_salary_lookup` | **給与専用**。Salary IDで登録済みの明細を読み戻す（保存後の照合）。元メールでは引けず、タイムアウト後は同じメール・同じPDFで `asset_manager_salary_preview` を引き直し、`existing.alreadyImportedSalaryId` で登録の有無を判定する。scope `salary-agent:read` |
 | `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
 | `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻・枠の長さ・取得時刻 |
