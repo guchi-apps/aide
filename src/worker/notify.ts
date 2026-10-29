@@ -33,6 +33,8 @@ import { DATA_DIR } from "../core/paths.ts";
 
 /** 同じ理由で失敗し続けている間、次の通知までに空ける時間。 */
 const SUPPRESSION_WINDOW_MS = 6 * 60 * 60 * 1000;
+/** 2分周期の見張りで単発の通信断を知らせず、長引く障害だけを知らせる。 */
+const TRANSIENT_FAILURE_GRACE_MS = 10 * 60 * 1000;
 
 /** 通知の送信タイムアウト。ジョブの終了を長く引き止めない。 */
 const SEND_TIMEOUT_MS = 10_000;
@@ -193,6 +195,18 @@ export function decideNotification(
   const elapsed = record.notifiedAt ? now.getTime() - new Date(record.notifiedAt).getTime() : null;
   const shouldNotify = elapsed === null || elapsed >= SUPPRESSION_WINDOW_MS;
   return { shouldNotify, record };
+}
+
+/** ジョブの失敗は記録しつつ、短命な通信断だけ Discord 通知を保留する。 */
+export function shouldDelayTransientFailure(job: string, record: FailureRecord, now: Date): boolean {
+  if (record.notifiedAt !== null) return false;
+  const transient =
+    (job === "printer-watch" &&
+      record.signature === "myroom からプリンターの状態を取得できなかった: 3000ms 以内に応答しなかった") ||
+    (job === "claude-sessions-sync" &&
+      record.signature === "送信に失敗しました（claude-sessions）: fetch failed");
+  return transient &&
+    (record.count < 3 || now.getTime() - new Date(record.firstFailedAt).getTime() < TRANSIENT_FAILURE_GRACE_MS);
 }
 
 /** 日時はJSTで出す。通知を読むのは日本にいる人だけで、UTC表記だと毎回換算が要る。 */
@@ -439,7 +453,7 @@ export async function notifyJobFailure(job: string, cause: unknown): Promise<voi
 
     // 自動再ログインで直る見込みのセッション失効は、人の対応が要らないので送らない。
     // 記録は残すので、直らずに `auto-failed` へ悪化したとき（署名が変わる）は届く。
-    if (shouldNotify && summary.sessionExpiry !== "auto-pending") {
+    if (shouldNotify && summary.sessionExpiry !== "auto-pending" && !shouldDelayTransientFailure(job, record, now)) {
       const sent = await send(url, buildFailurePayload({ job, summary, occurredAt: now, record }));
       // 送れなかったときは notifiedAt を進めない。次の実行で送り直す。
       if (sent) record.notifiedAt = now.toISOString();

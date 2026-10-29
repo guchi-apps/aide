@@ -57,7 +57,6 @@ describe("機能一覧ページ", () => {
     assert.ok(html.includes("GET /api/money/transactions"));
     assert.ok(html.includes("明細が無い場合は空配列（[]）を返す"));
     assert.ok(html.includes("401: 認証情報が無い、または一致しない。"));
-    assert.ok(html.includes("409: 前回の登録結果が確定しておらず、再送不可。"));
   });
 
   it("詳細に渡すリクエスト情報をHTMLとして解釈しない", () => {

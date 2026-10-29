@@ -8,7 +8,7 @@ import {
 import type { Tool, ToolResult } from "../types.ts";
 
 /**
- * 電気代・ガス代の読み取り（aide#324）。
+ * 電気代・ガス代の読み取り（aide#324）。情報源は kurashio の月次請求（aide#714 でZaim公式APIから移した）。
  *
  * `aide_balances` へ畳まず別のツールにしている。あちらは引数を持たない「いまいくら持っているか」で、
  * こちらは種類と期間を指定して「推移」を読む。畳むと毎回13か月ぶんの明細まで載ってしまう。
@@ -34,10 +34,10 @@ function parseMonths(value: unknown): number | string {
 export const utilityBillsTool: Tool = {
   name: "aide_utility_bills",
   description:
-    "電気代・ガス代の請求をZaimの家計簿から読み、直近の請求（日付・金額・使用量）、月ごとの金額と使用量の推移、" +
+    "電気代・ガス代の月次請求をkurashioから読み、直近の請求（請求月・金額・使用量）、月ごとの金額と使用量の推移、" +
     "前月・前年同月との比較、期間内の平均額を返す。「今月の電気代」「先月のガス使用量」「最近の電気代の推移」" +
     "「去年より高いか」を尋ねられたときに呼ぶ。使用量（kWh・m3）は請求に書かれていた月だけ入り、無い月は null。" +
-    "date はZaimに登録された請求・支払の日で、検針期間ではない。読み取り専用。",
+    "月は請求月（メールの「◯月分」）で、検針期間・受信日ではない。1件の請求を細かく照会するなら kurashio_get_utility_bill。読み取り専用。",
   inputSchema: {
     type: "object",
     properties: {
@@ -50,7 +50,7 @@ export const utilityBillsTool: Tool = {
         type: "integer",
         minimum: 1,
         maximum: MAX_MONTHS,
-        description: `今月を含めて何か月ぶん遡るか。省略時は${DEFAULT_MONTHS}（前年同月と比べられる長さ）。`,
+        description: `今月を含めて何か月ぶんの請求月を遡るか。省略時は${DEFAULT_MONTHS}（前年同月と比べられる長さ）。`,
       },
     },
     additionalProperties: false,

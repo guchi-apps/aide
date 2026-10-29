@@ -7,42 +7,25 @@ import { after, afterEach, beforeEach, describe, it, mock } from "node:test";
 
 // 検査を通らない要求はZaimへ届かないが、記録の置き場だけは本番と分けておく。
 const dir = await mkdtemp(join(tmpdir(), "aide-zaim-api-test-"));
-process.env["AIDE_ZAIM_PAYMENT_LOG_PATH"] = join(dir, "zaim-payments.json");
 process.env["AIDE_ZAIM_WEB_PAYMENT_LOG_PATH"] = join(dir, "zaim-web-payments.json");
 process.env["AIDE_ZAIM_WEB_GENRE_EDIT_LOG_PATH"] = join(dir, "zaim-web-genre-edits.json");
 const {
-  handleZaimMaster,
-  handleZaimPayment,
   handleZaimReceiptRefresh,
+  handleZaimRetiredApi,
   handleZaimWebGenreEdit,
   handleZaimWebMemoEdit,
   handleZaimWebPayment,
 } = await import("./zaim.ts");
-const { resolveZaimWriteSecret, zaimWriteSecret } = await import("./zaim.ts");
+const { isRetiredZaimApiPath, resolveZaimWriteSecret, zaimWriteSecret } = await import("./zaim.ts");
 const { resetRateLimits } = await import("../auth/ratelimit.ts");
 const { resetSharedTokenCacheForTest } = await import("../core/connectors/issue-deck/shared-tokens.ts");
 
 /**
  * **Zaimへ実際にリクエストが飛ぶ経路はここでは扱わない。**
  * 認証・メソッド・設定の有無・入力検査という、Zaimへ届く前に決まるところだけをテストする。
- * 検査を通る本体（`createZaimPayment`）は `core/connectors/zaim/write.test.ts`。
  */
 
 const SECRET = "test-only-zaim-write-secret";
-
-const OAUTH_NAMES = [
-  "AIDE_ZAIM_CONSUMER_KEY",
-  "AIDE_ZAIM_CONSUMER_SECRET",
-  "AIDE_ZAIM_ACCESS_TOKEN",
-  "AIDE_ZAIM_ACCESS_TOKEN_SECRET",
-] as const;
-
-function setOAuthEnv(configured: boolean): void {
-  for (const name of OAUTH_NAMES) {
-    if (configured) process.env[name] = "dummy";
-    else delete process.env[name];
-  }
-}
 
 after(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -149,99 +132,22 @@ function fakeReq(method: string, body: string, authorization: string | null): In
   } as unknown as IncomingMessage;
 }
 
-async function post(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Promise<Captured> {
-  const { res, captured } = fakeRes();
-  await handleZaimPayment(fakeReq("POST", typeof body === "string" ? body : JSON.stringify(body), authorization), res);
-  return captured;
-}
-
-const VALID_BODY = {
-  requestId: "test:1",
-  amount: 1200,
-  date: "2026-08-19",
-  categoryId: 101,
-  genreId: 10101,
-};
-
-describe("POST /api/zaim/payment", () => {
-  it("シークレット未設定なら503（認証の失敗とは分ける）", async () => {
-    delete process.env["AIDE_ZAIM_WRITE_SECRET"];
-    const result = await post(VALID_BODY);
-    assert.equal(result.status, 503);
-    assert.match(result.body, /AIDE_ZAIM_WRITE_SECRET/);
+describe("廃止した公式APIの口（aide#714）", () => {
+  it("/api/zaim/payment と /api/zaim/master だけが廃止の対象", () => {
+    assert.equal(isRetiredZaimApiPath("/api/zaim/payment"), true);
+    assert.equal(isRetiredZaimApiPath("/api/zaim/master"), true);
+    assert.equal(isRetiredZaimApiPath("/api/zaim/payment/web"), false);
   });
 
-  it("シークレットが違えば401", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(true);
-    assert.equal((await post(VALID_BODY, "Bearer wrong")).status, 401);
-    assert.equal((await post(VALID_BODY, null)).status, 401);
-  });
-
-  it("失敗が続けば429で締め出す（公開URLからも届くため）", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(true);
-    for (let attempt = 0; attempt < 5; attempt += 1) await post(VALID_BODY, "Bearer wrong");
-
-    // 正しい鍵でもロック中は通さない。
-    assert.equal((await post(VALID_BODY)).status, 429);
-  });
-
-  it("POST以外は405（認証より先に見る）", async () => {
-    const { res, captured } = fakeRes();
-    await handleZaimPayment(fakeReq("GET", "", null), res);
-    assert.equal(captured.status, 405);
-  });
-
-  it("ZaimのOAuth設定が揃っていなければ503", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(false);
-    const result = await post(VALID_BODY);
-    assert.equal(result.status, 503);
-    assert.match(result.body, /AIDE_ZAIM_/);
-  });
-
-  it("JSONとして読めなければ400", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(true);
-    assert.equal((await post("{壊れた")).status, 400);
-  });
-
-  it("入力が不正なら400で、何が足りないかを返す", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(true);
-
-    const noRequestId = await post({ ...VALID_BODY, requestId: undefined });
-    assert.equal(noRequestId.status, 400);
-    assert.match(noRequestId.body, /requestId/);
-
-    const badAmount = await post({ ...VALID_BODY, amount: 0 });
-    assert.equal(badAmount.status, 400);
-    assert.match(badAmount.body, /amount/);
-  });
-});
-
-describe("GET /api/zaim/master", () => {
-  it("GET以外は405", async () => {
-    const { res, captured } = fakeRes();
-    await handleZaimMaster(fakeReq("POST", "", null), res);
-    assert.equal(captured.status, 405);
-  });
-
-  it("シークレットが違えば401", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(true);
-    const { res, captured } = fakeRes();
-    await handleZaimMaster(fakeReq("GET", "", "Bearer wrong"), res);
-    assert.equal(captured.status, 401);
-  });
-
-  it("ZaimのOAuth設定が揃っていなければ503（Zaimへは問い合わせない）", async () => {
-    process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(false);
-    const { res, captured } = fakeRes();
-    await handleZaimMaster(fakeReq("GET", "", `Bearer ${SECRET}`), res);
-    assert.equal(captured.status, 503);
+  it("認証なしでも410と移行先を返す（Zaimへは何も送らない）", () => {
+    for (const path of ["/api/zaim/payment", "/api/zaim/master"]) {
+      const { res, captured } = fakeRes();
+      handleZaimRetiredApi(path, res);
+      assert.equal(captured.status, 410);
+      const body = JSON.parse(captured.body) as Record<string, unknown>;
+      assert.equal(body["kind"], "retired");
+      assert.equal(typeof body["alternative"], "string");
+    }
   });
 });
 
@@ -292,7 +198,6 @@ describe("POST /api/zaim/payment/web", () => {
   it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
     // ここで503にすると、Zaimへ書ける環境（サブPC）なのに口が開かないことになる。
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(false);
     const result = await postWeb({ ...VALID_WEB_BODY, name: undefined });
     assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
     assert.match(result.body, /name/);
@@ -357,7 +262,6 @@ describe("POST /api/zaim/payment/web/genre", () => {
 
   it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(false);
     const result = await postWebGenre({ ...VALID_WEB_GENRE_BODY, categoryName: undefined });
     assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
     assert.match(result.body, /categoryName/);
@@ -421,7 +325,6 @@ describe("POST /api/zaim/payment/web/memo", () => {
 
   it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
-    setOAuthEnv(false);
     const result = await postWebMemo({ ...VALID_WEB_MEMO_BODY, comment: undefined });
     assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
     assert.match(result.body, /comment/);

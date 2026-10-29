@@ -18,8 +18,7 @@ import { dateMatches, parseAmountValue, pickGenreIndex, readMenuItems } from "./
  * Zaim Web版の「家計簿の編集」モーダルから、既存明細（自動連携明細を含む）の
  * カテゴリ・内訳だけを変更する（#273・#409）。
  *
- * **公式APIは自動連携明細（カード・スマートレシート等）を編集できない**（Zaim APIの仕様。
- * `write.ts` 冒頭）。asset-manager の「内訳の提案」（asset-manager#420）が算出した内訳を
+ * **公式APIは自動連携明細（カード・スマートレシート等）を編集できない**（Zaim APIの仕様）。asset-manager の「内訳の提案」（asset-manager#420）が算出した内訳を
  * 書き戻すため、この画面を人と同じように操作する。
  *
  * ## `web-payment.mjs`（新規登録）との違い

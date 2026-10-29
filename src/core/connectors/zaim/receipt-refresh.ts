@@ -6,7 +6,7 @@ import {
 import { buildZaimMoneyList } from "./parse.ts";
 import { type ZaimScriptDeps, runZaimScript, zaimScriptPath } from "./session.ts";
 import type { ZaimMoneyEntry, ZaimRawMoneyEntry } from "./types.ts";
-import { MAX_AMOUNT, isValidDate, normalizeId } from "./write.ts";
+import { MAX_AMOUNT, isValidDate, normalizeId } from "./input.ts";
 import { zaimMonthOfDate, zaimMonthStartDay } from "./zaim-month.ts";
 
 /**

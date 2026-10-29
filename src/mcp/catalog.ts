@@ -49,6 +49,11 @@ import {
   assetManagerImportPaymentTool,
   assetManagerSubscriptionsTool,
 } from "./tools/asset-manager.ts";
+import {
+  assetManagerSalaryCommitTool,
+  assetManagerSalaryLookupTool,
+  assetManagerSalaryPreviewTool,
+} from "./tools/salary-agent.ts";
 import { researchDeskImportWeeklyReportTool } from "./tools/research-desk.ts";
 import { reportWorkTool, workReportsTool } from "./tools/work-reports.ts";
 
@@ -73,7 +78,7 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(fixedCostsTool);
   // 電気代・ガス代（#324）。種類と期間を取るため固定費・残高へは畳まない。
   registry.register(utilityBillsTool);
-  // kurashioの月次請求（#678）。Zaim由来の aide_utility_bills とは保存先が別。読み取りと書き込みは別ツール・別scope。
+  // kurashioの月次請求（#678）。aide_utility_bills も同じ請求を推移として読む（#714）。読み取りと書き込みは別ツール・別scope。
   registry.register(kurashioBillContractsTool);
   registry.register(kurashioGetBillTool);
   registry.register(kurashioImportBillTool);
@@ -141,6 +146,10 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(assetManagerAddSubscriptionPriceTool);
   registry.register(assetManagerUpdateSubscriptionTool);
   registry.register(assetManagerRecordSubscriptionCancellationTool);
+  // 給与明細メールの代理登録（#725）。給与専用で、支出ツールとは別。プレビュー・読み戻しと保存はscopeも別。
+  registry.register(assetManagerSalaryPreviewTool);
+  registry.register(assetManagerSalaryCommitTool);
+  registry.register(assetManagerSalaryLookupTool);
   registry.register(researchDeskImportWeeklyReportTool);
   registry.register(createNotificationTool);
   registry.register(createTaskCandidateTool);

@@ -39,6 +39,9 @@ export const TRAVEL_READ_SCOPE = "travel:read";
 export const TRAVEL_WRITE_SCOPE = "travel:write";
 /** 現在地の最終測位（#715）。読み取り専用。位置は書き込みscopeを持たず、端末トークンだけが書ける。 */
 export const LOCATION_READ_SCOPE = "location:read";
+/** 給与明細メールの代理登録（#725）。プレビュー・読み戻しと保存は別の承認単位にする。 */
+export const SALARY_AGENT_READ_SCOPE = "salary-agent:read";
+export const SALARY_AGENT_WRITE_SCOPE = "salary-agent:write";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
@@ -53,6 +56,8 @@ const SUPPORTED_SCOPES = new Set([
   TRAVEL_READ_SCOPE,
   TRAVEL_WRITE_SCOPE,
   LOCATION_READ_SCOPE,
+  SALARY_AGENT_READ_SCOPE,
+  SALARY_AGENT_WRITE_SCOPE,
 ]);
 
 /**

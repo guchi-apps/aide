@@ -49,7 +49,7 @@ const PAGE_TIMEOUT = 60_000
 const SUBMIT_TIMEOUT = 60_000
 /** 入力のたびにReactの再描画を待つ。短すぎると読み直した値が古いまま通る。 */
 const SETTLE_MS = 400
-/** メモの上限。`write.ts` の `MAX_TEXT_LENGTH` と同じ値を持つ（Zaimが100文字を超えると受け付けない）。 */
+/** メモの上限。`input.ts` の `MAX_TEXT_LENGTH` と同じ値を持つ（Zaimが100文字を超えると受け付けない）。 */
 const MAX_COMMENT_LENGTH = 100
 /** 日付ピッカーで送る「前／次」の上限。これを超える月送りは入力の誤りとみなす。 */
 const MAX_MONTH_STEPS = 60
@@ -214,8 +214,8 @@ async function selectDate(page, form, date) {
 /**
  * 出金元の口座を選ぶ。
  *
- * **`option` の value はZaimの口座IDそのもの**なので、公式API（`fetchZaimMaster()`）で
- * 引いた `accounts[].id` をそのまま渡せる。置き換えの条件は「自動連携しているカードを
+ * **`option` の value はZaimの口座IDそのもの**（撤去した公式APIの `accounts[].id` と
+ * 同じ値）なので、呼び出し元が持っているIDをそのまま渡せる。置き換えの条件は「自動連携しているカードを
  * 出金元にすること」なので、ここが外れると登録できても置き換えに載らない。
  * **既定で先頭の口座が選ばれている。** 選び直さないと、指定と関係ない口座で登録される。
  */

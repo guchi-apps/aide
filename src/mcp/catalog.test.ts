@@ -71,7 +71,6 @@ describe("MCPツールの登録簿", () => {
   it("書き込みツールは dryRun を持つ", () => {
     // **どれも取り消せない経路。** 送る前に内容を確かめる口を必ず残す。
     for (const name of [
-      "aide_zaim_payment",
       "aide_create_issue",
       "issue_deck_upload_image",
       "aide_create_event",
@@ -110,6 +109,15 @@ describe("MCPツールの登録簿", () => {
       assert.deepEqual(registry.get(name)?.requiredScopes, ["kurashio-bills:read"], name);
     }
     assert.deepEqual(registry.get("kurashio_import_utility_bill")?.requiredScopes, ["kurashio-bills:write"]);
+  });
+
+  it("給与明細の代理登録は専用scopeで、プレビュー・読み戻しと保存を分離する（#725）", () => {
+    const registry = buildToolRegistry();
+    assert.deepEqual(registry.get("asset_manager_salary_preview")?.requiredScopes, ["salary-agent:read"]);
+    assert.deepEqual(registry.get("asset_manager_salary_lookup")?.requiredScopes, ["salary-agent:read"]);
+    assert.deepEqual(registry.get("asset_manager_salary_commit")?.requiredScopes, ["salary-agent:write"]);
+    // 既存の支出・サブスクのツールには給与の権限を持ち込まない。
+    assert.equal(registry.get("asset_manager_import_payment")?.requiredScopes, undefined);
   });
 
   it("kurashioの時間別kWhの照会と登録はOAuth scopeでも分離する", () => {

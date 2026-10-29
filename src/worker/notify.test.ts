@@ -22,6 +22,7 @@ const {
   readState,
   staleAccountsSignature,
   summarizeFailure,
+  shouldDelayTransientFailure,
 } = await import("./notify.ts");
 
 type FailureRecord = import("./notify.ts").FailureRecord;
@@ -182,6 +183,33 @@ describe("連続失敗の抑制", () => {
 
 });
 
+describe("短命な通信障害の通知", () => {
+  const first = new Date("2026-10-28T00:00:00.000Z");
+  const transient = recordAt({
+    signature: "送信に失敗しました（claude-sessions）: fetch failed",
+    firstFailedAt: first.toISOString(),
+    notifiedAt: null,
+    count: 6,
+  });
+
+  it("Claude の通信断は10分続くまでは通知を待つ", () => {
+    assert.equal(shouldDelayTransientFailure("claude-sessions-sync", transient, new Date(first.getTime() + 9 * 60_000)), true);
+    assert.equal(shouldDelayTransientFailure("claude-sessions-sync", transient, new Date(first.getTime() + 10 * 60_000)), false);
+  });
+
+  it("プリンターの取得タイムアウトも10分続くまでは通知を待つ", () => {
+    const record = { ...transient, signature: "myroom からプリンターの状態を取得できなかった: 3000ms 以内に応答しなかった" };
+    assert.equal(shouldDelayTransientFailure("printer-watch", record, new Date(first.getTime() + 9 * 60_000)), true);
+    assert.equal(shouldDelayTransientFailure("printer-watch", record, new Date(first.getTime() + 10 * 60_000)), false);
+  });
+
+  it("認証や他ジョブの失敗、既に通知した障害は遅らせない", () => {
+    assert.equal(shouldDelayTransientFailure("printer-watch", { ...transient, signature: "HTTP 503（相手側でAPIキーが未設定）" }, first), false);
+    assert.equal(shouldDelayTransientFailure("zaim-sync", transient, first), false);
+    assert.equal(shouldDelayTransientFailure("claude-sessions-sync", { ...transient, notifiedAt: first.toISOString() }, first), false);
+  });
+});
+
 describe("通知の中身", () => {
   const occurredAt = new Date("2026-08-14T11:07:36.000Z");
 
@@ -280,6 +308,17 @@ describe("送信と記録", () => {
     await notifyJobFailure("zaim-sync", new Error("壊れました"));
     assert.equal(received.length, 1);
     assert.equal((await readState())["zaim-sync"]?.count, 2);
+  });
+
+  it("単発の通信断は送らず、回復後の再発も新しい単発として扱う", async () => {
+    const timeout = new Error("送信に失敗しました（claude-sessions）: fetch failed（UND_ERR_CONNECT_TIMEOUT）");
+    await notifyJobFailure("claude-sessions-sync", timeout);
+    assert.equal(received.length, 0);
+    assert.equal((await readState())["claude-sessions-sync"]?.count, 1);
+    await clearJobFailure("claude-sessions-sync");
+    await notifyJobFailure("claude-sessions-sync", timeout);
+    assert.equal(received.length, 0);
+    assert.equal((await readState())["claude-sessions-sync"]?.count, 1);
   });
 
   it("送信できなければ通知済みにしない", async () => {
