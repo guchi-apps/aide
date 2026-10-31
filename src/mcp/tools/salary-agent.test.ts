@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { Tool, ToolResult } from "../types.ts";
 import {
+  createSalaryApprovalStatusTool,
   createSalaryCommitTool,
   createSalaryLookupTool,
   createSalaryPreviewTool,
@@ -14,7 +15,8 @@ import {
 const CONFIG = { baseUrl: "http://am.test", token: "secret-token" };
 const PDF = Buffer.from("%PDF-1.4 synthetic").toString("base64");
 const BASE = { mailbox: "Me@Example.com", gmailMessageId: "msg-1", pdfBase64: PDF };
-const COMMIT = { ...BASE, approved: true, salaryDate: "2026-10-25", previewToken: "tok" };
+const COMMIT = { ...BASE, previewId: "clxp1", previewToken: "tok" };
+const APPROVAL_PATH = "/api/salaries/agent/approvals/clxp1";
 
 interface Call {
   method: string;
@@ -44,6 +46,13 @@ function fake(handler: (call: Call) => Response | Promise<Response>): { deps: Sa
   return { deps: { readConfig: async () => CONFIG, fetchImpl }, calls };
 }
 
+/** 承認状態の読み取りには `approval` を返し、それ以外（commit）は `commit` に任せる。 */
+function approvedThen(commit: (call: Call) => Response | Promise<Response>, approval = "approved") {
+  return fake((call) =>
+    call.path === APPROVAL_PATH ? json(200, { status: "ok", previewId: "clxp1", approval, expiresAt: "2026-10-31T10:30:00.000Z" }) : commit(call),
+  );
+}
+
 function parse(r: ToolResult): Record<string, unknown> {
   return JSON.parse(r.content[0]!.text) as Record<string, unknown>;
 }
@@ -70,15 +79,25 @@ describe("入力の検証", () => {
 
 describe("asset_manager_salary_preview", () => {
   it("給与専用トークンで解析を依頼し、保存していないと明示する", async () => {
-    const { deps, calls } = fake(() => json(200, { status: "ok", blockers: [], canSave: true, previewToken: "tok" }));
+    const { deps, calls } = fake(() =>
+      json(200, { status: "ok", blockers: [], canSave: true, previewToken: "tok", previewId: "clxp1", approvalPath: "/salaries/agent/approvals/clxp1" }),
+    );
     const r = await run(createSalaryPreviewTool(deps), BASE);
     const body = parse(r);
     assert.equal(r.isError, false);
     assert.equal(body["registered"], false);
     assert.equal(body["previewToken"], "tok");
+    assert.equal(body["approvalUrl"], "http://am.test/salaries/agent/approvals/clxp1");
     assert.equal(calls[0]?.path, "/api/salaries/agent/preview");
     assert.equal(calls[0]?.auth, "Bearer secret-token");
     assert.deepEqual(calls[0]?.body?.["source"], { mailbox: "me@example.com", messageId: "msg-1" });
+  });
+
+  it("承認画面のパスが想定の形でなければ、本人に開かせるURLを作らない", async () => {
+    for (const approvalPath of ["https://evil.test/salaries/agent/approvals/x", "/salaries/agent/approvals/../../logout", 42]) {
+      const { deps } = fake(() => json(200, { status: "ok", previewId: "clxp1", approvalPath }));
+      assert.equal("approvalUrl" in parse(await run(createSalaryPreviewTool(deps), BASE)), false, String(approvalPath));
+    }
   });
 
   it("トークン未設定なら送らず未登録と返す", async () => {
@@ -99,34 +118,59 @@ describe("asset_manager_salary_preview", () => {
 });
 
 describe("asset_manager_salary_commit", () => {
-  it("approved: true が無ければ送らない", async () => {
-    const { deps, calls } = fake(() => json(200, { salaryId: 1 }));
-    for (const approved of [undefined, false, "true"]) {
-      const r = await run(createSalaryCommitTool(deps), { ...COMMIT, approved });
-      assert.equal(parse(r)["registered"], false);
+  it("画面で承認されていなければ、approved: true を付けても保存を送らない（#728）", async () => {
+    for (const approval of ["pending", "rejected", "consumed", "expired"]) {
+      const { deps, calls } = approvedThen(() => json(201, { status: "created", salaryId: "clx1abc" }), approval);
+      const r = await run(createSalaryCommitTool(deps), { ...COMMIT, approved: true });
+      const body = parse(r);
+      assert.equal(r.isError, true, approval);
+      assert.equal(body["status"], "not_approved", approval);
+      assert.equal(body["registered"], false, approval);
+      assert.equal(body["approval"], approval);
+      assert.deepEqual(calls.map((c) => c.method), ["GET"], approval);
+    }
+  });
+
+  it("承認状態が読めない・見つからない・連携に失敗したときも送らない", async () => {
+    const replies: (() => Response)[] = [
+      () => json(200, { status: "ok", previewId: "other", approval: "approved" }),
+      () => json(200, { status: "ok", previewId: "clxp1", approval: "maybe" }),
+      () => json(404, { status: "not_found", message: "見つかりません" }),
+      () => json(401, { status: "unauthorized", message: "Unauthorized" }),
+    ];
+    for (const reply of replies) {
+      const { deps, calls } = fake((call) => (call.method === "GET" ? reply() : json(201, { status: "created", salaryId: "clx1abc" })));
+      const r = await run(createSalaryCommitTool(deps), COMMIT);
       assert.equal(r.isError, true);
+      assert.equal(parse(r)["registered"], false);
+      assert.deepEqual(calls.map((c) => c.method), ["GET"]);
+    }
+  });
+
+  it("プレビューID・プレビューのトークンが無ければ送らない", async () => {
+    const { deps, calls } = approvedThen(() => json(200, { salaryId: 1 }));
+    for (const args of [{ ...COMMIT, previewId: "" }, { ...COMMIT, previewId: "../x" }, { ...COMMIT, previewToken: "" }]) {
+      assert.equal((await run(createSalaryCommitTool(deps), args)).isError, true);
     }
     assert.equal(calls.length, 0);
   });
 
-  it("支給日・プレビューのトークンが無ければ送らない", async () => {
-    const { deps, calls } = fake(() => json(200, { salaryId: 1 }));
-    assert.equal((await run(createSalaryCommitTool(deps), { ...COMMIT, salaryDate: "2026-02-30" })).isError, true);
-    assert.equal((await run(createSalaryCommitTool(deps), { ...COMMIT, previewToken: "" })).isError, true);
-    assert.equal(calls.length, 0);
-  });
-
   it("保存できたときは未検証で返し、読み戻しを促す", async () => {
-    const { deps, calls } = fake(() => json(201, { status: "created", salaryId: "clx1abc", readPath: "/api/salaries/agent/clx1abc" }));
+    const { deps, calls } = approvedThen(() => json(201, { status: "created", salaryId: "clx1abc", readPath: "/api/salaries/agent/clx1abc" }));
     const r = await run(createSalaryCommitTool(deps), COMMIT);
     const body = parse(r);
     assert.equal(r.isError, false);
     assert.equal(body["registered"], true);
     assert.equal(body["verified"], false);
     assert.equal(body["salaryId"], "clx1abc");
-    assert.equal(calls[0]?.body?.["approved"], true);
-    assert.equal(calls[0]?.body?.["salaryDate"], "2026-10-25");
-    assert.deepEqual(calls[0]?.body?.["source"], { mailbox: "me@example.com", messageId: "msg-1" });
+    assert.equal(calls[0]?.path, APPROVAL_PATH);
+    assert.equal(calls[1]?.path, "/api/salaries/agent/commit");
+    assert.equal(calls[1]?.body?.["previewId"], "clxp1");
+    assert.equal(calls[1]?.body?.["previewToken"], "tok");
+    // 承認の根拠は画面の記録だけ。LLM が付けられる approved や推測の支給日は送らない
+    assert.equal("approved" in (calls[1]?.body ?? {}), false);
+    assert.equal("salaryDate" in (calls[1]?.body ?? {}), false);
+    assert.deepEqual(calls[1]?.body?.["source"], { mailbox: "me@example.com", messageId: "msg-1" });
   });
 
   it("created の形をしていない2xxや、IDが無い応答は登録できたとしない", async () => {
@@ -137,7 +181,7 @@ describe("asset_manager_salary_commit", () => {
       [200, { status: "ok" }],
     ];
     for (const [httpStatus, payload] of cases) {
-      const { deps } = fake(() => json(httpStatus, payload));
+      const { deps } = approvedThen(() => json(httpStatus, payload));
       const r = await run(createSalaryCommitTool(deps), COMMIT);
       assert.equal(r.isError, true, JSON.stringify(payload));
       assert.equal(parse(r)["registered"], "unknown", JSON.stringify(payload));
@@ -146,7 +190,7 @@ describe("asset_manager_salary_commit", () => {
   });
 
   it("同じメールの再実行は新規登録ではなく既存IDを示す", async () => {
-    const { deps } = fake(() => json(200, { status: "already_imported", message: "すでに登録済みです", salaryId: "clx7" }));
+    const { deps } = approvedThen(() => json(200, { status: "already_imported", message: "すでに登録済みです", salaryId: "clx7" }));
     const r = await run(createSalaryCommitTool(deps), COMMIT);
     const body = parse(r);
     assert.equal(r.isError, true);
@@ -160,11 +204,12 @@ describe("asset_manager_salary_commit", () => {
     const cases: [number, Record<string, unknown>][] = [
       [422, { status: "blocked", message: "この明細は代理登録できません", blockers: [{ code: "unassigned", message: "未割当" }] }],
       [409, { status: "preview_expired", message: "プレビューの有効期限が切れました" }],
+      [409, { status: "approval_not_granted", message: "まだ承認されていません" }],
       [409, { status: "date_conflict", message: "同じ支給日の給与明細がすでにあります", salaryId: "clx9" }],
       [422, { status: "needs_password", message: "パスワード付きのPDFは代理登録できません", manualImportPath: "/salaries/new" }],
     ];
     for (const [httpStatus, payload] of cases) {
-      const { deps } = fake(() => json(httpStatus, payload));
+      const { deps } = approvedThen(() => json(httpStatus, payload));
       const r = await run(createSalaryCommitTool(deps), COMMIT);
       const body = parse(r);
       assert.equal(r.isError, true);
@@ -172,14 +217,15 @@ describe("asset_manager_salary_commit", () => {
       assert.equal(body["reason"], payload["message"]);
       assert.equal("salaryId" in body, false, JSON.stringify(payload));
       assert.equal(body["httpStatus"], httpStatus);
+      assert.equal(body["code"], payload["status"]);
     }
-    const { deps } = fake(() => json(409, { status: "date_conflict", message: "m", salaryId: "clx9" }));
+    const { deps } = approvedThen(() => json(409, { status: "date_conflict", message: "m", salaryId: "clx9" }));
     assert.equal(parse(await run(createSalaryCommitTool(deps), COMMIT))["existingSalaryId"], "clx9");
   });
 
   it("タイムアウトは unknown で、再送せず先に照会させる", async () => {
     const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
-    const { deps } = fake(() => Promise.reject(abort));
+    const { deps } = approvedThen(() => Promise.reject(abort));
     const r = await run(createSalaryCommitTool(deps), COMMIT);
     const body = parse(r);
     assert.equal(r.isError, true);
@@ -190,10 +236,43 @@ describe("asset_manager_salary_commit", () => {
   });
 
   it("エラー文にPDFやトークンを含めない", async () => {
-    const { deps } = fake(() => Promise.reject(new Error(`boom ${PDF} secret-token`)));
+    const { deps } = approvedThen(() => Promise.reject(new Error(`boom ${PDF} secret-token`)));
     const r = await run(createSalaryCommitTool(deps), COMMIT);
     assert.ok(!r.content[0]!.text.includes(PDF));
     assert.ok(!r.content[0]!.text.includes("secret-token"));
+  });
+});
+
+describe("asset_manager_salary_approval_status", () => {
+  it("画面での承認状態を読み、approved のときだけ保存へ進めると返す", async () => {
+    for (const approval of ["pending", "approved", "rejected", "consumed", "expired"]) {
+      const { deps, calls } = approvedThen(() => json(500, {}), approval);
+      const r = await run(createSalaryApprovalStatusTool(deps), { previewId: "clxp1" });
+      const body = parse(r);
+      assert.equal(r.isError, false);
+      assert.equal(body["approval"], approval);
+      assert.equal(body["canCommit"], approval === "approved");
+      assert.equal(calls[0]?.method, "GET");
+      assert.equal(calls[0]?.path, APPROVAL_PATH);
+      assert.equal(calls[0]?.auth, "Bearer secret-token");
+    }
+  });
+
+  it("IDの形が違うものは送らない", async () => {
+    const { deps, calls } = fake(() => json(200, {}));
+    for (const previewId of [undefined, "", "../commit", 42]) {
+      assert.equal((await run(createSalaryApprovalStatusTool(deps), { previewId })).isError, true);
+    }
+    assert.equal(calls.length, 0);
+  });
+
+  it("見つからない・読めない状態は承認済みと扱わない", async () => {
+    const notFound = fake(() => json(404, { status: "not_found", message: "見つかりません" }));
+    assert.equal(parse(await run(createSalaryApprovalStatusTool(notFound.deps), { previewId: "clxp1" }))["status"], "not_found");
+    const odd = fake(() => json(200, { status: "ok", previewId: "clxp1", approval: "granted" }));
+    const r = await run(createSalaryApprovalStatusTool(odd.deps), { previewId: "clxp1" });
+    assert.equal(r.isError, true);
+    assert.equal("canCommit" in parse(r), false);
   });
 });
 
