@@ -111,10 +111,11 @@ describe("MCPツールの登録簿", () => {
     assert.deepEqual(registry.get("kurashio_import_utility_bill")?.requiredScopes, ["kurashio-bills:write"]);
   });
 
-  it("給与明細の代理登録は専用scopeで、プレビュー・読み戻しと保存を分離する（#725）", () => {
+  it("給与明細の代理登録は専用scopeで、プレビュー・承認状態・読み戻しと保存を分離する（#725・#728）", () => {
     const registry = buildToolRegistry();
     assert.deepEqual(registry.get("asset_manager_salary_preview")?.requiredScopes, ["salary-agent:read"]);
     assert.deepEqual(registry.get("asset_manager_salary_lookup")?.requiredScopes, ["salary-agent:read"]);
+    assert.deepEqual(registry.get("asset_manager_salary_approval_status")?.requiredScopes, ["salary-agent:read"]);
     assert.deepEqual(registry.get("asset_manager_salary_commit")?.requiredScopes, ["salary-agent:write"]);
     // 既存の支出・サブスクのツールには給与の権限を持ち込まない。
     assert.equal(registry.get("asset_manager_import_payment")?.requiredScopes, undefined);
