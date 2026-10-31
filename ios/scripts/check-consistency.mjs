@@ -53,7 +53,20 @@ export function collectProblems(files) {
     }
   }
 
-  // 3. project.pbxproj を手で編集した場合の壊れ方（括弧・ID参照）
+  // 3. 位置情報の設定画面への遷移先: AIDE の LOCATION_SETTINGS_PATH と Swift の locationSettingsPath（#736）
+  const webPath = files.login.match(/LOCATION_SETTINGS_PATH\s*=\s*"([^"]+)"/);
+  const swiftPath = files.contentView.match(/locationSettingsPath\s*=\s*"([^"]+)"/);
+  if (!webPath || !swiftPath) {
+    problems.push(
+      "LOCATION_SETTINGS_PATH または locationSettingsPath が読み取れません（書き方を変えたならこのスクリプトも直す）",
+    );
+  } else if (webPath[1] !== swiftPath[1]) {
+    problems.push(
+      `位置情報の設定画面の遷移先が違います: AIDE は "${webPath[1]}"、Swift は "${swiftPath[1]}"`,
+    );
+  }
+
+  // 4. project.pbxproj を手で編集した場合の壊れ方（括弧・ID参照）
   let depth = 0;
   for (const ch of files.pbxproj) {
     if (ch === "{") depth++;
@@ -79,6 +92,7 @@ function main() {
     packageJson: read("package.json"),
     pbxproj: read("ios", "AIDEios.xcodeproj", "project.pbxproj"),
     appAuth: read("src", "web", "app-auth.ts"),
+    login: read("src", "web", "login.ts"),
     contentView: read("ios", "AIDEios", "ContentView.swift"),
     infoPlist: read("ios", "AIDEios-Info.plist"),
   });

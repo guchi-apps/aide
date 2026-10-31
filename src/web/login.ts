@@ -128,11 +128,22 @@ export async function currentSession(
 const ACCOUNT_MENU_ID = "account-menu";
 
 const ICON_USER = `<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.2" r="3.9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4.4 20.2c.6-3.6 3.7-5.6 7.6-5.6s7 2 7.6 5.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+/**
+ * iOSアプリ（`ios/`）が横取りする遷移先。アプリは位置共有の設定シートを開き、遷移そのものは取り消す。
+ * Swift の `AIDEConfiguration.locationSettingsPath` と同じ値にする（`ios/scripts/check-consistency.mjs` が照合する）。
+ */
+export const LOCATION_SETTINGS_PATH = "/app/location-settings";
+
+const ICON_PIN = `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>`;
 const ICON_LOGOUT = `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 4.5H6.2a1.7 1.7 0 0 0-1.7 1.7v11.6a1.7 1.7 0 0 0 1.7 1.7h3.3M15 8l4 4-4 4M19 12H9.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 /**
  * ヘッダー右上のアカウントボタンと、押すと開くメニュー（ログイン中のメールアドレスとログアウト）。
  * 認証が無効な環境では何も出さない（ログアウトしても素通しのままで、押す意味が無い）。
+ *
+ * 「位置情報の設定画面」は iOS アプリで開いたときだけ見える（#736）。位置共有は iPhone アプリの機能で、
+ * ブラウザには設定先が無い。アプリが `<html data-aide-app>` を付けたときだけ CSS が表示する
+ * （`src/web/layout.ts`）。押すと `LOCATION_SETTINGS_PATH` へ遷移しようとし、アプリがそれを取り消して設定シートを開く。
  *
  * 開閉はブラウザ標準のポップオーバー（`popover`）に任せ、JavaScriptは足さない。
  * 外側を押す・Escキー・もう一度ボタンを押すで閉じる処理と、開閉状態の読み上げはブラウザが持つ。
@@ -144,7 +155,7 @@ export function accountAction(session: StatusSession | null, authEnabled: boolea
     ? `<div class="account-who"><span class="lb">ログイン中</span><span class="em">${escapeHtml(session.email)}</span></div>`
     : "";
   return `<div class="account"><button class="account-btn" type="button" popovertarget="${ACCOUNT_MENU_ID}" aria-label="アカウント" aria-haspopup="true">${ICON_USER}</button>
-<div id="${ACCOUNT_MENU_ID}" class="account-menu" popover="auto" role="group" aria-label="アカウント">${who}<form method="post" action="/status/logout"><button class="account-out" type="submit">${ICON_LOGOUT}ログアウト</button></form></div></div>`;
+<div id="${ACCOUNT_MENU_ID}" class="account-menu" popover="auto" role="group" aria-label="アカウント">${who}<form class="account-app" method="get" action="${LOCATION_SETTINGS_PATH}"><button class="account-out" type="submit" popovertarget="${ACCOUNT_MENU_ID}" popovertargetaction="hide">${ICON_PIN}位置情報の設定画面</button></form><form method="post" action="/status/logout"><button class="account-out" type="submit">${ICON_LOGOUT}ログアウト</button></form></div></div>`;
 }
 
 /**

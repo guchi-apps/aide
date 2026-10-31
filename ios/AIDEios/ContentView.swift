@@ -19,6 +19,9 @@ enum AIDEConfiguration {
     static let appConsumePath = "/status/auth/app/consume"
     static let callbackScheme = "com.gucchii.aide"
     static let callbackPath = "/auth/callback"
+    /// 右上のユーザーメニューの「位置情報の設定画面」が向かう先。遷移は取り消し、設定シートを開く。
+    /// AIDE側の`LOCATION_SETTINGS_PATH`（`src/web/login.ts`）と同じ値にする。
+    static let locationSettingsPath = "/app/location-settings"
 }
 
 struct ContentView: View {
@@ -36,7 +39,8 @@ struct ContentView: View {
                 url: AIDEConfiguration.mapURL,
                 route: router.pendingRoute,
                 isActive: lock.isUnlocked,
-                onRouteOpened: router.consume
+                onRouteOpened: router.consume,
+                onOpenLocationSettings: { showsLocationSettings = true }
             ) { message in
                 authenticationError = message
                 showsAuthenticationError = true
@@ -46,26 +50,6 @@ struct ContentView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(authenticationError)
-            }
-
-            // 位置共有の設定を開く小さなボタン。ロック解除後だけ出す。
-            if lock.isUnlocked {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Button {
-                            showsLocationSettings = true
-                        } label: {
-                            Image(systemName: location.status == .sharing ? "location.fill" : "location")
-                                .padding(10)
-                                .background(.regularMaterial, in: Circle())
-                        }
-                        .accessibilityLabel("位置共有の設定")
-                        Spacer()
-                    }
-                    .padding(.leading, 12)
-                    .padding(.bottom, 80)
-                }
             }
 
             // ロック中と、アプリ切り替え画面に映る間（非アクティブ時）はAIDEの画面を隠す。
@@ -101,10 +85,15 @@ struct WebView: UIViewRepresentable {
     /// 本人確認とCookie復元が済むまで読み込まない。
     let isActive: Bool
     let onRouteOpened: (AIDERoute) -> Void
+    /// ユーザーメニューの「位置情報の設定画面」が押されたとき。
+    let onOpenLocationSettings: () -> Void
     let onAuthenticationError: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onAuthenticationError: onAuthenticationError)
+        Coordinator(
+            onAuthenticationError: onAuthenticationError,
+            onOpenLocationSettings: onOpenLocationSettings
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -112,6 +101,16 @@ struct WebView: UIViewRepresentable {
 
         // Cookieを保存し、次回以降もログイン状態を維持する
         configuration.websiteDataStore = .default()
+
+        // アプリ内で開いたことをAIDEの画面へ知らせる。ユーザーメニューの「位置情報の設定画面」は
+        // この印があるときだけ表示される（ブラウザには設定先が無い）。
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: "document.documentElement.setAttribute('data-aide-app','ios');",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
 
         let webView = WKWebView(
             frame: .zero,
@@ -141,11 +140,16 @@ struct WebView: UIViewRepresentable {
         weak var webView: WKWebView?
 
         private let onAuthenticationError: (String) -> Void
+        private let onOpenLocationSettings: () -> Void
         private var authenticationSession: ASWebAuthenticationSession?
         private var pendingVerifier: String?
 
-        init(onAuthenticationError: @escaping (String) -> Void) {
+        init(
+            onAuthenticationError: @escaping (String) -> Void,
+            onOpenLocationSettings: @escaping () -> Void
+        ) {
             self.onAuthenticationError = onAuthenticationError
+            self.onOpenLocationSettings = onOpenLocationSettings
         }
 
         func webView(
@@ -153,6 +157,18 @@ struct WebView: UIViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
+            if
+                let navigationURL = navigationAction.request.url,
+                navigationURL.scheme == AIDEConfiguration.baseURL.scheme,
+                navigationURL.host == AIDEConfiguration.baseURL.host,
+                navigationURL.path == AIDEConfiguration.locationSettingsPath
+            {
+                // ユーザーメニューの「位置情報の設定画面」。画面は遷移させず、設定シートを開く。
+                decisionHandler(.cancel)
+                DispatchQueue.main.async { [onOpenLocationSettings] in onOpenLocationSettings() }
+                return
+            }
+
             guard
                 let navigationURL = navigationAction.request.url,
                 navigationURL.scheme == AIDEConfiguration.baseURL.scheme,

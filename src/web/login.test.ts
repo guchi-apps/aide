@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { accountAction, renderLoginPage, safeLanding } from "./login.ts";
+import { accountAction, LOCATION_SETTINGS_PATH, renderLoginPage, safeLanding } from "./login.ts";
 
 describe("ログイン画面", () => {
   it("パスワードだけを尋ね、値を埋め込まない", () => {
@@ -93,6 +93,17 @@ describe("ヘッダーのアカウントメニュー", () => {
     const html = accountAction({ email: null, sub: null }, true);
     assert.ok(html.includes('action="/status/logout"'));
     assert.ok(!html.includes("ログイン中"));
+  });
+
+  it("位置情報の設定画面への項目を、ログアウトの前に出す（表示はiOSアプリだけ）", () => {
+    const html = accountAction({ email: "me@example.com", sub: null }, true);
+    const item = html.indexOf(`action="${LOCATION_SETTINGS_PATH}"`);
+    assert.ok(item > html.indexOf('class="account-menu"'), "項目がメニューの外にある");
+    assert.ok(item < html.indexOf('action="/status/logout"'));
+    assert.ok(html.includes("位置情報の設定画面"));
+    // 押したらメニューを閉じる（シートの裏にメニューが残らない）
+    assert.match(html, /popovertarget="account-menu" popovertargetaction="hide"/);
+    assert.equal(LOCATION_SETTINGS_PATH, "/app/location-settings");
   });
 
   it("認証が無効なら何も出さない", () => {
