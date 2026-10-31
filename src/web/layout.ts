@@ -123,6 +123,9 @@ nav a:hover{color:var(--ink)}
  font:inherit;font-size:.86rem;text-align:left;color:var(--ink-2);background:none;border:0;cursor:pointer}
 .account-out:hover{background:var(--panel-2);color:var(--ink)}
 .account-out svg{flex:none}
+/* iOSアプリ（<html data-aide-app>）でだけ出す。ブラウザには位置共有の設定先が無い（#736） */
+.account-app{display:none;border-bottom:1px solid var(--line-2)}
+html[data-aide-app] .account-app{display:block}
 
 /* ---- 本文 ---- */
 main{padding:1.1rem 1rem 1.6rem;display:flex;flex-direction:column;gap:1.1rem;flex:1;
