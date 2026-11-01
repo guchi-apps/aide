@@ -20,7 +20,7 @@ const config = { url: "https://research.example.test", token: "service-secret" }
 
 function article(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    business: "DELIVERY",
+    business: "EXTERIOR",
     informationType: "NEW_PRODUCT",
     title: "宅配ロッカーの新製品が発表された",
     url: "https://news.example.test/articles/1",
@@ -49,8 +49,8 @@ const succeededBody = {
   insertedCount: 2,
   duplicateCount: 1,
   failedCount: 0,
-  businessCounts: { DELIVERY: 2, LOCKER: 1 },
-  duplicateBusinessCounts: { DELIVERY: 0, LOCKER: 1 },
+  businessCounts: { EXTERIOR: 2, LOCKER: 1 },
+  duplicateBusinessCounts: { EXTERIOR: 0, LOCKER: 1 },
   errors: [],
 };
 
@@ -110,21 +110,22 @@ describe("research-desk 週報入力の検証", () => {
     assert.equal(reversed.ok, false);
   });
 
-  it("記事は1〜10件、1事業あたり5件までに制限する（#226）", () => {
+  it("記事は1〜15件、1事業あたり5件までに制限する（#226・#744）", () => {
     assert.equal(normalizeWeeklyReportInput(validArgs([])).ok, false);
-    assert.equal(normalizeWeeklyReportInput(validArgs(Array.from({ length: 11 }, () => article()))).ok, false);
+    assert.equal(normalizeWeeklyReportInput(validArgs(Array.from({ length: 16 }, () => article()))).ok, false);
 
-    const sixDelivery = normalizeWeeklyReportInput(validArgs(Array.from({ length: 6 }, () => article())));
-    assert.equal(sixDelivery.ok, false);
-    if (!sixDelivery.ok) assert.match(sixDelivery.reason, /DELIVERY/);
+    const sixExterior = normalizeWeeklyReportInput(validArgs(Array.from({ length: 6 }, () => article())));
+    assert.equal(sixExterior.ok, false);
+    if (!sixExterior.ok) assert.match(sixExterior.reason, /EXTERIOR/);
 
-    // 宅配5件＋ロッカー5件の日次10件が通ること。
+    // エクステリア5件＋ロッカー5件＋AI関連5件の日次15件が通ること。
     const mixed = normalizeWeeklyReportInput(validArgs([
       ...Array.from({ length: 5 }, () => article()),
       ...Array.from({ length: 5 }, () => article({ business: "LOCKER" })),
+      ...Array.from({ length: 5 }, () => article({ business: "AI" })),
     ]));
     assert.equal(mixed.ok, true);
-    if (mixed.ok) assert.equal(mixed.input.articles.length, 10);
+    if (mixed.ok) assert.equal(mixed.input.articles.length, 15);
   });
 
   it("登録簿に無い事業は外部へ送る前に拒否し、受け付ける事業を理由へ示す（#314）", () => {
@@ -132,13 +133,14 @@ describe("research-desk 週報入力の検証", () => {
     assert.equal(unknown.ok, false);
     if (!unknown.ok) {
       assert.match(unknown.reason, /articles\[0\]\.business/);
-      assert.match(unknown.reason, /DELIVERY/);
+      assert.match(unknown.reason, /EXTERIOR/);
       assert.match(unknown.reason, /LOCKER/);
+      assert.match(unknown.reason, /AI/);
     }
 
     // 大文字小文字の違いや配列など、文字列でない値も同じく弾く。
     assert.equal(normalizeWeeklyReportInput(validArgs([article({ business: "delivery" })])).ok, false);
-    assert.equal(normalizeWeeklyReportInput(validArgs([article({ business: ["DELIVERY"] })])).ok, false);
+    assert.equal(normalizeWeeklyReportInput(validArgs([article({ business: ["EXTERIOR"] })])).ok, false);
   });
 
   it("登録簿へ事業を足すと、検証と事業ごとの件数上限がその事業にも効く（#314）", () => {
@@ -151,17 +153,17 @@ describe("research-desk 週報入力の検証", () => {
     if (added.ok) assert.equal(added.input.articles[0]?.business, "HOME");
 
     // 上限は事業ごとに数える。3事業に3件ずつ（合計9件）は通り、1事業に6件は弾く。
-    const spread = normalizeWeeklyReportInput(validArgs(["DELIVERY", "LOCKER", "HOME"].flatMap((business) =>
+    const spread = normalizeWeeklyReportInput(validArgs(["EXTERIOR", "LOCKER", "HOME"].flatMap((business) =>
       Array.from({ length: 3 }, () => article({ business })))), businesses);
     assert.equal(spread.ok, true);
     const sixHome = normalizeWeeklyReportInput(validArgs(Array.from({ length: 6 }, () => article({ business: "HOME" }))), businesses);
     assert.equal(sixHome.ok, false);
     if (!sixHome.ok) assert.match(sixHome.reason, /HOME/);
 
-    // 全体の上限（10件）は事業を足しても広がらない。
-    const eleven = normalizeWeeklyReportInput(validArgs(["DELIVERY", "LOCKER", "HOME"].flatMap((business, i) =>
-      Array.from({ length: i === 2 ? 3 : 4 }, () => article({ business })))), businesses);
-    assert.equal(eleven.ok, false);
+    // 全体の上限（15件）は事業を足しても広がらない。4事業に4件ずつ（合計16件）は弾く。
+    const sixteen = normalizeWeeklyReportInput(validArgs(["EXTERIOR", "LOCKER", "AI", "HOME"].flatMap((business) =>
+      Array.from({ length: 4 }, () => article({ business })))), businesses);
+    assert.equal(sixteen.ok, false);
   });
 
   it("以前までの6件・1事業3件の呼び出しはそのまま通る", () => {
@@ -219,11 +221,11 @@ describe("research-desk 週報の登録", () => {
   const input = (normalizeWeeklyReportInput(validArgs()) as { ok: true; input: ResearchDeskWeeklyReportInput }).input;
 
   it("登録簿に無い事業のキーが応答に含まれても、そのまま返す（#314）", async () => {
-    const body = { ...succeededBody, businessCounts: { DELIVERY: 1, HOME: 2 }, duplicateBusinessCounts: { HOME: 1 } };
+    const body = { ...succeededBody, businessCounts: { EXTERIOR: 1, HOME: 2 }, duplicateBusinessCounts: { HOME: 1 } };
     const outcome = await importWeeklyReport(input, config, (async () => jsonResponse(body)) as unknown as typeof fetch);
     assert.equal(outcome.ok, true);
     if (outcome.ok) {
-      assert.deepEqual(outcome.result.businessCounts, { DELIVERY: 1, HOME: 2 });
+      assert.deepEqual(outcome.result.businessCounts, { EXTERIOR: 1, HOME: 2 });
       assert.deepEqual(outcome.result.duplicateBusinessCounts, { HOME: 1 });
     }
   });
@@ -257,13 +259,13 @@ describe("research-desk 週報の登録", () => {
     if (outcome.ok) {
       assert.equal(outcome.result.runId, "run-1");
       assert.equal(outcome.result.duplicateCount, 1);
-      assert.deepEqual(outcome.result.businessCounts, { DELIVERY: 2, LOCKER: 1 });
+      assert.deepEqual(outcome.result.businessCounts, { EXTERIOR: 2, LOCKER: 1 });
     }
   });
 
   it("重複だけの再送も業務上の結果として返す", async () => {
     const outcome = await importWeeklyReport(input, config, (async () =>
-      jsonResponse({ ...succeededBody, insertedCount: 0, duplicateCount: 3, duplicateBusinessCounts: { DELIVERY: 2, LOCKER: 1 } })) as unknown as typeof fetch);
+      jsonResponse({ ...succeededBody, insertedCount: 0, duplicateCount: 3, duplicateBusinessCounts: { EXTERIOR: 2, LOCKER: 1 } })) as unknown as typeof fetch);
     assert.equal(outcome.ok, true);
     if (outcome.ok) {
       assert.equal(outcome.result.insertedCount, 0);
@@ -329,7 +331,7 @@ describe("research-desk 週報の登録", () => {
         mergedCount: 2,
         duplicateCount: 1,
         excludedCount: 1,
-        businessCounts: { DELIVERY: 4, LOCKER: 4 },
+        businessCounts: { EXTERIOR: 4, LOCKER: 4 },
         supplementalFrom: "2026-08-01T09:00:00.000Z",
       })) as unknown as typeof fetch);
     assert.equal(outcome.ok, true);

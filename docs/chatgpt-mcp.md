@@ -45,7 +45,7 @@ ChatGPT側のMCP接続には既存AIDEの公開URL末尾 `/mcp` を指定する�
 
 # ChatGPTのスケジュールからResearch Deskへ週報を登録する
 
-宅配事業・ロッカー事業の業界情報は、ChatGPTの定期タスクが**毎日20:00（Asia/Tokyo）**に直近7日分を
+エクステリア事業・ロッカー事業・AI関連の業界情報は、ChatGPTの定期タスクが**毎日20:00（Asia/Tokyo）**に直近7日分を
 検索・選定・要約し、AIDE経由でResearch Deskへ登録する（#211 / #226 / guchi-apps/research-desk#31 /
 guchi-apps/research-desk#43）。**週へ集約するのはResearch Desk側**（日曜始まり）で、AIDEは1回の
 呼び出しを中継するだけ。
@@ -73,10 +73,10 @@ ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
 ## 入力と制限
 
 `aide_research_desk_import_weekly_report` の引数は `executedAt`、`targetFrom`、`targetTo`、`articles`。
-日時はISO 8601形式で指定する。記事は**1回あたり全体で1〜10件、1事業あたり5件まで**（#226。
-それ以前は全体6件・1事業3件で、**当時の呼び出しはそのまま通る**）。
+日時はISO 8601形式で指定する。記事は**1回あたり全体で1〜15件、1事業あたり5件まで**（#226・#744。
+全体は6件→10件→15件と広げた。**以前の件数の呼び出しはそのまま通る**）。
 
-記事の必須項目は `business`（現在の登録は `DELIVERY` = 宅配事業 / `LOCKER` = ロッカー事業。
+記事の必須項目は `business`（現在の登録は `EXTERIOR` = エクステリア事業（宅配・ポスト） / `LOCKER` = ロッカー事業 / `AI` = AI関連（Gemini・Copilot）。旧 `DELIVERY` はwork-relay側の#362で `EXTERIOR` へ移行済みで、AIDEは受け付けない。
 増やし方は下の「対象の事業を増やす」）、`informationType`、
 `title`、`url`、`sourceName`。任意で `publisher`、`isPrimarySource`、`publishedAt`、`occurredAt`、
 `summary`、`content`、`implications`（商品企画・全体設計への示唆）、`importance`、`targetCompany`、
@@ -105,8 +105,8 @@ ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
    事業ごと・全体の件数配分を新しい事業に合わせる
 4. 下の「手動確認」で、新事業の記事が登録され `businessCounts` に出ることを確かめる
 
-**全体の上限（10件）は事業を増やしても広がらない。** Research Desk 側にも同じ定数があるため、
-事業が3つ以上になると1事業あたりに割ける件数は全体10件の内訳になる。広げるときは、次の段落のとおり
+**全体の上限（15件）は事業を増やしても広がらない。** Research Desk 側にも同じ定数があるため、
+事業が4つ以上になると1事業あたりに割ける件数は全体15件の内訳になる。広げるときは、次の段落のとおり
 両方を揃える。
 
 **件数の上限はAIDEとResearch Deskの両方に、それぞれ独立した定数として書かれている**
@@ -146,7 +146,7 @@ Research Desk側で項目が増えてもそのまま届く。
 
 （事業を増やしたときは、下の事業名と件数配分を登録簿に合わせて書き換える）
 
-「宅配事業とロッカー事業の業界情報を直近7日から探し、事業ごとに5件まで（合計10件まで）選ぶ。7日で
+「エクステリア事業（宅配・ポスト）・ロッカー事業・AI関連（Gemini・Copilot）の業界情報を直近7日から探し、事業ごとに5件まで（合計15件まで）選ぶ。AI関連は、GeminiやCopilotなどの新機能・料金・提供開始・業務利用の事例を観点にする。7日で
 足りなければ30日まで広げ、その記事の `periodScope` を `PAST_30_DAYS_SUPPLEMENT` にする。各記事に
 タイトル・URL・情報源・発表元（`publisher`）・対象製品（`targetProduct`）・発表日（`occurredAt`）・
 要約・商品企画への示唆・重要度・キーワードを付け、設置台数や金額などの数字が分かるものは
@@ -158,7 +158,7 @@ Research Desk側で項目が増えてもそのまま届く。
 2. 同じ内容をもう一度送り、`insertedCount` が増えず `duplicateCount` が増えることを確認する。
 3. 同じ発表を**別のURL**で、`publisher` と `targetProduct` を揃えて送り、`mergedCount` が増えて
    画面の記事が増えないことを確認する。
-4. 宅配事業とロッカー事業を混ぜて送り、`businessCounts` が分かれて返り、画面でも分かれて見えることを確認する。
+4. エクステリア事業・ロッカー事業・AI関連を混ぜて送り、`businessCounts` が分かれて返り、画面でも分かれて見えることを確認する。
 
 ---
 

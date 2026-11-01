@@ -603,7 +603,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
 | `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・区分・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
 | `asset_manager_record_subscription_cancellation` | 契約へ解約情報（検討中／事業者での手続き完了＝自動更新停止＋終了日＋メモ追記）を記録する。**書き込みツール**（条件3の例外。台帳の記録だけで事業者の契約は変更しない） |
-| `aide_research_desk_import_weekly_report` | Research Deskへ宅配事業・ロッカー事業の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体10件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
+| `aide_research_desk_import_weekly_report` | Research Deskへエクステリア事業・ロッカー事業・AI関連の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体15件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
 **各ツールの利用者・問い・応答サイズ・変更しない根拠は [docs/mcp-tool-inventory.md](docs/mcp-tool-inventory.md)**（#489）。
 `asset_manager_subscriptions` は既定で契約ごとの料金履歴・支払方法履歴を省く（今日より先の改定は
