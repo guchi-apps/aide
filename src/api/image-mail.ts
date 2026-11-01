@@ -27,7 +27,8 @@ const MAX_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_ZIP_BYTES = 2 * 1024 * 1024;
 const MAX_TITLE_LENGTH = 200;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
-const ALLOWED_WIDTHS = [1200, 900, 600] as const;
+const MIN_WIDTH = 1;
+const MAX_WIDTH = 10000;
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res
@@ -88,8 +89,8 @@ function normalizeImageMailInput(
   }
 
   const width = Number(fields["width"]);
-  if (!(ALLOWED_WIDTHS as readonly number[]).includes(width)) {
-    return { error: `width は ${ALLOWED_WIDTHS.join(" / ")} のいずれかで指定してください` };
+  if (!Number.isInteger(width) || width < MIN_WIDTH || width > MAX_WIDTH) {
+    return { error: `width は ${MIN_WIDTH}〜${MAX_WIDTH} の整数で指定してください` };
   }
 
   const idempotencyKey = (fields["idempotencyKey"] ?? "").trim();
@@ -109,7 +110,7 @@ function normalizeImageMailInput(
       idempotencyKey,
       title,
       imageCount,
-      width: width as 1200 | 900 | 600,
+      width,
       zip: file.data,
     },
   };

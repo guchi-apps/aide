@@ -240,10 +240,19 @@ describe("POST /api/image-mail/send", () => {
     assert.equal(result.status, 400);
   });
 
-  it("widthが許可値以外なら400", async () => {
-    const result = await post(validBody({ width: "800" }));
-    assert.equal(result.status, 400);
-  });
+  for (const width of ["0", "-1", "800.5", "10001", "abc", ""]) {
+    it(`widthが範囲外（${JSON.stringify(width)}）なら400`, async () => {
+      const result = await post(validBody({ width }));
+      assert.equal(result.status, 400);
+    });
+  }
+
+  for (const width of ["1", "800", "1600", "10000"]) {
+    it(`widthが1〜10000の整数（${width}）なら受け付ける`, async () => {
+      const result = await post(validBody({ width }));
+      assert.notEqual(result.status, 400);
+    });
+  }
 
   it("imageCountが整数でなければ400", async () => {
     const result = await post(validBody({ imageCount: "abc" }));
