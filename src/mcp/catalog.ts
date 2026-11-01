@@ -50,6 +50,7 @@ import {
   assetManagerSubscriptionsTool,
 } from "./tools/asset-manager.ts";
 import {
+  assetManagerSalaryApprovalStatusTool,
   assetManagerSalaryCommitTool,
   assetManagerSalaryLookupTool,
   assetManagerSalaryPreviewTool,
@@ -148,6 +149,7 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(assetManagerRecordSubscriptionCancellationTool);
   // 給与明細メールの代理登録（#725）。給与専用で、支出ツールとは別。プレビュー・読み戻しと保存はscopeも別。
   registry.register(assetManagerSalaryPreviewTool);
+  registry.register(assetManagerSalaryApprovalStatusTool);
   registry.register(assetManagerSalaryCommitTool);
   registry.register(assetManagerSalaryLookupTool);
   registry.register(researchDeskImportWeeklyReportTool);

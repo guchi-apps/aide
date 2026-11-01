@@ -42,7 +42,8 @@
 | `kurashio_get_kepco_hourly` | kurashioの関西電力 時間別kWh | C | 読 | なし | kurashio | 未測定 | 小 | 新規（#692）。scope `kurashio-energy:read`。件数・日別合計・各時間の値・missing |
 | `kurashio_import_kepco_hourly` | kurashioへ時間別kWhを登録 | C | **書** | なし | kurashio | 未測定 | 小 | 新規（#692）。scope `kurashio-energy:write`。既存値は書き換えない（conflict）。空欄は送らない。登録後に読み戻し確認。期間内に欠けが残れば incomplete（#690）。dryRunあり |
 | `asset_manager_salary_preview` | 給与明細メールのプレビュー | C | 読 | なし | Asset Manager | 未測定 | 小 | 新規（#725）。scope `salary-agent:read`。給与専用。保存しない。PDFを引数で受ける（上限700KB。MCPのリクエスト上限1MiBにbase64化後も収める） |
-| `asset_manager_salary_commit` | 給与明細の代理登録 | C | **書** | なし | Asset Manager | 未測定 | 小 | 新規（#725）。scope `salary-agent:write`。本人承認後のみ。上書きなし・保存後も未検証で返し、`asset_manager_salary_lookup` で読み戻す |
+| `asset_manager_salary_approval_status` | 給与明細の承認状態 | C | 読 | なし | Asset Manager | 未測定 | 極小 | 新規（#728）。scope `salary-agent:read`。Asset Manager の画面での本人承認の状態だけを返す（金額なし） |
+| `asset_manager_salary_commit` | 給与明細の代理登録 | C | **書** | なし | Asset Manager | 未測定 | 小 | 新規（#725）。scope `salary-agent:write`。Asset Manager の画面で本人が承認したプレビューだけ（#728。送る前に承認状態を読む）。上書きなし・保存後も未検証で返し、`asset_manager_salary_lookup` で読み戻す |
 | `asset_manager_salary_lookup` | 給与明細の読み戻し・照会 | C | 読 | なし | Asset Manager | 未測定 | 小 | 新規（#725）。scope `salary-agent:read`。Salary ID で引く（元メールで引く口は Asset Manager に無い。タイムアウト後はプレビューを引き直す） |
 | `aide_host_status` | サーバーの状態 | C B | 読 | ops-dashboard | ops-dashboard | 1.2KB | 約2KB | 維持 |
 | `aide_uptime_monitors` | 外形監視 | C B | 読 | ops-dashboard | ops-dashboard | 0.8KB | 未実測 | 維持 |

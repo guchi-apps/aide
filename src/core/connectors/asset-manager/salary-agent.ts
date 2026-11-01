@@ -2,12 +2,13 @@ import { getSharedToken } from "../issue-deck/shared-tokens.ts";
 import { DEFAULT_ASSET_MANAGER_URL } from "./index.ts";
 
 /**
- * Asset Manager の給与専用のサーバー間API（asset-manager#791。AIDE側は aide#725）。
+ * Asset Manager の給与専用のサーバー間API（asset-manager#791・#798。AIDE側は aide#725・#728）。
  *
  * | Asset Manager のAPI | 用途 |
  * |---|---|
  * | `POST /api/salaries/agent/preview` | PDFを解析して確認情報を返す（保存しない）。同じメールの取込済みも `existing` で返す |
- * | `POST /api/salaries/agent/commit` | 本人の承認後に1件だけ保存する（201 `created` / 200 `already_imported`） |
+ * | `GET /api/salaries/agent/approvals/:previewId` | 本人が画面で承認したかを読む（状態とIDだけ） |
+ * | `POST /api/salaries/agent/commit` | 本人が画面で承認したプレビューを1件だけ保存する（201 `created` / 200 `already_imported`） |
  * | `GET /api/salaries/agent/:id` | 保存された実レコードの読み戻し |
  *
  * 元メールは `source: { mailbox, messageId }` で渡す。向こうがメールボックス＋Message-IDをハッシュにして同一メールを判定する。
