@@ -90,7 +90,7 @@ ChatGPT定期タスク → AIDE（aide_research_desk_import_weekly_report）
 すべてここから作られるため、**AIDE側で直すのはこの1エントリとテストだけ**。
 
 **ただし、AIDEへ足す前に Research Desk 側が `main` で同じ `id` を受けられる状態になっている**
-必要がある。あちらは事業を Prisma enum（`IndustryBusiness`）と `/api/internal/weekly-report` の
+必要がある。あちらは事業を事業マスタと `/api/internal/weekly-report` の
 検証で持っており（画面・週あたりの保持上限・解析の関連性判定も事業ごとに分かれている）、知らない
 `id` は400で弾く。AIDEだけ先に本番へ出すと、**AIDEの検証は通るのに本番でだけ失敗する**。
 リリースは **Research Desk（`main`）→ AIDE（`main`）** の順にする。

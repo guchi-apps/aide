@@ -6,8 +6,8 @@
  * `index.ts` や `mcp/tools/research-desk.ts` に事業のIDを直書きしない。
  *
  * **登録簿へ足す前に、Research Desk 側が同じIDを受けられる状態で `main` に出ていること。**
- * あちらは事業を Prisma enum（`IndustryBusiness`）と `/api/internal/weekly-report` の検証で
- * 持っており、知らないIDは400で弾く。AIDEだけ先に本番へ出すと、本番でだけ失敗する。
+ * あちらは事業を事業マスタと `/api/internal/weekly-report` の検証で持っており
+ * （旧 Prisma enum `IndustryBusiness` はマスタ化された）、知らないIDは400で弾く。AIDEだけ先に本番へ出すと、本番でだけ失敗する。
  */
 
 export interface ResearchDeskBusinessDefinition {
