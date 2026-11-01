@@ -11,7 +11,7 @@ export interface SendImageMailInput {
   idempotencyKey: string;
   title: string;
   imageCount: number;
-  width: 1200 | 900 | 600;
+  width: number;
   zip: Buffer;
 }
 
