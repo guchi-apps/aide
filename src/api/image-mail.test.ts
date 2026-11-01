@@ -264,14 +264,24 @@ describe("POST /api/image-mail/send", () => {
     assert.equal(result.status, 400);
   });
 
-  it("zipが2MiB超なら400", async () => {
-    const bigZip = Buffer.alloc(2 * 1024 * 1024 + 1, 1);
+  it("zipが3MiB超なら400", async () => {
+    const bigZip = Buffer.alloc(3 * 1024 * 1024 + 1, 1);
     const body = buildMultipartBody(
       { title: "test", imageCount: "1", width: "600", idempotencyKey: "big-zip-key" },
       { name: "zip", filename: "images.zip", contentType: "application/zip", data: bigZip },
     );
     const result = await post(body);
     assert.equal(result.status, 400);
+  });
+
+  it("zipが2MiB超・3MiB以下なら送信できる", async () => {
+    const zip = Buffer.alloc(3 * 1024 * 1024, 1);
+    const body = buildMultipartBody(
+      { title: "test", imageCount: "10", width: "600", idempotencyKey: "three-mb-zip-key" },
+      { name: "zip", filename: "images.zip", contentType: "application/zip", data: zip },
+    );
+    const result = await post(body);
+    assert.equal(result.status, 200);
   });
 
   it("zipが無ければ400", async () => {
