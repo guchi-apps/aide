@@ -20,7 +20,7 @@ function args(articles?: Record<string, unknown>[]): Record<string, unknown> {
     targetTo: "2026-08-30T18:00:00+09:00",
     articles: articles ?? [
       {
-        business: "DELIVERY",
+        business: "EXTERIOR",
         informationType: "MARKET_STATISTICS",
         title: "宅配便取扱個数の統計が公表された",
         url: "https://news.example.test/articles/1",
@@ -45,8 +45,8 @@ const importResult = {
   duplicateCount: 1,
   excludedCount: 1,
   failedCount: 0,
-  businessCounts: { DELIVERY: 1, LOCKER: 1 },
-  duplicateBusinessCounts: { DELIVERY: 0, LOCKER: 1 },
+  businessCounts: { EXTERIOR: 1, LOCKER: 1 },
+  duplicateBusinessCounts: { EXTERIOR: 0, LOCKER: 1 },
   errors: [],
 };
 
@@ -69,7 +69,7 @@ describe("aide_research_desk_import_weekly_report", () => {
   it("書き込みツールとして必要な入力を必須にする", () => {
     assert.deepEqual(tool.inputSchema["required"], ["executedAt", "targetFrom", "targetTo", "articles"]);
     const properties = tool.inputSchema["properties"] as Record<string, Record<string, unknown>>;
-    assert.equal(properties["articles"]?.["maxItems"], 10);
+    assert.equal(properties["articles"]?.["maxItems"], 15);
     assert.match(tool.description, /書き込みツール/);
     // 認証情報はサーバー側の設定から決まる。引数として受け取らない。
     assert.deepEqual(Object.keys(properties).sort(), ["articles", "executedAt", "targetFrom", "targetTo"]);
@@ -104,7 +104,7 @@ describe("aide_research_desk_import_weekly_report", () => {
         assert.equal(payload["duplicateCount"], 1);
         assert.equal(payload["mergedCount"], 1);
         assert.equal(payload["excludedCount"], 1);
-        assert.deepEqual(payload["businessCounts"], { DELIVERY: 1, LOCKER: 1 });
+        assert.deepEqual(payload["businessCounts"], { EXTERIOR: 1, LOCKER: 1 });
       } finally {
         fetchMock.mock.restore();
       }

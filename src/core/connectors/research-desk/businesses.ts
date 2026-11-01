@@ -6,8 +6,8 @@
  * `index.ts` や `mcp/tools/research-desk.ts` に事業のIDを直書きしない。
  *
  * **登録簿へ足す前に、Research Desk 側が同じIDを受けられる状態で `main` に出ていること。**
- * あちらは事業を Prisma enum（`IndustryBusiness`）と `/api/internal/weekly-report` の検証で
- * 持っており、知らないIDは400で弾く。AIDEだけ先に本番へ出すと、本番でだけ失敗する。
+ * あちらは事業を事業マスタと `/api/internal/weekly-report` の検証で持っており
+ * （旧 Prisma enum `IndustryBusiness` はマスタ化された）、知らないIDは400で弾く。AIDEだけ先に本番へ出すと、本番でだけ失敗する。
  */
 
 export interface ResearchDeskBusinessDefinition {
@@ -18,8 +18,9 @@ export interface ResearchDeskBusinessDefinition {
 }
 
 export const RESEARCH_DESK_BUSINESSES = [
-  { id: "DELIVERY", label: "宅配事業" },
+  { id: "EXTERIOR", label: "エクステリア事業（宅配・ポスト）" },
   { id: "LOCKER", label: "ロッカー事業" },
+  { id: "AI", label: "AI関連（Gemini・Copilot）" },
 ] as const satisfies readonly ResearchDeskBusinessDefinition[];
 
 /** 登録簿に載っている事業のID。 */
@@ -29,12 +30,12 @@ export function businessIds(businesses: readonly ResearchDeskBusinessDefinition[
   return businesses.map((business) => business.id);
 }
 
-/** 「宅配事業（DELIVERY）・ロッカー事業（LOCKER）」のような、説明文へ埋め込む列挙。 */
+/** 「エクステリア事業（宅配・ポスト）（EXTERIOR）・ロッカー事業（LOCKER）」のような、説明文へ埋め込む列挙。 */
 export function describeBusinesses(businesses: readonly ResearchDeskBusinessDefinition[] = RESEARCH_DESK_BUSINESSES): string {
   return businesses.map((business) => `${business.label}（${business.id}）`).join("・");
 }
 
-/** 「DELIVERY=宅配事業、LOCKER=ロッカー事業」のような、`business` 項目の説明。 */
+/** 「EXTERIOR=エクステリア事業（宅配・ポスト）、LOCKER=ロッカー事業」のような、`business` 項目の説明。 */
 export function describeBusinessIds(businesses: readonly ResearchDeskBusinessDefinition[] = RESEARCH_DESK_BUSINESSES): string {
   return businesses.map((business) => `${business.id}=${business.label}`).join("、");
 }
