@@ -2925,7 +2925,7 @@ Research Desk（guchi-apps/research-desk#64）が、ブラウザ内で圧縮・Z
 | エンドポイント | `POST /api/image-mail/send`（`multipart/form-data`） |
 | 認証 | `Authorization: Bearer $AIDE_IMAGE_MAIL_TOKEN`（Research Desk側の同名環境変数と同じ値） |
 | 必要な設定 | 上のトークン、宛先（`AIDE_IMAGE_MAIL_TO`）、Gmail OAuthの3つ（`AIDE_GMAIL_CLIENT_ID` ほか）。**1つでも欠ければ503**。送信元（`AIDE_IMAGE_MAIL_FROM`）は任意 |
-| リクエストの項目 | `title`（200文字まで）・`imageCount`（整数）・`width`（1〜10000の整数）・`idempotencyKey`・`zip`（2MiBまで） |
+| リクエストの項目 | `title`（200文字まで）・`imageCount`（整数）・`width`（1〜10000の整数）・`idempotencyKey`・`zip`（3MiBまで） |
 
 ### 件名・宛先・送信元はAIDE側で固定する
 
