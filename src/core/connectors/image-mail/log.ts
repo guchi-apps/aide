@@ -26,7 +26,7 @@ export interface ImageMailLogEntry {
   at: string;
   ok: boolean;
   imageCount: number;
-  width: 1200 | 900 | 600;
+  width: number;
   zipBytes: number;
   messageId: string | null;
   /** 失敗理由（1行）。成功時は null。 */
