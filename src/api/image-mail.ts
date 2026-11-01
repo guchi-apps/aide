@@ -22,9 +22,12 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * 実装のため、ここだけは合わせる。
  */
 
-/** ZIPの上限（2MiB）に、他フィールドとmultipartのヘッダ分の余裕を足した値。 */
-const MAX_BODY_BYTES = 3 * 1024 * 1024;
-const MAX_ZIP_BYTES = 2 * 1024 * 1024;
+/**
+ * ZIPの上限（3MiB。work-relayの分割上限 `MAX_ZIP_SIZE_BYTES` と同値）に、他フィールドと
+ * multipartのヘッダ分の余裕を足した値。Gmailの添付上限（25MB）はbase64化（約1.37倍）しても十分収まる。
+ */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_ZIP_BYTES = 3 * 1024 * 1024;
 const MAX_TITLE_LENGTH = 200;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 const MIN_WIDTH = 1;
