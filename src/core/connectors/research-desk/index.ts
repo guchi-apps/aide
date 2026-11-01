@@ -4,7 +4,7 @@ import { RESEARCH_DESK_BUSINESSES, businessIds, type ResearchDeskBusinessDefinit
 /**
  * Research Desk の週報登録コネクタ。
  *
- * ChatGPT が検索・要約した事業（宅配事業・ロッカー事業など。登録簿は `businesses.ts`）の業界情報を、Research Desk の
+ * ChatGPT が検索・要約した事業（エクステリア事業・ロッカー事業・AI関連など。登録簿は `businesses.ts`）の業界情報を、Research Desk の
  * **AIDE専用内部API** へ中継する（aide#211 / research-desk#31）。収集は週1回から
  * 毎日20時へ変わり、Research Desk 側が日曜始まりの週へ集約する（aide#226 / research-desk#43）。
  *
@@ -107,12 +107,13 @@ interface ResearchDeskConfig {
 /**
  * 1回の登録で送れる記事の上限。全体と1事業あたりの両方を見る（#211）。
  *
- * 毎日20時の日次実行で宅配・ロッカーを1回にまとめて送るため、全体6件・1事業3件から広げた（#226）。
- * **Research Desk 側の受け口にも同じ上限がある**ので、あちらを広げるまで10件は400で弾かれる。
- * 全体の上限は事業の数と連動させていない。事業が3つ以上になると、1事業あたりに割ける件数は
- * 全体10件の内訳で決まる（#314）。
+ * 毎日20時の日次実行でエクステリア・ロッカー・AI関連を1回にまとめて送るため、全体6件・1事業3件から
+ * 広げ（#226）、3事業×5件を使い切れるよう全体を15件にした（#744）。
+ * **Research Desk 側の受け口にも同じ上限がある**ので、あちらを広げるまで15件は400で弾かれる。
+ * 全体の上限は事業の数と連動させていない。事業が4つ以上になると、1事業あたりに割ける件数は
+ * 全体15件の内訳で決まる（#314）。
  */
-export const MAX_ARTICLES = 10;
+export const MAX_ARTICLES = 15;
 export const MAX_ARTICLES_PER_BUSINESS = 5;
 
 const LIMITS = {
