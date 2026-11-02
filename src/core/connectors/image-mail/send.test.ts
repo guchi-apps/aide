@@ -7,7 +7,7 @@ import { after, describe, it } from "node:test";
 const dir = await mkdtemp(join(tmpdir(), "aide-image-mail-send-test-"));
 process.env["AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH"] = join(dir, "image-mail-idempotency.json");
 process.env["AIDE_IMAGE_MAIL_LOG_PATH"] = join(dir, "image-mail-log.json");
-const { sendImageMail } = await import("./send.ts");
+const { sendImageMail, sanitizeAttachmentFilename } =await import("./send.ts");
 const { IMAGE_MAIL_LOG_PATH } = await import("./log.ts");
 
 after(async () => {
@@ -40,7 +40,45 @@ async function readLog(): Promise<unknown[]> {
   return JSON.parse(await readFile(IMAGE_MAIL_LOG_PATH, "utf8")) as unknown[];
 }
 
+describe("sanitizeAttachmentFilename", () => {
+  it("未指定・空・不正なら images.zip にフォールバックする", () => {
+    assert.equal(sanitizeAttachmentFilename(undefined), "images.zip");
+    assert.equal(sanitizeAttachmentFilename(""), "images.zip");
+    assert.equal(sanitizeAttachmentFilename('  "\r\n '), "images.zip");
+    assert.equal(sanitizeAttachmentFilename(".."), "images.zip");
+  });
+
+  it("ヘッダを壊す文字とパス区切りを除き、日本語はそのまま残す", () => {
+    assert.equal(sanitizeAttachmentFilename('251102 タイトル.zip'), "251102 タイトル.zip");
+    assert.equal(sanitizeAttachmentFilename('a"b\r\nc/d\\e.zip'), "abcde.zip");
+  });
+});
+
 describe("sendImageMail", () => {
+  it("ZIPのファイル名が添付ファイル名になる", async () => {
+    let sentRaw = "";
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      if (String(url).includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "at" }), { status: 200 });
+      }
+      sentRaw = Buffer.from(
+        (JSON.parse(String(init?.body)) as { raw: string }).raw,
+        "base64url",
+      ).toString("utf8");
+      return new Response(JSON.stringify({ id: "msg-name" }), { status: 200 });
+    }) as typeof fetch;
+
+    const outcome = await sendImageMail(
+      credentials,
+      addresses,
+      { ...baseInput("send-name"), zipFilename: "251102 テスト.zip" },
+      fetchImpl,
+    );
+    assert.equal(outcome.ok, true);
+    assert.match(sentRaw, /Content-Disposition: attachment; filename\*=UTF-8''/);
+    assert.doesNotMatch(sentRaw, /images\.zip/);
+  });
+
   it("成功: messageIdを返し、ログに記録される", async () => {
     const outcome = await sendImageMail(
       credentials,

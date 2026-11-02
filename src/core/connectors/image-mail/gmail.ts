@@ -176,6 +176,23 @@ function encodeWord(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 
+/**
+ * MIMEパラメータ（`name` / `filename`）を組み立てる。ASCIIだけならそのまま `name="x"`、
+ * 非ASCIIを含むなら RFC 2231 の `name*=UTF-8''%E3...` と、RFC 2047 の `name="=?UTF-8?B?...?="` を併記する
+ * （前者を読めるクライアントは前者、読めない古いクライアントは後者を使う）。
+ */
+function encodeParameter(param: string, value: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x20-\x7e]*$/.test(value)) return `${param}="${value}"`;
+  const encoded = [...Buffer.from(value, "utf8")]
+    .map((byte) => {
+      const char = String.fromCharCode(byte);
+      return /[A-Za-z0-9!#$&+.^_`|~-]/.test(char) ? char : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+    })
+    .join("");
+  return `${param}*=UTF-8''${encoded}; ${param}="${encodeWord(value)}"`;
+}
+
 /** RFC 2045: base64本文は76文字ごとに改行する。 */
 function chunkBase64(base64: string): string {
   return (base64.match(/.{1,76}/g) ?? []).join("\r\n");
@@ -222,9 +239,9 @@ export function buildMimeMessage(input: BuildMimeMessageInput): string {
 
   const attachmentPart = [
     `--${boundary}`,
-    `Content-Type: ${input.attachment.contentType}; name="${input.attachment.filename}"`,
+    `Content-Type: ${input.attachment.contentType}; ${encodeParameter("name", input.attachment.filename)}`,
     "Content-Transfer-Encoding: base64",
-    `Content-Disposition: attachment; filename="${input.attachment.filename}"`,
+    `Content-Disposition: attachment; ${encodeParameter("filename", input.attachment.filename)}`,
     "",
     chunkBase64(input.attachment.data.toString("base64")),
   ].join("\r\n");

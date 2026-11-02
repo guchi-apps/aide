@@ -115,6 +115,7 @@ function normalizeImageMailInput(
       imageCount,
       width,
       zip: file.data,
+      zipFilename: file.filename,
     },
   };
 }

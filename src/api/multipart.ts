@@ -61,7 +61,13 @@ function parseContentDisposition(value: string | undefined): { name: string | nu
   if (!value) return { name: null, filename: null };
   const nameMatch = /;\s*name="([^"]*)"/.exec(value);
   const filenameMatch = /;\s*filename="([^"]*)"/.exec(value);
-  return { name: nameMatch?.[1] ?? null, filename: filenameMatch?.[1] ?? null };
+  // ヘッダ全体をlatin1で読んでいるため、UTF-8の生バイトで送られた日本語ファイル名は
+  // 1バイト1文字に化けている。バイト列へ戻してUTF-8として読み直す（ASCIIだけなら変わらない）。
+  const rawFilename = filenameMatch?.[1];
+  return {
+    name: nameMatch?.[1] ?? null,
+    filename: rawFilename === undefined ? null : Buffer.from(rawFilename, "latin1").toString("utf8"),
+  };
 }
 
 /**

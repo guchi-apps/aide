@@ -131,6 +131,24 @@ describe("buildMimeMessage", () => {
     assert.ok(decoded.equals(zip));
   });
 
+  it("日本語のファイル名はRFC2231とRFC2047の両方でエンコードされる", () => {
+    const filename = "251102 テスト.zip";
+    const raw = buildMimeMessage({
+      to: ["to@example.com"],
+      bcc: [],
+      subject: "件名",
+      bodyText: "本文",
+      attachment: { filename, contentType: "application/zip", data: Buffer.from("zip") },
+    });
+    // 生の日本語がヘッダに出ない（メッセージ全体がASCII）
+    assert.match(raw, /^[\x00-\x7f]*$/);
+    const star = /Content-Disposition: attachment; filename\*=UTF-8''([^;\r\n]+); filename="=\?UTF-8\?B\?([^?]+)\?="/.exec(raw);
+    assert.ok(star);
+    assert.equal(decodeURIComponent(star[1]!), filename);
+    assert.equal(Buffer.from(star[2]!, "base64").toString("utf8"), filename);
+    assert.match(raw, /Content-Type: application\/zip; name\*=UTF-8''/);
+  });
+
   it("From未指定ならFromヘッダを書かない（Gmailが認可済みアカウントで補完する）", () => {
     const raw = buildMimeMessage({
       to: ["to@example.com"],
