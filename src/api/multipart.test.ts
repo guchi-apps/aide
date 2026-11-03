@@ -21,6 +21,15 @@ function buildMultipartBody(parts: { name: string; filename?: string; contentTyp
   return Buffer.concat(chunks);
 }
 
+describe("parseMultipart（日本語のファイル名）", () => {
+  it("UTF-8の生バイトで送られたファイル名を文字化けさせずに読む", () => {
+    const body = buildMultipartBody([{ name: "zip", filename: "251102 テスト.zip", data: Buffer.from("x") }]);
+    const parsed = parseMultipart(body, BOUNDARY);
+    assert.ok(!("error" in parsed));
+    assert.equal(parsed.file?.filename, "251102 テスト.zip");
+  });
+});
+
 describe("extractBoundary", () => {
   it("multipart/form-data のboundaryを取り出す", () => {
     assert.equal(extractBoundary(`multipart/form-data; boundary=${BOUNDARY}`), BOUNDARY);
