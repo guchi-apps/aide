@@ -51,4 +51,11 @@ describe("複数月ぶんの取得結果のマージ", () => {
 
     assert.equal(merged.entries.length, 2);
   });
+
+  it("明細JSONの項目名は月をまたいでまとめる。どの月にも無ければ付けない（aide#759）", () => {
+    const a = { entries: [], months: ["202610"], sourceFields: ["id", "mode"] };
+    const b = { entries: [], months: ["202611"], sourceFields: ["calc_flag", "id"] };
+    assert.deepEqual(mergeZaimMoneyLists([a, b]).sourceFields, ["calc_flag", "id", "mode"]);
+    assert.equal("sourceFields" in mergeZaimMoneyLists([{ entries: [], months: ["202611"] }]), false);
+  });
 });

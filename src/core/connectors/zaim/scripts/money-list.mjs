@@ -1,7 +1,7 @@
 import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { resolveStatePath } from "./paths.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
-import { fetchDetails, readDetail, toRawEntry } from "./money-entry.mjs"
+import { fetchDetails, listItemKeys, readDetail, toRawEntry } from "./money-entry.mjs"
 import { assertLoggedIn } from "./session-check.mjs"
 
 const PAGE_TIMEOUT = 60_000
@@ -52,7 +52,7 @@ try {
     // 巡回・登録と同様、開いたついでにセッションを延長しておく。
     await context.storageState({ path: statePath })
 
-    process.stdout.write(JSON.stringify({ url, month, entries }))
+    process.stdout.write(JSON.stringify({ url, month, entries, itemKeys: listItemKeys(details.items) }))
 } finally {
     await browser.close()
 }

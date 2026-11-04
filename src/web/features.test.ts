@@ -55,7 +55,7 @@ describe("機能一覧ページ", () => {
     const html = render(registryWith(pingTool));
     assert.match(html, /class="nm feature-trigger"[^>]*>\/api\/money\/transactions/);
     assert.ok(html.includes("GET /api/money/transactions"));
-    assert.ok(html.includes("明細が無い場合は空配列（[]）を返す"));
+    assert.ok(html.includes("まだ一度も巡回していなければ empty: true・entries: [] を返す"));
     assert.ok(html.includes("401: 認証情報が無い、または一致しない。"));
   });
 

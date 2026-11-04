@@ -1,6 +1,6 @@
 import { acquireZaimScreenFileLockWaiting } from "../../core/connectors/zaim/screen-file-lock.ts";
 import { fetchZaimMoneyList } from "../../core/connectors/zaim/index.ts";
-import type { ZaimMoneyEntry, ZaimMoneyList } from "../../core/connectors/zaim/types.ts";
+import type { ZaimFailedMonth, ZaimMoneyEntry, ZaimMoneyList } from "../../core/connectors/zaim/types.ts";
 import {
   coveredCalendarMonths,
   zaimMonthStartDay,
@@ -21,8 +21,14 @@ export function mergeZaimMoneyLists(lists: readonly ZaimMoneyList[]): ZaimMoneyL
   const months: string[] = [];
   const seenIds = new Set<number>();
   const entries: ZaimMoneyEntry[] = [];
+  const fields = new Set<string>();
+  let hasFields = false;
   for (const list of lists) {
     months.push(...list.months);
+    if (list.sourceFields) {
+      hasFields = true;
+      for (const field of list.sourceFields) fields.add(field);
+    }
     for (const entry of list.entries) {
       if (entry.id !== null) {
         if (seenIds.has(entry.id)) continue;
@@ -31,7 +37,7 @@ export function mergeZaimMoneyLists(lists: readonly ZaimMoneyList[]): ZaimMoneyL
       entries.push(entry);
     }
   }
-  return { entries, months };
+  return { entries, months, ...(hasFields ? { sourceFields: [...fields].sort() } : {}) };
 }
 
 /**
@@ -84,7 +90,17 @@ async function syncZaimMoney(): Promise<string> {
 
   const merged = mergeZaimMoneyLists(lists);
   const covered = coveredCalendarMonths(merged.months, today, startDay);
-  const destination = await publish(ZAIM_MONEY_CACHE_KEY, "zaim-money", { ...merged, months: covered });
+  // 読もうとした月と読めなかった月を残す（aide#760）。前月の失敗はジョブを失敗にしないため、
+  // ここに残さないと利用側からは「months が狭い」ことしか分からない
+  const failedMonths: ZaimFailedMonth[] = previousFailureMessage
+    ? [{ month: prevMonth, reason: previousFailureMessage.slice(0, 300) }]
+    : [];
+  const destination = await publish(ZAIM_MONEY_CACHE_KEY, "zaim-money", {
+    ...merged,
+    months: covered,
+    requestedMonths: [prevMonth, month],
+    failedMonths,
+  });
 
   const parts = [
     `Zaimの${merged.months.join("・")}月（暦月で${covered.join("・") || "なし"}が全日分）の明細 ${merged.entries.length} 件を取得し、${destination}`,

@@ -7,6 +7,7 @@ import { JOB_CATALOG, type JobInfo } from "../../worker/jobs/catalog.ts";
 import { readJobRuns, type JobRun } from "../../worker/job-history.ts";
 import { jobRecordKey, type JobRecord } from "../../worker/record.ts";
 import { ZAIM_CACHE_KEY } from "../../worker/jobs/zaim-sync.ts";
+import { ZAIM_MONEY_CACHE_KEY } from "../../worker/jobs/zaim-money-sync.ts";
 import { readCache, type CachedValue } from "../cache/store.ts";
 import { REPO_ROOT } from "../paths.ts";
 import { readDaySpanConfig } from "../connectors/dayspan/index.ts";
@@ -17,8 +18,9 @@ import { readOpsDashboardConfig } from "../connectors/ops-dashboard/index.ts";
 import { readAssetManagerConfig } from "../connectors/asset-manager/index.ts";
 import { findStaleZaimAccounts } from "../connectors/zaim/parse.ts";
 import { zaimWebUpstreamUrl } from "../connectors/zaim/web-payment-forward.ts";
-import type { ZaimSnapshot } from "../connectors/zaim/types.ts";
+import type { ZaimMoneyList, ZaimSnapshot } from "../connectors/zaim/types.ts";
 import { STALE_AFTER_MINUTES } from "./money.ts";
+import { STALE_AFTER_MINUTES as MONEY_STALE_AFTER_MINUTES } from "./money-transactions.ts";
 
 /**
  * AIDE自身の動作状況の横断ビュー。
@@ -87,6 +89,21 @@ export interface HealthCache {
   severity: HealthSeverity;
 }
 
+/** Zaimの家計簿明細のキャッシュの状態（aide#760）。 */
+export interface HealthMoneyCache {
+  key: string;
+  empty: boolean;
+  fetchedAt: string | null;
+  ageMinutes: number | null;
+  stale: boolean;
+  entries: number;
+  /** 全日を読めた暦月（`YYYYMM`） */
+  months: string[];
+  /** 読めなかったZaimの月。旧キャッシュでは空 */
+  failedMonths: string[];
+  severity: HealthSeverity;
+}
+
 export interface HealthConnector {
   key: string;
   label: string;
@@ -113,6 +130,8 @@ export interface Health {
   server: HealthServer;
   jobs: HealthJob[];
   cache: HealthCache;
+  /** Zaimの家計簿明細のキャッシュ（aide#760）。asset-managerの家計簿の取り込み元 */
+  moneyCache: HealthMoneyCache;
   connectors: HealthConnector[];
   mcp: AuthSummary;
   /**
@@ -392,23 +411,55 @@ export interface HealthInput {
   now?: Date;
 }
 
+/** Zaimの家計簿明細のキャッシュを畳む（aide#760）。純粋関数。 */
+export function summarizeMoneyCache(cached: CachedValue<ZaimMoneyList> | null): HealthMoneyCache {
+  if (!cached) {
+    return {
+      key: ZAIM_MONEY_CACHE_KEY,
+      empty: true,
+      fetchedAt: null,
+      ageMinutes: null,
+      stale: false,
+      entries: 0,
+      months: [],
+      failedMonths: [],
+      severity: "unknown",
+    };
+  }
+  const stale = cached.ageMinutes > MONEY_STALE_AFTER_MINUTES;
+  const failedMonths = (cached.data.failedMonths ?? []).map((f) => f.month);
+  return {
+    key: ZAIM_MONEY_CACHE_KEY,
+    empty: false,
+    fetchedAt: cached.fetchedAt,
+    ageMinutes: cached.ageMinutes,
+    stale,
+    entries: cached.data.entries.length,
+    months: cached.data.months ?? [],
+    failedMonths,
+    severity: stale || failedMonths.length > 0 ? "warn" : "ok",
+  };
+}
+
 /** 画面から呼ばれる入口。手元の材料を集めて畳む。 */
 export async function buildHealth(input: HealthInput): Promise<Health> {
   const now = input.now ?? new Date();
 
-  const [version, jobRecords, jobRuns, zaimCache, mcp, mcpAccess] = await Promise.all([
+  const [version, jobRecords, jobRuns, zaimCache, mcp, mcpAccess, zaimMoneyCache] = await Promise.all([
     readVersion(),
     Promise.all(JOB_CATALOG.map((job) => readCache<JobRecord>(jobRecordKey(job.name)))),
     Promise.all(JOB_CATALOG.map((job) => readJobRuns(jobRecordKey(job.name)))),
     readCache<ZaimSnapshot>(ZAIM_CACHE_KEY),
     readAuthSummary(),
     readMcpAccessSummary(now),
+    readCache<ZaimMoneyList>(ZAIM_MONEY_CACHE_KEY).catch(() => null),
   ]);
 
   const jobs = JOB_CATALOG.map((job, index) =>
     summarizeJob(job, jobRecords[index] ?? null, jobRuns[index] ?? []),
   );
   const cache = summarizeCache(zaimCache, now);
+  const moneyCache = summarizeMoneyCache(zaimMoneyCache);
   const connectors = await readConnectors({ supabase: input.supabase ?? null });
 
   const attention: HealthAttention[] = [
@@ -428,6 +479,13 @@ export async function buildHealth(input: HealthInput): Promise<Health> {
       severity: "warn",
       message: `残高のキャッシュが ${formatDuration(cache.ageMinutes ?? 0)} 前のものです`,
       action: "zaim-sync が動いているか確認する",
+    });
+  }
+  if (moneyCache.failedMonths.length > 0) {
+    attention.push({
+      severity: "warn",
+      message: `Zaimの家計簿明細のうち ${moneyCache.failedMonths.join("・")} 月を読めませんでした`,
+      action: "zaim-money-sync のログを確認する。次の巡回で読めれば戻る",
     });
   }
   if (cache.staleAccounts.length > 0) {
@@ -457,6 +515,7 @@ export async function buildHealth(input: HealthInput): Promise<Health> {
     },
     jobs,
     cache,
+    moneyCache,
     connectors,
     mcp,
     mcpAccess,

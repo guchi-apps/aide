@@ -1,5 +1,5 @@
 import { readCache } from "../cache/store.ts";
-import type { ZaimMoneyEntry, ZaimMoneyList } from "../connectors/zaim/index.ts";
+import type { ZaimFailedMonth, ZaimMoneyEntry, ZaimMoneyList } from "../connectors/zaim/index.ts";
 import {
   type ZaimReceiptDetailEntry,
   zaimReceiptDetailCacheKey,
@@ -20,6 +20,12 @@ export interface MoneyTransactionsView {
    * 場合は省略する（asset-manager側は、無ければ`fetchedAt`の月だけを読んだものとして扱う）。
    */
   months?: string[];
+  /** 巡回で読もうとしたZaimの月（aide#760）。旧キャッシュでは省略する。 */
+  requestedMonths?: string[];
+  /** 読めなかったZaimの月と理由（aide#760）。空なら全部読めた。旧キャッシュでは省略する。 */
+  failedMonths?: ZaimFailedMonth[];
+  /** 明細JSONの1件が持っていた項目の名前（値は含まない。aide#759）。旧キャッシュでは省略する。 */
+  sourceFields?: string[];
   entries: MoneyTransactionEntry[];
   note: string;
 }
@@ -87,7 +93,9 @@ const NAME_TRUNCATION_NOTE =
   "partial（一部しか読めていない可能性。合計が合わない）の行だけで、failed（取得失敗）の行と" +
   "内訳を持たない通常明細には付かない。complete 以外は商品明細として確定しないこと。" +
   "itemsStatus が無い行は、内訳の取得に対応する前のキャッシュで、次の巡回で更新される。" +
-  "itemsFetchedAt が付く行は、定期巡回より後に手動再取得（POST /api/zaim/receipt-detail/refresh）した内訳に差し替えてある。";
+  "itemsFetchedAt が付く行は、定期巡回より後に手動再取得（POST /api/zaim/receipt-detail/refresh）した内訳に差し替えてある。" +
+  "mode（payment / income / transfer）・fromAccountId・toAccountId・childIds・calcFlag（集計の設定の生の値）は、" +
+  "Zaimの明細JSONに項目があったときだけ付く（項目名は sourceFields で確かめられる）。calcFlag の値の意味は未確定。";
 
 /**
  * Zaim Web版の家計簿明細一覧の横断ビュー。
@@ -115,6 +123,11 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
 
   const stale = cached.ageMinutes > STALE_AFTER_MINUTES;
   const notes = [NAME_TRUNCATION_NOTE];
+  if (cached.data.failedMonths && cached.data.failedMonths.length > 0) {
+    notes.push(
+      `Zaimの${cached.data.failedMonths.map((f) => f.month).join("・")}月は読めなかった（months に含まれない）。`,
+    );
+  }
   if (stale) {
     notes.push(
       `このデータは ${Math.round(cached.ageMinutes / 60)} 時間前のもので、最新の明細を反映していない可能性がある。`,
@@ -127,6 +140,9 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
     ageMinutes: cached.ageMinutes,
     stale,
     ...(cached.data.months ? { months: cached.data.months } : {}),
+    ...(cached.data.requestedMonths ? { requestedMonths: cached.data.requestedMonths } : {}),
+    ...(cached.data.failedMonths ? { failedMonths: cached.data.failedMonths } : {}),
+    ...(cached.data.sourceFields ? { sourceFields: cached.data.sourceFields } : {}),
     entries: await overlayReceiptDetails(cached.data.entries, cached.fetchedAt),
     note: notes.join(" "),
   };
