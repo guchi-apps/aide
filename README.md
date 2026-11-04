@@ -2709,6 +2709,9 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
   "ageMinutes": 30,
   "stale": false,
   "months": ["202608", "202609"],
+  "requestedMonths": ["202608", "202609"], // #760
+  "failedMonths": [],                       // #760
+  "sourceFields": ["amount", "calc_flag", "child_ids", "..."], // #759（項目名だけ）
   "entries": [
     { "id": 10228209053, "date": "2026-09-02", "amount": 1238,
       "category": "食費", "genre": "調理食品", "account": "スマートレシート",
@@ -2724,6 +2727,28 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 **`name`（品目名）は、1件の明細に複数品目があると先頭の1件しか取れず、末尾が「…」で省略されることがある。**
 これはZaim Web版の一覧表示そのものの仕様で、一覧のJSONは代表の品名と合計しか持たない。全品目は
 `items` で返す（#596）。
+
+#### 種別・口座id・子明細id・集計の設定（#759）と、読めなかった月（#760）
+
+asset-managerの家計簿（guchi-apps/asset-manager#814）が支出・収入・振替を分け、Zaimの「集計の設定」を
+引き継ぐために、明細JSON（`/money/details`）の項目を足して返す。**項目は足すだけで、既存の項目は変えない。**
+
+| 項目 | 元の項目（明細JSON） | 付く条件 |
+|---|---|---|
+| `entries[].mode` | `mode` | 値が `payment` / `income` / `transfer` のとき |
+| `entries[].fromAccountId` / `toAccountId` | `from_account_id` / `to_account_id` | JSONに項目があるとき（数で読めなければ `null`） |
+| `entries[].childIds` | `child_ids` | 子明細を持つ取引 |
+| `entries[].calcFlag` | `calc_flag` | JSONに項目があるとき。**生の値のまま返す** |
+| `sourceFields` | 1件目以降の全項目の**名前** | 新しい巡回のあと（値は含まない） |
+| `requestedMonths` / `failedMonths` | 巡回で読もうとした・読めなかったZaimの月 | 新しい巡回のあと |
+
+- **明細JSONの項目名は、実物で確かめきれていない。** `from_account_id`・`calc_flag` は編集画面の `Receipt`
+  にあることを確かめた名前（`scripts/receipt-detail.test.ts`）で、`mode`・`to_account_id` は旧公式APIの名前。
+  実際に一覧JSONにどの項目があるかは、次の巡回のあとに `sourceFields` で確かめる（値は持ち出さない）
+- **`calcFlag` の値の意味（どれが「集計に含めない」か）は変換しない。** ZaimのCSVの「集計の設定」と
+  突き合わせて確かめてから、利用側で解釈する
+- 前月の取得に失敗してもジョブは成功のまま今日を含む月だけを保存する（従来どおり）が、`failedMonths` に
+  月と理由が残り、`/api/status` の `moneyCache` にも出る
 
 #### 商品内訳（`entries[].items`・`itemsStatus`）
 

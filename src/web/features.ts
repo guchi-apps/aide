@@ -190,11 +190,12 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/api/money/transactions",
     meta: "GET",
     description:
-      "Zaim Web版の家計簿明細一覧（当月＋先月ぶん、JST）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
+      "Zaim Web版の家計簿明細一覧（Zaimの月で当月＋前月ぶん、JST）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
     detail: {
       request: "GET /api/money/transactions\nAuthorization: Bearer <AIDE_READ_SECRET>",
-      success: "200: 当月と先月の明細をJSON配列で返す。",
-      empty: "明細が無い場合は空配列（[]）を返す。取得失敗ではない。",
+      success:
+        "200: { empty, fetchedAt, ageMinutes, stale, months, requestedMonths, failedMonths, sourceFields, entries, note } のオブジェクトを返す。entries が明細の配列で、mode・fromAccountId・toAccountId・childIds・calcFlag は明細JSONに項目があったときだけ付く。",
+      empty: "まだ一度も巡回していなければ empty: true・entries: [] を返す。取得失敗ではない。",
       errors: ["401: 認証情報が無い、または一致しない。", "503: 読み取り用の共有シークレットが未設定。", "405: GET・HEAD以外。"],
     },
   },

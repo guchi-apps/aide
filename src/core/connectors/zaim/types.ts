@@ -119,6 +119,15 @@ export interface ZaimRefreshResult {
 export interface ZaimRawMoneyEntry {
   /** 明細の編集リンク（例: `/money/10228209053/edit`）。IDはここから取り出す。 */
   editUrl: string;
+  /**
+   * 種別・口座id・子明細id・集計の設定（aide#759）。明細JSONの項目名を実物で確かめきれていないため、
+   * JSONに無ければ付かない（旧スクリプトの出力にも無い）。
+   */
+  mode?: string;
+  fromAccountId?: number | null;
+  toAccountId?: number | null;
+  childIds?: number[];
+  calcFlag?: number | null;
   /** 表示のまま（例: `"9月2日（水）"`）。年は month パラメータ側で補う。`isoDate` があればそちらを使う。 */
   date: string;
   /**
@@ -184,6 +193,8 @@ export interface ZaimRawMoneyListResult {
   /** クロール対象の年月（`YYYYMM`）。表示テキストの日付に年を足すために使う。 */
   month: string;
   entries: ZaimRawMoneyEntry[];
+  /** 明細JSONの1件が持っていた項目の名前（値は含まない。aide#759）。旧スクリプトの出力には無い。 */
+  itemKeys?: string[];
 }
 
 /** 家計簿明細1件。金額を数値化し、明細IDを編集リンクから取り出した結果。 */
@@ -215,7 +226,24 @@ export interface ZaimMoneyEntry {
   itemsStatus?: ZaimItemsStatus;
   /** `partial` / `failed` の理由。 */
   itemsNote?: string;
+  /**
+   * 種別（aide#759）。Zaimの明細JSONが返す値（`payment` / `income` / `transfer`）のときだけ付く。
+   * 付かない行は、利用側が口座名の有無から推定する。
+   */
+  mode?: ZaimMoneyMode;
+  /** 出金元・入金先のZaim口座id（aide#759）。JSONに項目が無ければ付かない。口座が無い側は null。 */
+  fromAccountId?: number | null;
+  toAccountId?: number | null;
+  /** 子明細のid（aide#759）。子明細を持つ取引だけに付く。`items[].id` と同じ値の集まり。 */
+  childIds?: number[];
+  /**
+   * Zaimの「集計の設定」の生の値（aide#759。編集画面の `calc_flag`）。**値の意味（どれが「集計に含めない」か）は
+   * 実物とCSVの突き合わせで確かめるまで変換しない。** JSONに項目が無ければ付かない。
+   */
+  calcFlag?: number | null;
 }
+
+export type ZaimMoneyMode = "payment" | "income" | "transfer";
 
 /** `GET /api/money/transactions` の `entries[].items` の1行（asset-managerの `LinkedDetailItem` に対応）。 */
 export interface ZaimMoneyItem {
@@ -241,4 +269,16 @@ export interface ZaimMoneyList {
    * 暦月へ直すのは `zaim-month.ts` の `coveredCalendarMonths`。
    */
   months: string[];
+  /** 明細JSONの1件が持っていた項目の名前（値は含まない。aide#759）。旧キャッシュには無い。 */
+  sourceFields?: string[];
+  /** 巡回で読もうとしたZaimの月（`YYYYMM`。aide#760）。旧キャッシュには無い。 */
+  requestedMonths?: string[];
+  /** 読めなかったZaimの月と理由（aide#760）。空なら全部読めた。旧キャッシュには無い。 */
+  failedMonths?: ZaimFailedMonth[];
+}
+
+export interface ZaimFailedMonth {
+  /** Zaimの月（`YYYYMM`。開始日区切り） */
+  month: string;
+  reason: string;
 }

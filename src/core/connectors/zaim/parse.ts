@@ -4,6 +4,7 @@ import type {
   ZaimMoneyEntry,
   ZaimMoneyItem,
   ZaimMoneyList,
+  ZaimMoneyMode,
   ZaimOnlineAccount,
   ZaimRawEntry,
   ZaimRawMoneyEntry,
@@ -300,6 +301,24 @@ function buildItems(
   return { items, itemsStatus: detail.status, ...note };
 }
 
+const ZAIM_MONEY_MODES: readonly ZaimMoneyMode[] = ["payment", "income", "transfer"];
+
+/**
+ * 種別・口座id・子明細id・集計の設定（aide#759）を、JSONに項目があったときだけ付ける。
+ * 項目の無い行・旧スクリプトの出力には何も足さない（APIの形を変えない）。
+ */
+function buildSourceFields(
+  entry: ZaimRawMoneyEntry,
+): Pick<ZaimMoneyEntry, "mode" | "fromAccountId" | "toAccountId" | "childIds" | "calcFlag"> {
+  const out: Pick<ZaimMoneyEntry, "mode" | "fromAccountId" | "toAccountId" | "childIds" | "calcFlag"> = {};
+  if (entry.mode && (ZAIM_MONEY_MODES as readonly string[]).includes(entry.mode)) out.mode = entry.mode as ZaimMoneyMode;
+  if (entry.fromAccountId !== undefined) out.fromAccountId = entry.fromAccountId;
+  if (entry.toAccountId !== undefined) out.toAccountId = entry.toAccountId;
+  if (entry.childIds && entry.childIds.length > 0) out.childIds = entry.childIds;
+  if (entry.calcFlag !== undefined) out.calcFlag = entry.calcFlag;
+  return out;
+}
+
 /**
  * 一覧の生テキストを、金額を数値化しIDを取り出した明細一覧へ変換する。**純粋関数。**
  *
@@ -327,7 +346,8 @@ export function buildZaimMoneyList(raw: ZaimRawMoneyListResult): ZaimMoneyList {
       name: collapseWhitespace(entry.name),
       comment: collapseWhitespace(entry.comment),
       ...buildItems(entry.detail),
+      ...buildSourceFields(entry),
     });
   }
-  return { entries, months: [raw.month] };
+  return { entries, months: [raw.month], ...(raw.itemKeys ? { sourceFields: raw.itemKeys } : {}) };
 }
