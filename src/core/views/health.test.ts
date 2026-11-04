@@ -4,7 +4,7 @@ import type { CachedValue } from "../cache/store.ts";
 import type { ZaimSnapshot } from "../connectors/zaim/types.ts";
 import type { JobInfo } from "../../worker/jobs/catalog.ts";
 import type { JobRecord } from "../../worker/record.ts";
-import { formatDuration, readConnectors, summarizeCache, summarizeJob, worst } from "./health.ts";
+import { formatDuration, readConnectors, summarizeCache, summarizeJob, summarizeMoneyCache, worst } from "./health.ts";
 
 const JOB: JobInfo = {
   name: "zaim-keep-alive",
@@ -250,5 +250,30 @@ describe("表示の補助", () => {
     assert.equal(formatDuration(5), "5分");
     assert.equal(formatDuration(90), "1時間30分");
     assert.equal(formatDuration(60 * 26), "1日2時間");
+  });
+});
+
+describe("家計簿明細のキャッシュの判定（aide#760）", () => {
+  const cached = (ageMinutes: number, failedMonths?: { month: string; reason: string }[]) => ({
+    source: "zaim-money",
+    fetchedAt: "2026-11-03T11:35:00+09:00",
+    ageMinutes,
+    data: { entries: [], months: ["202610", "202611"], ...(failedMonths ? { failedMonths } : {}) },
+  });
+
+  it("一度も巡回していなければ記録なし", () => {
+    assert.equal(summarizeMoneyCache(null).severity, "unknown");
+  });
+
+  it("読めなかった月があれば注意にし、月を出す", () => {
+    const view = summarizeMoneyCache(cached(10, [{ month: "202610", reason: "timeout" }]));
+    assert.equal(view.severity, "warn");
+    assert.deepEqual(view.failedMonths, ["202610"]);
+  });
+
+  it("新しく、全部読めていれば正常。旧キャッシュ（failedMonths なし）も正常", () => {
+    assert.equal(summarizeMoneyCache(cached(10, [])).severity, "ok");
+    assert.equal(summarizeMoneyCache(cached(10)).severity, "ok");
+    assert.equal(summarizeMoneyCache(cached(60 * 18 + 1)).severity, "warn");
   });
 });

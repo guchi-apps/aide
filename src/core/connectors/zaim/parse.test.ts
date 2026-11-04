@@ -413,6 +413,47 @@ describe("buildZaimMoneyList（明細JSON由来）", () => {
     })
 })
 
+describe("buildZaimMoneyList（種別・口座id・子明細id・集計の設定。aide#759）", () => {
+    const base = {
+        editUrl: "/money/9000000001/edit",
+        isoDate: "2026-11-01",
+        date: "",
+        amount: "1000",
+        category: "食費",
+        genre: "外食",
+        account: "テストカード",
+        toAccount: "",
+        place: "テスト店",
+        name: "",
+        comment: "",
+    }
+
+    it("明細JSONに項目があれば付け、項目名の一覧も残す", () => {
+        const list = buildZaimMoneyList({
+            url: "",
+            month: "202611",
+            itemKeys: ["calc_flag", "id", "mode"],
+            entries: [{ ...base, mode: "payment", fromAccountId: 12, toAccountId: null, childIds: [9000000002], calcFlag: 10 }],
+        })
+        const entry = list.entries[0]
+        assert.equal(entry?.mode, "payment")
+        assert.equal(entry?.fromAccountId, 12)
+        assert.equal(entry?.toAccountId, null)
+        assert.deepEqual(entry?.childIds, [9000000002])
+        assert.equal(entry?.calcFlag, 10)
+        assert.deepEqual(list.sourceFields, ["calc_flag", "id", "mode"])
+    })
+
+    it("項目が無い・知らない種別なら付けない（今までの応答と同じ形）", () => {
+        const list = buildZaimMoneyList({ url: "", month: "202611", entries: [{ ...base, mode: "unknown", childIds: [] }] })
+        const entry = list.entries[0] ?? {}
+        for (const key of ["mode", "fromAccountId", "toAccountId", "childIds", "calcFlag"]) {
+            assert.equal(key in entry, false, key)
+        }
+        assert.equal("sourceFields" in list, false)
+    })
+})
+
 describe("buildZaimMoneyList", () => {
     it("一覧の生テキストから明細を組み立てる", () => {
         const list = buildZaimMoneyList({
