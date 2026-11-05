@@ -316,16 +316,22 @@ async function callAssetManager(path: string, request: { method: "GET" | "POST" 
 export const assetManagerImportPaymentTool: Tool = {
   name: "asset_manager_import_payment",
   description:
-    "Gmailから抽出した請求情報をAsset Managerへ取り込む。Zaim APIは直接呼ばず、Asset Managerが" +
-    "重複判定・信頼度判定・反映待ち登録を行う。Gmailの請求メール1件を取り込むときだけ呼び、" +
+    "Gmailから抽出した請求情報をAsset Managerへ取り込む。Asset Managerが" +
+    "重複判定・信頼度判定・反映待ち登録を行う。" +
+    "取り込むのは、サービス提供元の請求書・領収書・購入確認・購入履歴など、品目や用途が分かるメールだけ" +
+    "（例: ChatGPTのサブスクの請求、ゲームの課金・購入履歴）。" +
+    "クレジットカード会社・デビットカード・銀行・決済サービスからの利用通知や引き落としのお知らせ" +
+    "（例: 「ご利用のお知らせ」）は取り込まない。同じ支払いがカード明細として家計簿に入り、" +
+    "カード明細より情報が少なく、どのカードかも分からないため、重複の確認を増やすだけになる。" +
+    "対象のメール1件を取り込むときだけ呼び、" +
     "gmailMessageId は必ず元メールの messageId を渡す。confidence も必ず指定し、曖昧な抽出結果は低くする。" +
-    "status（imported / pendingReview / duplicate / ignored / error）、receiptId、zaimMoneyId、reasonを含む" +
+    "status（imported / pendingReview / duplicate / ignored / error）、receiptId、reasonを含む" +
     "Asset Managerの結果をそのまま返す。同じgmailMessageIdを再送してもduplicateになる。" +
     "Asset Managerが2xx以外を返したときは、isError付きで status: error・reason・httpStatus を返す。" +
     "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。" +
     "ドル建てなど外貨建ての請求メールでは、originalAmount（外貨の元の金額）と originalCurrency（通貨コード）を必ず付け、" +
     "amount には円へ換算して整数へ丸めた金額を入れる（amount は整数のみ。換算レートと丸めは amountNote に書く）。" +
-    "外貨建ての明細は概算として扱われ、Zaimへ自動登録されない。",
+    "外貨建ての明細は概算として扱われ、Asset Managerの突合せタブで確定する。",
   inputSchema: {
     type: "object",
     properties: {
@@ -352,7 +358,7 @@ export const assetManagerImportPaymentTool: Tool = {
         type: "boolean",
         description:
           "金額が正確でない可能性があるときに true。為替換算した・請求額が確定前の見込み、など。" +
-          "originalCurrency が JPY 以外なら省いてもAsset Manager側で概算として扱う。概算の明細はZaimへ自動登録されず、Asset Managerの突合せタブで確定する。",
+          "originalCurrency が JPY 以外なら省いてもAsset Manager側で概算として扱う。概算の明細はAsset Managerの突合せタブで確定する。",
       },
       amountNote: {
         type: "string",
