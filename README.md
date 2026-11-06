@@ -553,7 +553,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_ping` | 疎通確認。サーバー時刻・セッションIDに加え、応答中プロセスの本体バージョン（`serverVersion`。`initialize` の `serverInfo.version` と同じ値）と起動時刻（`startedAt`・UTC）を返す。本番のバージョン確認・再起動の確認にも使う |
 | `aide_connection_permissions` | 現在のMCP接続に付与されたOAuth scopeの診断（読み取り専用・scope不要）。**そのリクエストの認証結果**から `authMode`（`oauth` / `auth-disabled`）・付与済み `scopes`・`work-reports:read`/`write` 等の有無（`checks`）を返す。サーバーの対応scope一覧や要求scope、別接続の権限は返さず、入力も取らない。`authMode=auth-disabled` は開発用の認証無効起動で、全権限を仮置きしているだけでOAuthの付与ではない。scopeを判定できないときは `status=indeterminate` かつ `isError` で返し、未許可とは区別する。ツールが一覧に出ないのにscopeがある場合は、ツール公開・登録情報側の問題と切り分けられる |
 | `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
-| `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
+| `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別・家計簿の口座別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
 | `aide_utility_bills` | 電気代・ガス代の直近の請求・月ごとの推移（金額・使用量）・前月比・前年同月比。kurashio の月次請求を都度読む（詳細は[電気代・ガス代を読む](#電気代ガス代を読むmcp)） |
 | `kurashio_utility_bill_contracts` | kurashio に記録済みの電気・ガスの契約候補（不透明な契約キー・契約種別・最新の請求月）。お客さま番号は返さない。scope `kurashio-bills:read`（詳細は[kurashioの月次請求の照会と登録](#kurashioの月次請求の照会と登録678)） |
 | `kurashio_get_utility_bill` | kurashio に保存済みの月次請求を1件、請求月か元メールの messageId で読む（found / not_found を区別）。scope `kurashio-bills:read` |
@@ -1560,7 +1560,7 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 ### 返す粒度と、totals へ足さない理由
 
-通貨別の月額合計・**支払方法別の月額合計**・契約ごとの明細（区分・契約状況・支払方法つき）・
+通貨別の月額合計・**支払方法別の月額合計**・家計簿の口座別の月額合計（asset-manager#878。旧Zaim口座の項目は読まない）・契約ごとの明細（区分・契約状況・支払方法つき）・
 **31日以内の支払予定**まで。契約IDやラベル・料金改定の履歴は返さない（それは `asset_manager_subscriptions`）。
 
 **固定費はサブスクだけではない。** Asset Manager の契約には区分（`SUBSCRIPTION` / `INSURANCE` /
@@ -2655,9 +2655,12 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
     "configured": true,
     "monthlyByCurrency": [{ "currency": "JPY", "amount": 2470 }],
     "monthlyByPaymentMethod": [{ "paymentMethod": "〇〇カード", "currency": "JPY", "amount": 2470 }],
+    "monthlyByLedgerAccount": [{ "accountLink": "LINKED", "ledgerAccountId": 7, "ledgerAccountName": "〇〇銀行",
+                                 "currency": "JPY", "amount": 2470 }],
     "monthlyJpy": 2470, "usdJpyRate": 152.3, "count": 2,
     "items": [{ "name": "〇〇", "monthlyAmount": 1490, "currency": "JPY",
                 "contractStatus": "AUTO_RENEWING", "paymentMethod": "〇〇カード",
+                "accountLink": "LINKED", "ledgerAccountName": "〇〇銀行",
                 "nextPaymentDate": "2026-09-05" }],
     "upcoming": [{ "name": "〇〇", "date": "2026-09-05", "amount": 1490, "currency": "JPY" }],
     "unavailable": null, "note": "..."

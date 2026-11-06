@@ -7,6 +7,7 @@ import {
 import type {
   AssetManagerSubscription,
   AssetManagerSubscriptionsSnapshot,
+  SubscriptionAccountLink,
   SubscriptionContractStatus,
   SubscriptionCurrency,
 } from "../connectors/asset-manager/types.ts";
@@ -38,6 +39,18 @@ export interface FixedCostPaymentMethodTotal {
   amount: number;
 }
 
+/**
+ * 家計簿の口座ごとの月額合計（asset-manager#878）。通貨別。
+ * 口座を持たない支払方法・未設定のものは `ledgerAccountName` が null で、`accountLink` で区別する。
+ */
+export interface FixedCostLedgerAccountTotal {
+  accountLink: SubscriptionAccountLink;
+  ledgerAccountId: number | null;
+  ledgerAccountName: string | null;
+  currency: SubscriptionCurrency;
+  amount: number;
+}
+
 export interface FixedCostItem {
   name: string;
   /**
@@ -57,6 +70,10 @@ export interface FixedCostItem {
   contractStatus: SubscriptionContractStatus;
   /** 引き落とし元（例 `"楽天カード"`）。 */
   paymentMethod: string;
+  /** 引き落とし先の家計簿の口座との紐づき。 */
+  accountLink: SubscriptionAccountLink;
+  /** 引き落とし先の家計簿の口座名。`accountLink` が `LINKED` でなければ null。 */
+  ledgerAccountName: string | null;
   /** 次回の支払日（`YYYY-MM-DD`）。見つからなければ null。 */
   nextPaymentDate: string | null;
 }
@@ -85,6 +102,8 @@ export interface FixedCostsView {
    * 並びは通貨ごとにまとめたうえで金額の大きい順（同額なら支払方法名の昇順）。
    */
   monthlyByPaymentMethod: FixedCostPaymentMethodTotal[];
+  /** 引き落とし先の家計簿の口座別の月額合計。通貨別で、並びは支払方法別と同じ。 */
+  monthlyByLedgerAccount: FixedCostLedgerAccountTotal[];
   /** 円換算した月額合計の参考値。換算できないものがあれば null。 */
   monthlyJpy: number | null;
   /** 円換算に使ったレート。取得できていなければ null。 */
@@ -136,6 +155,7 @@ const sum = (items: { amount: number }[]): number =>
 const emptyFixedCosts = (): Omit<FixedCostsView, "configured" | "unavailable" | "note"> => ({
   monthlyByCurrency: [],
   monthlyByPaymentMethod: [],
+  monthlyByLedgerAccount: [],
   monthlyJpy: null,
   usdJpyRate: null,
   count: 0,
@@ -270,6 +290,45 @@ function summarizeByPaymentMethod(
     );
 }
 
+/**
+ * 引き落とし先の家計簿の口座別の月額合計（asset-manager#878）。支払方法別と同様に通貨別に分ける。
+ * 口座が無い（`NO_ACCOUNT`）・未設定（`UNSET`）は口座名が null の行にまとまる。
+ */
+function summarizeByLedgerAccount(
+  subscriptions: readonly AssetManagerSubscription[],
+): FixedCostLedgerAccountTotal[] {
+  const totals = new Map<string, FixedCostLedgerAccountTotal>();
+  for (const subscription of subscriptions) {
+    const accountLink = subscription.accountLink ?? "UNSET";
+    const ledgerAccountId = accountLink === "LINKED" ? (subscription.ledgerAccountId ?? null) : null;
+    const ledgerAccountName = accountLink === "LINKED" ? (subscription.ledgerAccountName ?? null) : null;
+    const currency = subscription.currency;
+    const key = `${accountLink}\u0000${ledgerAccountId ?? ""}\u0000${ledgerAccountName ?? ""}\u0000${currency}`;
+    const found = totals.get(key);
+    if (found) {
+      found.amount += subscription.monthlyAmount;
+    } else {
+      totals.set(key, {
+        accountLink,
+        ledgerAccountId,
+        ledgerAccountName,
+        currency,
+        amount: subscription.monthlyAmount,
+      });
+    }
+  }
+
+  return [...totals.values()]
+    .map((total) => ({ ...total, amount: roundAmount(total.amount) }))
+    .sort(
+      (a, b) =>
+        a.currency.localeCompare(b.currency) ||
+        b.amount - a.amount ||
+        (a.ledgerAccountName ?? "").localeCompare(b.ledgerAccountName ?? "") ||
+        a.accountLink.localeCompare(b.accountLink),
+    );
+}
+
 /** `YYYY-MM-DD` に日数を足す。ISO形式なので文字列のまま大小比較できる。 */
 function addDays(date: string, days: number): string {
   const at = new Date(`${date}T00:00:00Z`);
@@ -296,6 +355,8 @@ export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot)
     currency: subscription.currency,
     contractStatus: subscription.status,
     paymentMethod: subscription.paymentMethod,
+    accountLink: subscription.accountLink ?? "UNSET",
+    ledgerAccountName: subscription.ledgerAccountName ?? null,
     nextPaymentDate: subscription.nextBillingDay,
   }));
 
@@ -314,6 +375,7 @@ export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot)
 
   const monthlyByCurrency = summarizeByCurrency(living);
   const monthlyByPaymentMethod = summarizeByPaymentMethod(living);
+  const monthlyByLedgerAccount = summarizeByLedgerAccount(living);
 
   // 円換算できない契約が1件でもあれば、合計は「全件ぶん」ではなくなる。部分的な合計を返すと
   // 実際より少ない額が「固定費」として読まれるため、null にして理由を note に残す。
@@ -351,6 +413,7 @@ export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot)
     configured: true,
     monthlyByCurrency,
     monthlyByPaymentMethod,
+    monthlyByLedgerAccount,
     monthlyJpy,
     usdJpyRate: snapshot.summary.usdJpyRate,
     count: items.length,

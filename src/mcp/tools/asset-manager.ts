@@ -414,7 +414,7 @@ export const assetManagerImportPaymentTool: Tool = {
 /**
  * 契約ごとの履歴（`priceHistory`・`paymentMethodHistory`）を省く（#489）。
  *
- * 履歴は契約ごとに付き、支払方法の履歴は現在値（`paymentMethod`・`zaimLink`…）の重複がほとんどで、
+ * 履歴は契約ごとに付き、支払方法の履歴は現在値（`paymentMethod`・`accountLink`…）の重複がほとんどで、
  * 22契約で応答が約40KBになっていた。「いくら払っているか・次にいつ請求されるか」には要らない。
  * **ただし将来日付の料金改定は「次にいくら請求されるか」に効く**ため、`scheduledPriceChanges` へ残す。
  * 計算はせず、Asset Manager が付けた `isCurrent` を基準に抜き出すだけ。
@@ -473,8 +473,10 @@ export const assetManagerSubscriptionsTool: Tool = {
     "usdJpyRate が null（為替レートを取れなかった）のとき、ドル建ては monthlyAmountJpy が null になり合計から外れる。" +
     "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
     "summary.monthlyTotalJpy などはサブスク区分だけの集計で、保険・税金・分割払いを含む固定費全体は summary.fixedCost* と byCategory にある。" +
-    "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別の合計・31日以内の支払予定へ畳んだ要約で、" +
-    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。" +
+    "引き落とし先の口座は家計簿の口座で返る（asset-manager#878）。契約ごとの accountLink（LINKED=口座あり / NO_ACCOUNT=口座を持たない支払方法 / UNSET=未設定）・ledgerAccountId・ledgerAccountName と、口座別の集計 summary.byLedgerAccount を使う。" +
+    "旧項目の zaimLink・zaimAccountName・zaimAccountId・summary.byZaimAccount は廃止予定（zaimAccountId は常に null）なので読まない。" +
+    "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別・家計簿の口座別の合計・31日以内の支払予定へ畳んだ要約で、" +
+    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」「どの口座から毎月いくら引き落とされるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。" +
     "既定では応答を小さくするため、契約ごとの料金履歴（priceHistory）と支払方法の履歴（paymentMethodHistory）は省き、" +
     "今日より先に適用される料金改定だけを scheduledPriceChanges で返す（無ければ項目自体が無い）。" +
     "過去の料金改定・支払方法の変更履歴まで尋ねられたときだけ includeHistory: true を指定する。",
