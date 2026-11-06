@@ -316,16 +316,22 @@ async function callAssetManager(path: string, request: { method: "GET" | "POST" 
 export const assetManagerImportPaymentTool: Tool = {
   name: "asset_manager_import_payment",
   description:
-    "Gmailから抽出した請求情報をAsset Managerへ取り込む。Zaim APIは直接呼ばず、Asset Managerが" +
-    "重複判定・信頼度判定・反映待ち登録を行う。Gmailの請求メール1件を取り込むときだけ呼び、" +
+    "Gmailから抽出した請求情報をAsset Managerへ取り込む。Asset Managerが" +
+    "重複判定・信頼度判定・反映待ち登録を行う。" +
+    "取り込むのは、サービス提供元の請求書・領収書・購入確認・購入履歴など、品目や用途が分かるメールだけ" +
+    "（例: ChatGPTのサブスクの請求、ゲームの課金・購入履歴）。" +
+    "クレジットカード会社・デビットカード・銀行・決済サービスからの利用通知や引き落としのお知らせ" +
+    "（例: 「ご利用のお知らせ」）は取り込まない。同じ支払いがカード明細として家計簿に入り、" +
+    "カード明細より情報が少なく、どのカードかも分からないため、重複の確認を増やすだけになる。" +
+    "対象のメール1件を取り込むときだけ呼び、" +
     "gmailMessageId は必ず元メールの messageId を渡す。confidence も必ず指定し、曖昧な抽出結果は低くする。" +
-    "status（imported / pendingReview / duplicate / ignored / error）、receiptId、zaimMoneyId、reasonを含む" +
+    "status（imported / pendingReview / duplicate / ignored / error）、receiptId、reasonを含む" +
     "Asset Managerの結果をそのまま返す。同じgmailMessageIdを再送してもduplicateになる。" +
     "Asset Managerが2xx以外を返したときは、isError付きで status: error・reason・httpStatus を返す。" +
     "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。" +
     "ドル建てなど外貨建ての請求メールでは、originalAmount（外貨の元の金額）と originalCurrency（通貨コード）を必ず付け、" +
     "amount には円へ換算して整数へ丸めた金額を入れる（amount は整数のみ。換算レートと丸めは amountNote に書く）。" +
-    "外貨建ての明細は概算として扱われ、Zaimへ自動登録されない。",
+    "外貨建ての明細は概算として扱われ、Asset Managerの突合せタブで確定する。",
   inputSchema: {
     type: "object",
     properties: {
@@ -352,7 +358,7 @@ export const assetManagerImportPaymentTool: Tool = {
         type: "boolean",
         description:
           "金額が正確でない可能性があるときに true。為替換算した・請求額が確定前の見込み、など。" +
-          "originalCurrency が JPY 以外なら省いてもAsset Manager側で概算として扱う。概算の明細はZaimへ自動登録されず、Asset Managerの突合せタブで確定する。",
+          "originalCurrency が JPY 以外なら省いてもAsset Manager側で概算として扱う。概算の明細はAsset Managerの突合せタブで確定する。",
       },
       amountNote: {
         type: "string",
@@ -408,7 +414,7 @@ export const assetManagerImportPaymentTool: Tool = {
 /**
  * 契約ごとの履歴（`priceHistory`・`paymentMethodHistory`）を省く（#489）。
  *
- * 履歴は契約ごとに付き、支払方法の履歴は現在値（`paymentMethod`・`zaimLink`…）の重複がほとんどで、
+ * 履歴は契約ごとに付き、支払方法の履歴は現在値（`paymentMethod`・`accountLink`…）の重複がほとんどで、
  * 22契約で応答が約40KBになっていた。「いくら払っているか・次にいつ請求されるか」には要らない。
  * **ただし将来日付の料金改定は「次にいくら請求されるか」に効く**ため、`scheduledPriceChanges` へ残す。
  * 計算はせず、Asset Manager が付けた `isCurrent` を基準に抜き出すだけ。
@@ -467,8 +473,10 @@ export const assetManagerSubscriptionsTool: Tool = {
     "usdJpyRate が null（為替レートを取れなかった）のとき、ドル建ては monthlyAmountJpy が null になり合計から外れる。" +
     "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
     "summary.monthlyTotalJpy などはサブスク区分だけの集計で、保険・税金・分割払いを含む固定費全体は summary.fixedCost* と byCategory にある。" +
-    "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別の合計・31日以内の支払予定へ畳んだ要約で、" +
-    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。" +
+    "引き落とし先の口座は家計簿の口座で返る（asset-manager#878）。契約ごとの accountLink（LINKED=口座あり / NO_ACCOUNT=口座を持たない支払方法 / UNSET=未設定）・ledgerAccountId・ledgerAccountName と、口座別の集計 summary.byLedgerAccount を使う。" +
+    "旧項目の zaimLink・zaimAccountName・zaimAccountId・summary.byZaimAccount は廃止予定（zaimAccountId は常に null）なので読まない。" +
+    "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別・家計簿の口座別の合計・31日以内の支払予定へ畳んだ要約で、" +
+    "「毎月の固定費はいくらか」「どのカードから毎月いくら落ちるか」「どの口座から毎月いくら引き落とされるか」だけを知りたいときはそちらが軽い。契約ごとの詳細・料金履歴が要るときはこのツールを呼ぶ。" +
     "既定では応答を小さくするため、契約ごとの料金履歴（priceHistory）と支払方法の履歴（paymentMethodHistory）は省き、" +
     "今日より先に適用される料金改定だけを scheduledPriceChanges で返す（無ければ項目自体が無い）。" +
     "過去の料金改定・支払方法の変更履歴まで尋ねられたときだけ includeHistory: true を指定する。",

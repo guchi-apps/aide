@@ -70,6 +70,8 @@ describe("summarizeFixedCosts", () => {
         currency: "JPY",
         contractStatus: "AUTO_RENEWING",
         paymentMethod: "楽天カード",
+        accountLink: "UNSET",
+        ledgerAccountName: null,
         nextPaymentDate: "2026-09-05",
       },
     ]);
@@ -78,6 +80,35 @@ describe("summarizeFixedCosts", () => {
     ]);
     assert.deepEqual(view.upcoming, [
       { name: "Netflix", date: "2026-09-05", amount: 1490, currency: "JPY" },
+    ]);
+  });
+
+  it("引き落とし先の家計簿の口座（accountLink・ledgerAccountName）を明細と口座別合計へ出す", () => {
+    const linked = { accountLink: "LINKED", ledgerAccountId: 7, ledgerAccountName: "楽天銀行" } as const;
+    const view = summarizeFixedCosts(
+      snapshot({
+        subscriptions: [
+          subscription({ id: 1, name: "A", monthlyAmount: 1000, ...linked }),
+          subscription({ id: 2, name: "B", monthlyAmount: 500, paymentMethod: "楽天カード", ...linked }),
+          subscription({ id: 3, name: "C", monthlyAmount: 300, paymentMethod: "現金", accountLink: "NO_ACCOUNT" }),
+          subscription({ id: 4, name: "D", monthlyAmount: 200, paymentMethod: "不明" }),
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      view.items.map((item) => [item.name, item.accountLink, item.ledgerAccountName]),
+      [
+        ["A", "LINKED", "楽天銀行"],
+        ["B", "LINKED", "楽天銀行"],
+        ["C", "NO_ACCOUNT", null],
+        ["D", "UNSET", null],
+      ],
+    );
+    assert.deepEqual(view.monthlyByLedgerAccount, [
+      { accountLink: "LINKED", ledgerAccountId: 7, ledgerAccountName: "楽天銀行", currency: "JPY", amount: 1500 },
+      { accountLink: "NO_ACCOUNT", ledgerAccountId: null, ledgerAccountName: null, currency: "JPY", amount: 300 },
+      { accountLink: "UNSET", ledgerAccountId: null, ledgerAccountName: null, currency: "JPY", amount: 200 },
     ]);
   });
 
