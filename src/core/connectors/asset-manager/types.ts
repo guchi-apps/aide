@@ -13,6 +13,12 @@ export type SubscriptionCurrency = "JPY" | "USD";
 /** 契約状況。`ENDED`（解約済み）は既定でAPIから除外されて返らない。 */
 export type SubscriptionContractStatus = "AUTO_RENEWING" | "SCHEDULED_TO_END" | "ENDED";
 
+/**
+ * 引き落とし先の家計簿の口座との紐づき（asset-manager#878）。
+ * `LINKED`＝口座あり、`NO_ACCOUNT`＝口座を持たない支払方法（現金など）、`UNSET`＝未設定。
+ */
+export type SubscriptionAccountLink = "LINKED" | "NO_ACCOUNT" | "UNSET";
+
 export interface AssetManagerSubscription {
   id: number;
   name: string;
@@ -27,6 +33,13 @@ export interface AssetManagerSubscription {
   status: SubscriptionContractStatus;
   /** 支払方法の名称（例 `"三井住友カード(VISA)"`）。 */
   paymentMethod: string;
+  /**
+   * 引き落とし先の家計簿の口座（asset-manager#878）。旧項目 `zaimLink`・`zaimAccountName`・
+   * `zaimAccountId`（deprecated）の置き換えで、こちらは読まない。相手が未対応の間は欠けうる。
+   */
+  accountLink?: SubscriptionAccountLink;
+  ledgerAccountId?: number | null;
+  ledgerAccountName?: string | null;
   /** 1回あたりの請求額。`monthlyAmount`（月あたり）とは別物。 */
   amount: number;
   currency: SubscriptionCurrency;

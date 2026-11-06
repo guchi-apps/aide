@@ -98,7 +98,7 @@
 
 | 対象 | 実測で確認したこと | 変更 |
 |---|---|---|
-| `asset_manager_subscriptions` | 22契約で約40KB超。契約ごとに料金履歴と支払方法履歴が付き、支払方法履歴は現在値（`paymentMethod`・`zaimLink`…）の重複がほとんど | 既定で両履歴を省く。**今後適用される料金改定（Asset Manager が付けた `isCurrent` の行より後ろ）は `scheduledPriceChanges` に残す**（「次にいくら請求されるか」に効くため）。`includeHistory: true` で従来どおり |
+| `asset_manager_subscriptions` | 22契約で約40KB超。契約ごとに料金履歴と支払方法履歴が付き、支払方法履歴は現在値（`paymentMethod`・`accountLink`…）の重複がほとんど | 既定で両履歴を省く。**今後適用される料金改定（Asset Manager が付けた `isCurrent` の行より後ろ）は `scheduledPriceChanges` に残す**（「次にいくら請求されるか」に効くため）。`includeHistory: true` で従来どおり |
 | `aide_balances` | `staleAccounts` が `onlineAccounts` と同じ口座を二重に返す（当日でない口座が28件のとき28件×2） | MCPのみ `staleAccountNames`（名前の配列）へ。最終更新は `onlineAccounts` に残る。HTTPの `/api/money/summary` は不変 |
 | 全ツール共通 | どのツールも `JSON.stringify(_, null, 2)` の整形で返しており、インデントと改行だけで応答が約3分の1大きい（サブスク一覧の同等データで 40.5KB→27.1KB） | `transport.ts` の出口でJSONとして読める text だけ整形なしに直す。値は変えない |
 
