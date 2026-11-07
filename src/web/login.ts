@@ -36,7 +36,7 @@ import {
 } from "./session.ts";
 
 /**
- * 画面のログイン。ログインの内側にある画面（アプリ連携 `/map`・機能一覧 `/features`）の関門を
+ * 画面のログイン。ログインの内側にある画面（アプリ連携 `/map`・機能一覧 `/features`・メール `/mail`）の関門を
  * ここ1か所で持つ。
  *
  * **受け口のパスが `/status/...` のままなのは、Supabaseに登録した戻り先を変えないため。**
@@ -223,10 +223,10 @@ export async function handleGatedPage(
   res: ServerResponse,
   options: LoginOptions,
   path: string,
-  render: (session: StatusSession) => string,
+  render: (session: StatusSession) => string | Promise<string>,
 ): Promise<void> {
   const session = await currentSession(req, options);
-  html(res, 200, session ? render(session) : renderLoginPage({ google: options.supabase !== null, next: path }));
+  html(res, 200, session ? await render(session) : renderLoginPage({ google: options.supabase !== null, next: path }));
 }
 
 /** ログイン後の既定の戻り先。 */

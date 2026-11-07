@@ -326,9 +326,9 @@ export const GROUPS: DestinationGroup[] = [
       {
         id: "gmail",
         name: "Gmail",
-        dir: "write",
-        what: "画像・週報を社用メールへ",
-        uses: ["/api/image-mail/send", "/api/news-mail/send"],
+        dir: "both",
+        what: "画像・週報を社用メールへ／メール画面で受信メールを読む・整理する（#770）",
+        uses: ["/api/image-mail/send", "/api/news-mail/send", "/mail", "/mail/action"],
       },
       {
         id: "aide-bot",
