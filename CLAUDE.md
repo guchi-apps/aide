@@ -52,8 +52,9 @@ AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
 サジェスト付き）とだけ報告する。実装を疑って探し回っても見つからないので、まず対の `.d.mts`
 の有無を確認する。
 
-`dependencies` は空で、`devDependencies` は `typescript` と `@types/node` の2つだけ。**実行時依存を
-増やさない方針**なので、依存を足す判断は下記「依存関係の追加」に従う。
+`dependencies` は `imapflow`（メール画面のIMAP取得元。#782で承認のうえ追加）だけで、`devDependencies` は
+`typescript` と `@types/node` の2つだけ。**実行時依存は増やさない方針**（`imapflow` は例外として承認済み）なので、
+依存を足す判断は下記「依存関係の追加」に従う。
 
 ## iOSアプリ（`ios/`）とのつなぎ目
 
@@ -140,8 +141,8 @@ VPSの `authorized_keys` の `command=` が固定する。旧配布物の削除�
 `pm2 delete/start/save`（`deploy/ecosystem.config.cjs`）・`/api/app-version` の `sha` と `APP_COMMIT_SHA` の
 照合はgateが行う。`TARGET_DIR` はgateが置き場を固定するため使わない。
 
-- **配布物（tar）には `package-lock.json` を含める。** 実行時依存（`dependencies`）が無い間はgateの
-  `npm ci --omit=dev` が何も入れず従来と同じ結果になり、足したときはそのまま本番へ入る。外すとgateは
+- **配布物（tar）には `package-lock.json` を含める。** 実行時依存（`dependencies`。現在は `imapflow`）はgateの
+  `npm ci --omit=dev` が本番へ入れる。外すとgateは
   インストールを飛ばす
 - **gateの外の処理は動かない。** SSH先で任意のコマンドは実行できない（以前の deploy.yml にあった
   Node 24 未満で止める確認も無くなった。古いNodeでは起動に失敗し、gateの稼働版の照合で落ちる）
@@ -238,7 +239,7 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 
 ### 依存関係の追加
 
-**このリポジトリは実行時依存ゼロを保っている。** 新しい依存関係を追加する前には、必ずユーザーに
+**このリポジトリは実行時依存を最小に保っている**（現在は `imapflow` のみ。#782）。 新しい依存関係を追加する前には、必ずユーザーに
 確認を取る。無人実行では確認相手がいないため、追加が必要だと判断した場合は追加せずに作業を止め、
 `00.check-user` を付与したうえでなぜ必要かをIssueコメントで相談する。
 

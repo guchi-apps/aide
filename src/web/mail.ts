@@ -6,10 +6,14 @@ import {
   type GmailFailureKind,
   type GmailInboxDeps,
   type GmailLabel,
+  type GmailResult,
   type ListQuery,
   type MailAction,
+  type MailInbox,
   type MailPage,
 } from "../core/connectors/gmail-inbox/client.ts";
+import { ImapInbox, loadImapCredentials, type ImapInboxDeps } from "../core/connectors/imap-inbox/client.ts";
+import { loadGmailInboxCredentials } from "../core/connectors/gmail-inbox/client.ts";
 import { displayName, type MailDetail, type MailSummary } from "../core/connectors/gmail-inbox/message.ts";
 import { escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
@@ -57,14 +61,17 @@ export const MAIL_VIEWS: readonly MailView[] = [
 
 const DEFAULT_VIEW = MAIL_VIEWS[0]!;
 
-/** Gmailのメッセージ ID（16進）。パスやAPIのURLへ載せる前に必ず通す。 */
+/**
+ * メッセージ ID。パスやAPIのURLへ載せる前に必ず通す。Gmailは16進、IMAPは
+ * `<フォルダ(base64url)>.<UIDVALIDITY>.<UID>`（#782）なので、英数字・`_`・`-`・`.` の範囲で受ける。
+ */
 export function isMessageId(value: string | null | undefined): value is string {
-  return typeof value === "string" && /^[0-9a-f]{1,32}$/i.test(value);
+  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,300}$/.test(value);
 }
 
-/** GmailのラベルID（`INBOX`・`Label_12` など）。 */
+/** ラベルID（Gmailの `INBOX`・`Label_12` など。IMAPはフォルダを表す `F<base64url>`）。 */
 export function isLabelId(value: string | null | undefined): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value);
 }
 
 function isPageToken(value: string | null | undefined): value is string {
@@ -146,6 +153,9 @@ function formatFullDate(at: number | null): string {
   return at === null ? "" : dateFormat.format(new Date(at));
 }
 
+/** 画面が読んでいる取得元（#782）。 */
+export type MailSource = "gmail" | "imap";
+
 /** 画面に出す失敗の種類。Gmail側の失敗に「持ち主本人ではない」を加えたもの。 */
 export type MailFailure = GmailFailureKind | "not_owner";
 
@@ -160,6 +170,20 @@ const FAILURE_MESSAGES: Record<MailFailure, string> = {
   failed: "Gmailへの接続に失敗しました。時間をおいて開き直してください。",
 };
 
+const IMAP_FAILURE_MESSAGES: Record<MailFailure, string> = {
+  ...FAILURE_MESSAGES,
+  not_owner:
+    "このメールボックスの持ち主（IMAPのユーザー名のメールアドレス）でログインしたときだけ開けます。認証が無効な環境やパスワードでのログインでは開けません。",
+  unconfigured: "IMAPの接続情報（AIDE_IMAP_HOST・AIDE_IMAP_USER・AIDE_IMAP_PASSWORD）が未設定です。",
+  unauthorized:
+    "IMAPのログインに失敗しました。ユーザー名・パスワード（アプリパスワード）を確かめてください。ユーザー名がメールアドレスでないときは AIDE_IMAP_OWNER_EMAIL も必要です。",
+  failed: "IMAPサーバーとのやり取りに失敗しました。時間をおいて開き直してください。",
+};
+
+function failureMessage(failure: MailFailure, source: MailSource): string {
+  return (source === "imap" ? IMAP_FAILURE_MESSAGES : FAILURE_MESSAGES)[failure];
+}
+
 const DONE_MESSAGES: Record<string, string> = {
   read: "既読にしました",
   unread: "未読にしました",
@@ -167,7 +191,7 @@ const DONE_MESSAGES: Record<string, string> = {
   inbox: "受信トレイへ戻しました",
   star: "スターを付けました",
   unstar: "スターを外しました",
-  trash: "ゴミ箱へ移動しました（Gmailのゴミ箱から30日以内なら戻せます）",
+  trash: "ゴミ箱へ移動しました（ゴミ箱から戻せます。Gmailは30日以内）",
   untrash: "ゴミ箱から戻しました",
   "label-add": "ラベルを付けました",
   "label-remove": "ラベルを外しました",
@@ -237,14 +261,14 @@ function userLabels(labels: GmailLabel[]): GmailLabel[] {
   return labels.filter((l) => l.type === "user").sort((a, b) => a.name.localeCompare(b.name, "ja"));
 }
 
-function searchHtml(state: ListState): string {
+function searchHtml(state: ListState, source: MailSource): string {
   const hidden = state.labelId
     ? `<input type="hidden" name="label" value="${escapeHtml(state.labelId)}">`
     : state.view !== DEFAULT_VIEW
       ? `<input type="hidden" name="view" value="${escapeHtml(state.view.key)}">`
       : "";
   return `<form class="mail-search" method="get" action="/mail" role="search">${hidden}
-<input type="search" name="q" value="${escapeHtml(state.q)}" placeholder="Gmailの検索式（from:… subject:…）" aria-label="メールを検索">
+<input type="search" name="q" value="${escapeHtml(state.q)}" placeholder="${source === "imap" ? "検索する語（件名・差出人・本文）" : "Gmailの検索式（from:… subject:…）"}" aria-label="メールを検索">
 <button class="mail-btn" type="submit">検索</button></form>`;
 }
 
@@ -299,6 +323,8 @@ export interface MailListView {
   headerAction: string;
   authEnabled: boolean;
   now: Date;
+  /** 取得元。省略はGmail。 */
+  source?: MailSource;
 }
 
 export function renderMailList(view: MailListView): string {
@@ -310,7 +336,7 @@ export function renderMailList(view: MailListView): string {
 
   let content: string;
   if (view.failure) {
-    content = `<p class="err" role="alert">${escapeHtml(FAILURE_MESSAGES[view.failure])}</p>`;
+    content = `<p class="err" role="alert">${escapeHtml(failureMessage(view.failure, view.source ?? "gmail"))}</p>`;
   } else if (!view.page || view.page.messages.length === 0) {
     content = `<p class="mail-empty">${state.q ? "検索に一致するメールはありません。" : "メールはありません。"}</p>`;
   } else {
@@ -334,7 +360,7 @@ export function renderMailList(view: MailListView): string {
   const body = `${MAIL_STYLE}
 <section class="hero"><div class="hero-top"><h1>${escapeHtml(title)}</h1></div>
 ${tabsHtml(state, view.labels)}
-${searchHtml(state)}</section>
+${searchHtml(state, view.source ?? "gmail")}</section>
 ${authWarning}${flashHtml(view.params)}
 ${content}`;
   return renderPage({ title: TITLE, nav: siteNav("mail"), headerAction: view.headerAction, body });
@@ -373,6 +399,8 @@ export interface MailDetailView {
   params: URLSearchParams;
   headerAction: string;
   authEnabled: boolean;
+  /** 取得元。省略はGmail。 */
+  source?: MailSource;
 }
 
 export function renderMailDetail(view: MailDetailView): string {
@@ -380,10 +408,11 @@ export function renderMailDetail(view: MailDetailView): string {
   const message = view.message;
   if (!message) {
     const failure = view.failure ?? "not_found";
-    const body = `${MAIL_STYLE}${backLink}<p class="err" role="alert">${escapeHtml(FAILURE_MESSAGES[failure])}</p>`;
+    const body = `${MAIL_STYLE}${backLink}<p class="err" role="alert">${escapeHtml(failureMessage(failure, view.source ?? "gmail"))}</p>`;
     return renderPage({ title: TITLE, nav: siteNav("mail"), headerAction: view.headerAction, body });
   }
 
+  const source = view.source ?? "gmail";
   const self = `/mail/message?id=${encodeURIComponent(message.id)}&back=${encodeURIComponent(view.back)}`;
   const inTrash = message.labelIds.includes("TRASH");
   const inInbox = message.labelIds.includes("INBOX");
@@ -400,7 +429,7 @@ export function renderMailDetail(view: MailDetailView): string {
   const attached = message.labelIds
     .map((id) => byId.get(id))
     .filter((l): l is GmailLabel => l !== undefined && l.type === "user");
-  const chips = attached.length
+  const chips = source === "gmail" && attached.length
     ? `<ul class="mail-chips" aria-label="付いているラベル">${attached
         .map(
           (l) =>
@@ -409,7 +438,7 @@ export function renderMailDetail(view: MailDetailView): string {
         .join("")}</ul>`
     : "";
   const addable = userLabels(view.labels).filter((l) => !message.labelIds.includes(l.id));
-  const addLabel = addable.length
+  const addLabel = source === "gmail" && addable.length
     ? `<form class="mail-bar" method="post" action="/mail/action"><input type="hidden" name="id" value="${escapeHtml(message.id)}"><input type="hidden" name="back" value="${escapeHtml(self)}"><select class="mail-select" name="label" aria-label="付けるラベル">${addable
         .map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.name)}</option>`)
         .join("")}</select><button class="mail-btn" type="submit" name="action" value="label-add">ラベルを付ける</button></form>`
@@ -439,7 +468,7 @@ ${buttons}</form>`;
   const attachments = message.attachments.length
     ? `<p class="mail-note">添付: ${message.attachments
         .map((a) => `${escapeHtml(a.filename)}（${escapeHtml(formatSize(a.size))}）`)
-        .join("、")}。添付はGmailで開いてください。</p>`
+        .join("、")}。添付は${source === "imap" ? "お使いのメールアプリ" : "Gmail"}で開いてください。</p>`
     : "";
 
   const meta = [
@@ -451,7 +480,7 @@ ${buttons}</form>`;
     .map(([k, v]) => `<dt>${escapeHtml(k!)}</dt><dd>${escapeHtml(v!)}</dd>`)
     .join("");
 
-  const gmailLink = `<a href="https://mail.google.com/mail/u/0/#all/${encodeURIComponent(message.threadId)}" target="_blank" rel="noopener noreferrer">Gmailで開く</a>`;
+  const gmailLink = source === "imap" ? "<span></span>" : `<a href="https://mail.google.com/mail/u/0/#all/${encodeURIComponent(message.threadId)}" target="_blank" rel="noopener noreferrer">Gmailで開く</a>`;
 
   const authWarning = view.authEnabled
     ? ""
@@ -479,13 +508,35 @@ function formatSize(bytes: number): string {
 // ---- ハンドラ ----
 
 export interface MailDeps extends GmailInboxDeps {
-  connect?: typeof GmailInbox.connect;
+  connect?: (deps: GmailInboxDeps) => Promise<GmailResult<MailInbox>>;
+  /** IMAPの取得元の差し替え（テスト用）。 */
+  imap?: ImapInboxDeps;
+  /** 取得元の指定（テスト用）。省略時は環境変数から決める。 */
+  source?: MailSource;
   currentSession?: typeof currentSession;
   now?: () => Date;
 }
 
-async function connect(deps: MailDeps) {
-  return (deps.connect ?? GmailInbox.connect.bind(GmailInbox))(deps);
+/**
+ * 画面が読む取得元を決める（#782）。**1つの環境では1つだけ**（Gmailと併用して切り替える画面は持たない）。
+ * `AIDE_MAIL_SOURCE`（`gmail` / `imap`）で明示でき、省略時はGmailの読み取り用トークンがあればGmail、
+ * 無くてIMAPの接続情報があればIMAP、どちらも無ければGmail（未設定の案内を出す）。
+ */
+export function selectMailSource(): MailSource {
+  const explicit = (process.env["AIDE_MAIL_SOURCE"] ?? "").trim().toLowerCase();
+  if (explicit === "gmail" || explicit === "imap") return explicit;
+  if (loadGmailInboxCredentials()) return "gmail";
+  return loadImapCredentials() ? "imap" : "gmail";
+}
+
+function sourceOf(deps: MailDeps): MailSource {
+  return deps.source ?? selectMailSource();
+}
+
+async function connect(deps: MailDeps): Promise<GmailResult<MailInbox>> {
+  if (deps.connect) return deps.connect(deps);
+  if (sourceOf(deps) === "imap") return ImapInbox.connect(deps.imap ?? {});
+  return GmailInbox.connect(deps);
 }
 
 function logFailure(where: string, kind: MailFailure, reason: string): void {
@@ -500,7 +551,7 @@ function logFailure(where: string, kind: MailFailure, reason: string): void {
 export async function openMailbox(
   session: StatusSession,
   deps: MailDeps,
-): Promise<{ ok: true; inbox: GmailInbox } | { ok: false; kind: MailFailure }> {
+): Promise<{ ok: true; inbox: MailInbox } | { ok: false; kind: MailFailure }> {
   if (!session.email) return { ok: false, kind: "not_owner" };
   const inbox = await connect(deps);
   if (!inbox.ok) {
@@ -536,6 +587,7 @@ export async function handleMailListPage(
       headerAction: accountAction(session, options.authConfig.enabled),
       authEnabled: options.authConfig.enabled,
       now: (deps.now ?? (() => new Date()))(),
+      source: sourceOf(deps),
     };
     const mailbox = await openMailbox(session, deps);
     if (!mailbox.ok) return renderMailList({ ...base, labels: [], page: null, failure: mailbox.kind });
@@ -569,6 +621,7 @@ export async function handleMailMessagePage(
       params,
       headerAction: accountAction(session, options.authConfig.enabled),
       authEnabled: options.authConfig.enabled,
+      source: sourceOf(deps),
     };
     if (!isMessageId(id)) return renderMailDetail({ ...base, message: null, labels: [], failure: "not_found" });
     const mailbox = await openMailbox(session, deps);

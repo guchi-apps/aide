@@ -41,6 +41,8 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
     "Claude Code のセッション台帳の置き場。読むのはサブPCのworkerだけで、既定（~/.claude/sessions）で足りる",
   AIDE_DAYSPAN_URL: "既定 http://127.0.0.1:3113 で足りる",
   AIDE_GITHUB_ORG: "既定 guchi-apps で足りる",
+  AIDE_IMAP_PORT: "IMAPのポート（#782）。既定の993（TLS）で足りる",
+  AIDE_MAIL_SOURCE: "メール画面の取得元の明示（#782）。未設定ならGmailのトークンの有無で決まる",
   AIDE_GITHUB_REPOS: "未設定なら活動中のリポジトリを自動で拾う",
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
   AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH: "画像メール送信の冪等記録の置き場。既定（data/image-mail-idempotency.json）で足りる",

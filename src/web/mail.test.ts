@@ -10,6 +10,8 @@ import {
   formatListDate,
   handleMailAction,
   hasRemoteImages,
+  isLabelId,
+  isMessageId,
   isSameOriginPost,
   listHref,
   openMailbox,
@@ -17,6 +19,7 @@ import {
   renderMailDetail,
   renderMailList,
   safeMailBack,
+  selectMailSource,
   toListQuery,
 } from "./mail.ts";
 
@@ -324,5 +327,73 @@ describe("handleMailAction", () => {
     );
     assert.deepEqual(applied, []);
     assert.equal(res.location, "/mail");
+  });
+});
+
+describe("IMAP取得元（#782）", () => {
+  const names = ["AIDE_MAIL_SOURCE", "AIDE_GMAIL_CLIENT_ID", "AIDE_GMAIL_CLIENT_SECRET", "AIDE_GMAIL_INBOX_REFRESH_TOKEN", "AIDE_IMAP_HOST", "AIDE_IMAP_USER", "AIDE_IMAP_PASSWORD"];
+  const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+  const reset = () => {
+    for (const n of names) {
+      if (saved[n] === undefined) delete process.env[n];
+      else process.env[n] = saved[n];
+    }
+  };
+
+  it("取得元: 明示 > Gmailのトークン > IMAPの接続情報 > Gmail（未設定の案内）", () => {
+    try {
+      for (const n of names) delete process.env[n];
+      assert.equal(selectMailSource(), "gmail");
+      process.env["AIDE_IMAP_HOST"] = "imap.example.com";
+      process.env["AIDE_IMAP_USER"] = "me@example.com";
+      process.env["AIDE_IMAP_PASSWORD"] = "pw";
+      assert.equal(selectMailSource(), "imap");
+      process.env["AIDE_GMAIL_CLIENT_ID"] = "id";
+      process.env["AIDE_GMAIL_CLIENT_SECRET"] = "secret";
+      process.env["AIDE_GMAIL_INBOX_REFRESH_TOKEN"] = "token";
+      assert.equal(selectMailSource(), "gmail");
+      process.env["AIDE_MAIL_SOURCE"] = "imap";
+      assert.equal(selectMailSource(), "imap");
+    } finally {
+      reset();
+    }
+  });
+
+  it("IMAPのメッセージID・フォルダのラベルIDを受け、危険な文字は受けない", () => {
+    assert.ok(isMessageId("SU5CT1g.7.42"));
+    assert.ok(isLabelId("F5LuL5LqL"));
+    assert.ok(!isMessageId("../etc/passwd"));
+    assert.ok(!isMessageId("a/b"));
+    assert.ok(!isLabelId("a b"));
+  });
+
+  it("本文画面: Gmailへのリンクとラベル操作を出さず、一覧は検索式の案内を変える", () => {
+    const page = renderMailDetail({
+      message: { ...detail, id: "SU5CT1g.7.42", labelIds: ["UNREAD"] },
+      labels,
+      failure: null,
+      back: "/mail",
+      showImages: false,
+      params: new URLSearchParams(),
+      headerAction: "",
+      authEnabled: true,
+      source: "imap",
+    });
+    assert.ok(!page.includes("mail.google.com"));
+    assert.ok(!page.includes("label-add"));
+    assert.ok(!page.includes("ラベルを外す"));
+    const list = renderMailList({
+      state: parseListState(new URLSearchParams()),
+      labels: [],
+      page: null,
+      failure: "unconfigured",
+      params: new URLSearchParams(),
+      headerAction: "",
+      authEnabled: true,
+      now: new Date(),
+      source: "imap",
+    });
+    assert.ok(list.includes("AIDE_IMAP_HOST"));
+    assert.ok(!list.includes("Gmailの検索式"));
   });
 });
