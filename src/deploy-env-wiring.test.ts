@@ -41,7 +41,6 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
     "Claude Code のセッション台帳の置き場。読むのはサブPCのworkerだけで、既定（~/.claude/sessions）で足りる",
   AIDE_DAYSPAN_URL: "既定 http://127.0.0.1:3113 で足りる",
   AIDE_GITHUB_ORG: "既定 guchi-apps で足りる",
-  AIDE_IMAP_PORT: "IMAPのポート（#782）。既定の993（TLS）で足りる",
   AIDE_GITHUB_REPOS: "未設定なら活動中のリポジトリを自動で拾う",
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
   AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH: "画像メール送信の冪等記録の置き場。既定（data/image-mail-idempotency.json）で足りる",
@@ -195,5 +194,12 @@ describe("本番の.envへの配線（deploy.yml）", () => {
     assert.ok(sentLines.includes("AIDE_MAIL_SOURCE=${AIDE_MAIL_SOURCE:-}"), "未設定でも set -u で落ちない形で送ります");
     // 綴り違いはアプリ側で黙って無視されGmailが選ばれ続けるため、送る前に検査する。
     assert.match(sendStep, /case "\$\{AIDE_MAIL_SOURCE:-\}" in\s+''\|gmail\|imap\) ;;/);
+  });
+
+  it("993以外のIMAPポートを選べるよう、AIDE_IMAP_PORT が本番へ届く（#786）", () => {
+    assert.ok(deployYml.includes("AIDE_IMAP_PORT: ${{ vars.AIDE_IMAP_PORT }}"));
+    assert.ok(sentLines.includes("AIDE_IMAP_PORT=${AIDE_IMAP_PORT:-}"), "未設定でも set -u で落ちない形で送ります");
+    // 不正値はアプリ側で黙って993へ戻るため、送る前に整数かどうかを検査する。
+    assert.match(sendStep, /\*\[!0-9\]\*\) echo "::error::AIDE_IMAP_PORT/);
   });
 });

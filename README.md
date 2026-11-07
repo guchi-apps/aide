@@ -154,6 +154,8 @@ Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP
   トークンがあればGmail、無くてIMAPの接続情報があればIMAP。Gmailとの切り替え・併用画面は持たない
 - 接続情報は `AIDE_IMAP_HOST`・`AIDE_IMAP_USER`・`AIDE_IMAP_PASSWORD`（アプリパスワード）、任意で
   `AIDE_IMAP_PORT`（既定993）・`AIDE_IMAP_OWNER_EMAIL`。**TLS（`secure: true`）のみ**で平文は使わない。
+  サポートするのは**暗黙のTLS（IMAPS）で待ち受けるポート**で、993以外でも使える（本番はrepository variable
+  `AIDE_IMAP_PORT` で渡す。#786）。STARTTLS（143など）で平文から始まる接続は対象外
   接続は1回の表示・操作ごとに開いて閉じ、常駐させない
 - **持ち主本人の確認**: ログイン中のメールアドレスが `AIDE_IMAP_OWNER_EMAIL`（無ければ `AIDE_IMAP_USER` で、
   メールアドレスの形のとき）と一致するときだけ開ける。どちらもアドレスでなければ開けない
