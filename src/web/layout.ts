@@ -4,7 +4,7 @@ import { BRAND_STYLE, logoSize, logoSvg } from "./brand.ts";
 /**
  * 人間向けHTMLページの共通レイアウト。
  *
- * AIDEがブラウザへ出す画面は3つある（アプリ連携・機能一覧・ログイン）。
+ * AIDEがブラウザへ出す画面は4つある（アプリ連携・機能一覧・メール・ログイン）。
  * それぞれが自前のCSSを持っていたため、同じ「カード」「見出し」でも余白も色も違っていた。
  * **配色・書体・部品はここだけが持ち**、各ページは中身の組み立てに専念する。
  *
@@ -333,11 +333,12 @@ export interface NavItem {
 }
 
 /** ヘッダーのナビに並べる画面。ページを増やしたらここへ足す。 */
-export type NavKey = "map" | "features";
+export type NavKey = "map" | "features" | "mail";
 
 const NAV: { key: NavKey; href: string; label: string }[] = [
   { key: "map", href: "/map", label: "アプリ連携" },
   { key: "features", href: "/features", label: "機能一覧" },
+  { key: "mail", href: "/mail", label: "メール" },
 ];
 
 /**

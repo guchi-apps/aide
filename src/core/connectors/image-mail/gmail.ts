@@ -126,9 +126,13 @@ export function loadNewsMailAddresses(): { addresses: MailAddresses } | { error:
   return loadMailAddresses("AIDE_NEWS_MAIL");
 }
 
-type TokenOutcome = { ok: true; accessToken: string } | { ok: false; kind: "unauthorized" | "failed"; reason: string };
+export type TokenOutcome = { ok: true; accessToken: string } | { ok: false; kind: "unauthorized" | "failed"; reason: string };
 
-async function fetchAccessToken(
+/**
+ * リフレッシュトークンからアクセストークンを得る。メール画面（#770）も、別のリフレッシュトークンで同じ処理を使う。
+ * 失敗の文言は「何も送信されていない」前提の送信向けだが、取得前の失敗なのでどちらの用途でも正しい。
+ */
+export async function fetchAccessToken(
   credentials: GmailCredentials,
   fetchImpl: typeof fetch,
 ): Promise<TokenOutcome> {
