@@ -12,6 +12,7 @@ import {
   hasRemoteImages,
   isSameOriginPost,
   listHref,
+  openMailbox,
   parseListState,
   renderMailDetail,
   renderMailList,
@@ -64,6 +65,7 @@ describe("isSameOriginPost", () => {
     assert.equal(isSameOriginPost(request({ origin: "https://other.example.com" }), options.baseUrl), false);
     assert.equal(isSameOriginPost(request({ "sec-fetch-site": "same-site" }), options.baseUrl), false);
     assert.equal(isSameOriginPost(request({ "sec-fetch-site": "same-origin" }), options.baseUrl), true);
+    assert.equal(isSameOriginPost(request({}), options.baseUrl), false);
   });
 });
 
@@ -199,11 +201,37 @@ describe("renderMailList", () => {
   });
 });
 
+describe("openMailbox", () => {
+  const connectAs = (owner: string) =>
+    (async () => ({
+      ok: true,
+      value: { profileEmail: async () => ({ ok: true, value: owner }) },
+    })) as unknown as typeof GmailInbox.connect;
+
+  it("Gmailの認可アカウントと同じアドレスのときだけ開ける（大文字小文字は区別しない）", async () => {
+    assert.equal((await openMailbox({ email: "Me@Example.com", sub: "1" }, { connect: connectAs("me@example.com") })).ok, true);
+    const other = await openMailbox({ email: "family@example.com", sub: "2" }, { connect: connectAs("me@example.com") });
+    assert.equal(!other.ok && other.kind, "not_owner");
+  });
+
+  it("メールアドレスの無いセッションは、Gmailへつなぐ前に断る", async () => {
+    let connected = false;
+    const connect = (async () => {
+      connected = true;
+      return { ok: false, kind: "failed", reason: "" };
+    }) as unknown as typeof GmailInbox.connect;
+    const result = await openMailbox({ email: null, sub: null }, { connect });
+    assert.equal(!result.ok && result.kind, "not_owner");
+    assert.equal(connected, false);
+  });
+});
+
 describe("handleMailAction", () => {
-  function fakeInbox(applied: unknown[]): typeof GmailInbox.connect {
+  function fakeInbox(applied: unknown[], owner = "me@example.com"): typeof GmailInbox.connect {
     return (async () => ({
       ok: true,
       value: {
+        profileEmail: async () => ({ ok: true, value: owner }),
         apply: async (ids: string[], action: string, label: string | null) => {
           applied.push({ ids, action, label });
           return { ok: true, value: undefined };
@@ -250,6 +278,28 @@ describe("handleMailAction", () => {
     });
     assert.equal(res.status, 403);
     assert.deepEqual(applied, []);
+  });
+
+  it("持ち主以外のログインでは何もせず、断った旨を付けて戻す", async () => {
+    const applied: unknown[] = [];
+    const res = response();
+    await handleMailAction(request({ origin: "https://aide.example.com" }, "id=a1&action=trash&back=%2Fmail"), res, options, {
+      connect: fakeInbox(applied, "owner@example.com"),
+      currentSession: session,
+    });
+    assert.deepEqual(applied, []);
+    assert.equal(res.location, "/mail?error=not_owner");
+  });
+
+  it("メールアドレスを持たないセッション（認証無効・パスワード）では何もしない", async () => {
+    const applied: unknown[] = [];
+    const res = response();
+    await handleMailAction(request({ origin: "https://aide.example.com" }, "id=a1&action=trash&back=%2Fmail"), res, options, {
+      connect: fakeInbox(applied),
+      currentSession: async () => ({ email: null, sub: null }),
+    });
+    assert.deepEqual(applied, []);
+    assert.equal(res.location, "/mail?error=not_owner");
   });
 
   it("未ログインなら何もせず一覧へ", async () => {

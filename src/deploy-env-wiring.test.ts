@@ -45,7 +45,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_GITHUB_ACTIVE_DAYS: "未設定なら既定の日数を使う",
   AIDE_GMAIL_INBOX_REFRESH_TOKEN:
     "メール画面（#770）の gmail.modify トークン。発行（restricted スコープで同意画面の「本番」化が要る）が利用者の手作業で、" +
-    "1Password へ未登録のままマニフェストへ載せると本番デプロイの値検査で落ちるため、発行と同時に5か所へ配線してここから外す。" +
+    "1Password へ未登録のままマニフェストへ載せると本番デプロイの値検査で落ちるため、#771 で「トークン登録→配線PR→本番反映」の順に5か所へ配線し、ここから外す。" +
     "未設定の間、画面は「未設定」と出すだけ",
   AIDE_IMAGE_MAIL_IDEMPOTENCY_LOG_PATH: "画像メール送信の冪等記録の置き場。既定（data/image-mail-idempotency.json）で足りる",
   AIDE_IMAGE_MAIL_LOG_PATH: "画像メール送信の履歴の置き場。既定（data/image-mail-log.json）で足りる",

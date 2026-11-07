@@ -177,6 +177,17 @@ export class GmailInbox {
     }
   }
 
+  /** 認可したGmailアカウントのメールアドレス。メール画面を開ける人を持ち主本人に絞るのに使う。 */
+  async profileEmail(): Promise<GmailResult<string>> {
+    const result = await this.request<{ emailAddress?: string }>("/profile");
+    if (!result.ok) return result;
+    const email = result.value?.emailAddress;
+    if (typeof email !== "string" || !email) {
+      return { ok: false, kind: "failed", reason: "Gmailのプロフィール応答が不正です" };
+    }
+    return { ok: true, value: email };
+  }
+
   async labels(): Promise<GmailResult<GmailLabel[]>> {
     const result = await this.request<{ labels?: { id: string; name: string; type?: string }[] }>("/labels");
     if (!result.ok) return result;

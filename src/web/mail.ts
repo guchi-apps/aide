@@ -13,6 +13,7 @@ import {
 import { displayName, type MailDetail, type MailSummary } from "../core/connectors/gmail-inbox/message.ts";
 import { escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
+import type { StatusSession } from "./session.ts";
 
 /**
  * メール画面（`GET /mail`・`GET /mail/message`・`POST /mail/action`。#770）。
@@ -22,6 +23,11 @@ import { accountAction, currentSession, handleGatedPage, type LoginOptions } fro
  * README「書き込みをどこまで持つか」の条件3の例外として #770 で判断している。
  *
  * **ログインの内側に置く。** 画面の関門は他の画面と同じ `handleGatedPage`／`currentSession`。
+ * **さらに、メールボックスの持ち主本人に絞る。** ログインの許可はStatusHubの共通アクセス設定で決まり、
+ * 本人以外も通りうる。メール本文は他の画面と性質が違うため、ログイン中のメールアドレスが
+ * Gmailで認可したアカウント（`users.getProfile`）と一致するときだけGmailの中身を出し、操作も受け付ける。
+ * メールアドレスを持たないセッション（`AIDE_AUTH_DISABLED=1`・パスワードでのログイン）は本人と
+ * 確かめられないので開けない（計画レビュー指摘1）。
  *
  * **メール本文はAIDEに残さない。** 開くたびにGmail APIを叩き、ログにも件名・差出人・本文を出さない
  * （失敗の種類だけを出す）。
@@ -140,7 +146,12 @@ function formatFullDate(at: number | null): string {
   return at === null ? "" : dateFormat.format(new Date(at));
 }
 
-const FAILURE_MESSAGES: Record<GmailFailureKind, string> = {
+/** 画面に出す失敗の種類。Gmail側の失敗に「持ち主本人ではない」を加えたもの。 */
+export type MailFailure = GmailFailureKind | "not_owner";
+
+const FAILURE_MESSAGES: Record<MailFailure, string> = {
+  not_owner:
+    "このメールボックスの持ち主（Gmailで認可したアカウント）でログインしたときだけ開けます。認証が無効な環境やパスワードでのログインでは開けません。",
   unconfigured:
     "Gmailの読み取り用の資格情報（AIDE_GMAIL_INBOX_REFRESH_TOKEN）が未設定です。トークンを発行して本番の環境変数へ配線すると使えるようになります。",
   unauthorized:
@@ -246,7 +257,7 @@ function flashHtml(params: URLSearchParams): string {
   }
   const error = params.get("error");
   if (error) {
-    const kind = (Object.keys(FAILURE_MESSAGES) as GmailFailureKind[]).find((k) => k === error);
+    const kind = (Object.keys(FAILURE_MESSAGES) as MailFailure[]).find((k) => k === error);
     const message = kind ? FAILURE_MESSAGES[kind] : "操作できませんでした。";
     return `<p class="err" role="alert">${escapeHtml(message)}</p>`;
   }
@@ -283,7 +294,7 @@ export interface MailListView {
   state: ListState;
   labels: GmailLabel[];
   page: MailPage | null;
-  failure: GmailFailureKind | null;
+  failure: MailFailure | null;
   params: URLSearchParams;
   headerAction: string;
   authEnabled: boolean;
@@ -356,7 +367,7 @@ function actionButton(action: MailAction, label: string, extraClass = ""): strin
 export interface MailDetailView {
   message: MailDetail | null;
   labels: GmailLabel[];
-  failure: GmailFailureKind | null;
+  failure: MailFailure | null;
   back: string;
   showImages: boolean;
   params: URLSearchParams;
@@ -477,9 +488,36 @@ async function connect(deps: MailDeps) {
   return (deps.connect ?? GmailInbox.connect.bind(GmailInbox))(deps);
 }
 
-function logFailure(where: string, kind: GmailFailureKind, reason: string): void {
+function logFailure(where: string, kind: MailFailure, reason: string): void {
   // 件名・差出人・本文・IDは出さない。失敗の種類と理由（ステータスコード程度）だけ。
   if (kind !== "unconfigured") console.warn(`[mail] ${where}: ${kind} ${reason}`);
+}
+
+/**
+ * Gmailへつなぎ、ログイン中の人がメールボックスの持ち主本人かを確かめる。
+ * **一覧・本文・操作のすべてがここを通る。** 画面ごとに判定を書くと、片方だけ抜けて素通しになる。
+ */
+export async function openMailbox(
+  session: StatusSession,
+  deps: MailDeps,
+): Promise<{ ok: true; inbox: GmailInbox } | { ok: false; kind: MailFailure }> {
+  if (!session.email) return { ok: false, kind: "not_owner" };
+  const inbox = await connect(deps);
+  if (!inbox.ok) {
+    logFailure("connect", inbox.kind, inbox.reason);
+    return { ok: false, kind: inbox.kind };
+  }
+  const profile = await inbox.value.profileEmail();
+  if (!profile.ok) {
+    logFailure("profile", profile.kind, profile.reason);
+    return { ok: false, kind: profile.kind };
+  }
+  if (profile.value.trim().toLowerCase() !== session.email.trim().toLowerCase()) {
+    // 誰が開こうとしたかは残すが、Gmail側のアドレスはログに出さない。
+    console.warn("[mail] 持ち主ではないログインからのアクセスを断りました");
+    return { ok: false, kind: "not_owner" };
+  }
+  return { ok: true, inbox: inbox.value };
 }
 
 export async function handleMailListPage(
@@ -499,12 +537,9 @@ export async function handleMailListPage(
       authEnabled: options.authConfig.enabled,
       now: (deps.now ?? (() => new Date()))(),
     };
-    const inbox = await connect(deps);
-    if (!inbox.ok) {
-      logFailure("connect", inbox.kind, inbox.reason);
-      return renderMailList({ ...base, labels: [], page: null, failure: inbox.kind });
-    }
-    const [labels, page] = await Promise.all([inbox.value.labels(), inbox.value.list(toListQuery(state))]);
+    const mailbox = await openMailbox(session, deps);
+    if (!mailbox.ok) return renderMailList({ ...base, labels: [], page: null, failure: mailbox.kind });
+    const [labels, page] = await Promise.all([mailbox.inbox.labels(), mailbox.inbox.list(toListQuery(state))]);
     if (!page.ok) logFailure("list", page.kind, page.reason);
     return renderMailList({
       ...base,
@@ -536,12 +571,9 @@ export async function handleMailMessagePage(
       authEnabled: options.authConfig.enabled,
     };
     if (!isMessageId(id)) return renderMailDetail({ ...base, message: null, labels: [], failure: "not_found" });
-    const inbox = await connect(deps);
-    if (!inbox.ok) {
-      logFailure("connect", inbox.kind, inbox.reason);
-      return renderMailDetail({ ...base, message: null, labels: [], failure: inbox.kind });
-    }
-    const [labels, message] = await Promise.all([inbox.value.labels(), inbox.value.get(id)]);
+    const mailbox = await openMailbox(session, deps);
+    if (!mailbox.ok) return renderMailDetail({ ...base, message: null, labels: [], failure: mailbox.kind });
+    const [labels, message] = await Promise.all([mailbox.inbox.labels(), mailbox.inbox.get(id)]);
     if (!message.ok) logFailure("get", message.kind, message.reason);
     return renderMailDetail({
       ...base,
@@ -572,6 +604,8 @@ async function readForm(req: IncomingMessage): Promise<URLSearchParams | null> {
  * セッションCookieは `SameSite=Lax` で別サイトからの送信には付かないが、**同じ登録ドメインの別の
  * サブドメイン（他の個人アプリ）は「同じサイト」扱いで Cookie が付く。** メールを動かせる操作なので、
  * `Origin`（無ければ `Sec-Fetch-Site`）でAIDE自身の画面から来たことまで確かめる。
+ * **どちらも無い送信は断る**（計画レビュー指摘2）。今のブラウザ・WKWebView（iOSアプリ）はフォームの
+ * POSTに `Origin` を付けるので、無いのは画面を通らない送信だけになる。
  */
 export function isSameOriginPost(req: IncomingMessage, baseUrl: string): boolean {
   const origin = req.headers["origin"];
@@ -583,9 +617,7 @@ export function isSameOriginPost(req: IncomingMessage, baseUrl: string): boolean
     }
   }
   const site = req.headers["sec-fetch-site"];
-  if (typeof site === "string") return site === "same-origin";
-  // Origin も Sec-Fetch-Site も付けない古いクライアント。フォームを出しているのはAIDEだけなので通す。
-  return true;
+  return site === "same-origin";
 }
 
 function redirect(res: ServerResponse, location: string): void {
@@ -642,13 +674,12 @@ export async function handleMailAction(
     return;
   }
 
-  const inbox = await connect(deps);
-  if (!inbox.ok) {
-    logFailure("connect", inbox.kind, inbox.reason);
-    redirect(res, withParams(back, { error: inbox.kind }));
+  const mailbox = await openMailbox(session, deps);
+  if (!mailbox.ok) {
+    redirect(res, withParams(back, { error: mailbox.kind }));
     return;
   }
-  const result = await inbox.value.apply(ids, action, labelId);
+  const result = await mailbox.inbox.apply(ids, action, labelId);
   if (!result.ok) {
     logFailure(`action:${action}`, result.kind, result.reason);
     redirect(res, withParams(back, { error: result.kind }));
