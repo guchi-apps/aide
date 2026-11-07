@@ -204,11 +204,17 @@ export const ENDPOINTS: FeatureItem[] = [
     description:
       "Zaim Web版の家計簿明細一覧（Zaimの月で当月＋前月ぶん、JST）をJSONで返す。公式API（GET /v2/home/money）が返さない自動連携明細（スマートレシート等）も含む。1件の明細に複数品目がある場合、品目名は一覧に出る先頭の1件しか取れない。読み取り専用の共有シークレットで認証する。",
     detail: {
-      request: "GET /api/money/transactions\nAuthorization: Bearer <AIDE_READ_SECRET>",
+      request:
+        "GET /api/money/transactions[?from=YYYY-MM-DD&to=YYYY-MM-DD]\nAuthorization: Bearer <AIDE_READ_SECRET>\nIf-None-Match: <前回のETag>（任意）\nAccept-Encoding: gzip（任意）",
       success:
-        "200: { empty, fetchedAt, ageMinutes, stale, months, requestedMonths, failedMonths, sourceFields, entries, note } のオブジェクトを返す。entries が明細の配列で、mode・fromAccountId・toAccountId・childIds・calcFlag は明細JSONに項目があったときだけ付く。",
+        "200: { empty, fetchedAt, ageMinutes, stale, months, requestedMonths, failedMonths, sourceFields, range, entries, note } のオブジェクトを返す。entries が明細の配列で、mode・fromAccountId・toAccountId・childIds・calcFlag は明細JSONに項目があったときだけ付く。from/to を付けると entries をその期間に絞り、months は期間に月まるごと入る月だけになる（range はこのときだけ付く）。ETag が If-None-Match と一致すれば本文無しの304。鮮度は X-AIDE-Fetched-At・X-AIDE-Age-Minutes・X-AIDE-Stale ヘッダーでも返す。",
       empty: "まだ一度も巡回していなければ empty: true・entries: [] を返す。取得失敗ではない。",
-      errors: ["401: 認証情報が無い、または一致しない。", "503: 読み取り用の共有シークレットが未設定。", "405: GET・HEAD以外。"],
+      errors: [
+        "400: from・to が YYYY-MM-DD の実在する日付でない、または from が to より後。",
+        "401: 認証情報が無い、または一致しない。",
+        "503: 読み取り用の共有シークレットが未設定。",
+        "405: GET・HEAD以外。",
+      ],
     },
   },
   {

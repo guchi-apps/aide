@@ -2797,6 +2797,27 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 これはZaim Web版の一覧表示そのものの仕様で、一覧のJSONは代表の品名と合計しか持たない。全品目は
 `items` で返す（#596）。
 
+#### 必要な分だけ受け取る（期間指定・304・gzip。#785）
+
+パラメータもヘッダーも付けなければ、従来どおり全件を返す。取り込みの通信量を減らしたい呼び出し側は、
+次を組み合わせて使える。
+
+| 指定 | 挙動 |
+|---|---|
+| `?from=YYYY-MM-DD&to=YYYY-MM-DD`（片側だけも可・両端を含む） | `entries` をその期間の日付だけに絞り、応答に `range: {from, to}` を付ける。不正な日付・`from > to` は400 |
+| `If-None-Match: <前回のETag>` | 中身が前回と同じなら本文無しの `304 Not Modified` |
+| `Accept-Encoding: gzip` | 圧縮して返す（`Content-Encoding: gzip`・`Vary: Accept-Encoding`） |
+
+- **期間指定時の `months` は「全日を読めた暦月のうち、期間に月まるごと入る月」だけ。** 月の途中で切れる月を
+  残すと、範囲外で返さなかった明細を asset-manager が「消えた」と誤判定するため。直近数日だけを指定すると
+  `months` は空になり、消えた明細の判定はできない（要るなら月初〜月末で呼ぶ）
+- **`ETag` は弱いETag（`W/"..."`）で、`ageMinutes`・`stale`・`note` を除いた中身から作る。** `fetchedAt` だけでなく
+  `entries` も含むので、巡回の間に手動再取得した商品内訳の差し替え（`itemsFetchedAt`）でも値が変わる。
+  期間指定ごとに別の値になる。gzipの有無では変わらない
+- **鮮度は304でも分かるよう、ヘッダーでも返す。** `X-AIDE-Fetched-At`（キャッシュが空なら付かない）・
+  `X-AIDE-Age-Minutes`（同）・`X-AIDE-Stale`
+- 「前回以降に変わった明細だけ」を返す `?since=` は、明細ごとの変更時刻と削除の記録が要るため入れていない
+
 #### 種別・口座id・子明細id・集計の設定（#759）と、読めなかった月（#760）
 
 asset-managerの家計簿（guchi-apps/asset-manager#814）が支出・収入・振替を分け、Zaimの「集計の設定」を

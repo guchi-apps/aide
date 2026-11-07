@@ -1,7 +1,14 @@
+import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { buildMoneySummary } from "../core/views/money.ts";
-import { buildMoneyTransactions } from "../core/views/money-transactions.ts";
+import {
+  buildMoneyTransactions,
+  type MoneyTransactionsRange,
+  type MoneyTransactionsView,
+} from "../core/views/money-transactions.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
 
 /**
@@ -85,11 +92,77 @@ export async function handleMoneySummary(req: IncomingMessage, res: ServerRespon
     .end(JSON.stringify(summary));
 }
 
+const gzipAsync = promisify(gzip);
+
+/** `YYYY-MM-DD` で、実在する日付か。 */
+function isValidDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * `?from=YYYY-MM-DD&to=YYYY-MM-DD` を読む。どちらも無ければ undefined（従来どおり全件）。
+ * 不正な値はエラー文言を返す（黙って全件を返すと、呼び出し側が絞れたつもりで突き合わせを誤る）。
+ */
+export function parseTransactionsRange(url: string | undefined): MoneyTransactionsRange | undefined | { error: string } {
+  const params = new URL(url ?? "/", "http://localhost").searchParams;
+  const from = params.get("from");
+  const to = params.get("to");
+  if (from === null && to === null) return undefined;
+  for (const [name, value] of [["from", from], ["to", to]] as const) {
+    if (value !== null && !isValidDate(value)) return { error: `${name} は YYYY-MM-DD の実在する日付で指定してください` };
+  }
+  if (from !== null && to !== null && from > to) return { error: "from は to 以前の日付で指定してください" };
+  return { from, to };
+}
+
+/**
+ * 明細一覧のETag（弱いETag）。
+ *
+ * 呼び出しごとに動く `ageMinutes`・`stale`・`note` は**含めない**（含めると一致する日が来ない）。
+ * `fetchedAt` だけでなく `entries` まで含めるのは、巡回の間に手動再取得した商品内訳の差し替え
+ * （`itemsFetchedAt`）を304で隠さないため。期間指定は `range` と絞った `entries` に表れるので、
+ * 期間ごとに別の値になる。gzipの有無で同じ値を使うため弱いETagにする。
+ */
+export function transactionsEtag(view: MoneyTransactionsView): string {
+  const { ageMinutes: _age, stale: _stale, note: _note, ...stable } = view;
+  const hash = createHash("sha256").update(JSON.stringify(stable)).digest("base64url").slice(0, 32);
+  return `W/"${hash}"`;
+}
+
+/** `If-None-Match` がETagに一致するか（弱い比較。`*` も一致とみなす）。 */
+function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (!header) return false;
+  const raw = Array.isArray(header) ? header.join(",") : header;
+  const strip = (tag: string) => tag.trim().replace(/^W\//, "");
+  return raw.split(",").some((tag) => tag.trim() === "*" || strip(tag) === strip(etag));
+}
+
+/** `Accept-Encoding` が gzip を受け付けるか（`q=0` は拒否の意味なので除く）。 */
+function acceptsGzip(header: string | string[] | undefined): boolean {
+  if (!header) return false;
+  const raw = Array.isArray(header) ? header.join(",") : header;
+  return raw.split(",").some((part) => {
+    const [coding, ...params] = part.trim().toLowerCase().split(";");
+    if (coding !== "gzip" && coding !== "*") return false;
+    const q = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+    return q === undefined || Number(q.slice(2)) > 0;
+  });
+}
+
 /**
  * `GET /api/money/transactions`
  *
  * Zaim Web版の家計簿明細一覧（当月＋先月ぶん、JST）をキャッシュから返す。公式API
  * （`GET /v2/home/money`）が返さない自動連携明細（スマートレシート等）も含む（aide#244・aide#286）。
+ *
+ * 受け取る量を減らすための口（aide#785）。パラメータもヘッダーも無ければ従来どおり全件を返す。
+ * - `?from=YYYY-MM-DD&to=YYYY-MM-DD`（片側だけも可）: その期間の明細だけを返す。`months` は期間に
+ *   月まるごと入る月だけに絞る
+ * - `If-None-Match`: 前回の `ETag` と一致すれば本文無しの304
+ * - `Accept-Encoding: gzip`: 圧縮して返す
+ * - 鮮度は304でも分かるよう `X-AIDE-Fetched-At`・`X-AIDE-Age-Minutes`・`X-AIDE-Stale` ヘッダーでも返す
  */
 export async function handleMoneyTransactions(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD") {
@@ -101,11 +174,37 @@ export async function handleMoneyTransactions(req: IncomingMessage, res: ServerR
 
   if (!(await authorize(req, res, "GET /api/money/transactions"))) return;
 
-  const transactions = await buildMoneyTransactions();
-  res
-    .writeHead(200, {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    })
-    .end(JSON.stringify(transactions));
+  const range = parseTransactionsRange(req.url);
+  if (range && "error" in range) {
+    res
+      .writeHead(400, { "Content-Type": "application/json; charset=utf-8" })
+      .end(JSON.stringify({ error: range.error }));
+    return;
+  }
+
+  const transactions = await buildMoneyTransactions(range ? { range } : {});
+  const etag = transactionsEtag(transactions);
+  const headers: Record<string, string> = {
+    "Cache-Control": "no-store",
+    ETag: etag,
+    Vary: "Accept-Encoding",
+    "X-AIDE-Stale": String(transactions.stale),
+    ...(transactions.fetchedAt !== null ? { "X-AIDE-Fetched-At": transactions.fetchedAt } : {}),
+    ...(transactions.ageMinutes !== null ? { "X-AIDE-Age-Minutes": String(transactions.ageMinutes) } : {}),
+  };
+
+  if (etagMatches(req.headers["if-none-match"], etag)) {
+    res.writeHead(304, headers).end();
+    return;
+  }
+
+  const json = JSON.stringify(transactions);
+  if (acceptsGzip(req.headers["accept-encoding"])) {
+    const body = await gzipAsync(json);
+    res
+      .writeHead(200, { ...headers, "Content-Type": "application/json; charset=utf-8", "Content-Encoding": "gzip" })
+      .end(body);
+    return;
+  }
+  res.writeHead(200, { ...headers, "Content-Type": "application/json; charset=utf-8" }).end(json);
 }

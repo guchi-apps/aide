@@ -320,3 +320,148 @@ describe("GET /api/money/transactions: 手動再取得した商品内訳の重�
     assert.deepEqual(entries[1], { ...base, id: 9002 });
   });
 });
+
+/**
+ * 受け取る量を減らす口（aide#785）。期間指定・304・gzip。
+ * パラメータもヘッダーも無い呼び出しが従来どおり全件を返すことも確かめる。
+ */
+describe("GET /api/money/transactions: 期間指定・ETag・gzip（#785）", () => {
+  const row = (id: number, date: string) => ({
+    id,
+    date,
+    amount: 100,
+    category: "食費",
+    genre: "食料品",
+    account: "財布",
+    toAccount: "",
+    place: "",
+    name: "",
+    comment: "",
+  });
+
+  async function seed(): Promise<void> {
+    await writeCache(ZAIM_MONEY_CACHE_KEY, "test", {
+      entries: [row(1, "2026-09-30"), row(2, "2026-10-01"), row(3, "2026-10-15"), row(4, "2026-10-31")],
+      months: ["202609", "202610"],
+    });
+  }
+
+  async function get(
+    url: string,
+    headers: Record<string, string> = {},
+  ): Promise<{ status: number; headers: Record<string, string>; raw: unknown }> {
+    process.env["AIDE_READ_SECRET"] = SECRET;
+    const captured: { status: number; headers: Record<string, string>; raw: unknown } = {
+      status: 0,
+      headers: {},
+      raw: undefined,
+    };
+    const res = {
+      writeHead(status: number, h?: Record<string, string>) {
+        captured.status = status;
+        captured.headers = h ?? {};
+        return res;
+      },
+      end(body?: unknown) {
+        captured.raw = body;
+        return res;
+      },
+    };
+    const req = { method: "GET", url, headers: { authorization: `Bearer ${SECRET}`, ...headers } };
+    await handleMoneyTransactions(req as unknown as IncomingMessage, res as unknown as ServerResponse);
+    return captured;
+  }
+
+  it("パラメータ無しは従来どおり全件・全月を返し、range を付けない", async () => {
+    await seed();
+    const got = await get("/api/money/transactions");
+    assert.equal(got.status, 200);
+    const body = JSON.parse(got.raw as string);
+    assert.equal(body.entries.length, 4);
+    assert.deepEqual(body.months, ["202609", "202610"]);
+    assert.equal(body.range, undefined);
+    assert.equal(got.headers["Content-Encoding"], undefined);
+  });
+
+  it("期間指定で entries を絞り、months は期間に月まるごと入る月だけにする", async () => {
+    await seed();
+    const body = JSON.parse((await get("/api/money/transactions?from=2026-09-15&to=2026-10-31")).raw as string);
+    assert.deepEqual(body.entries.map((e: { id: number }) => e.id), [1, 2, 3, 4]);
+    // 9月は15日からしか見ていないので months から外す（範囲外の9月の明細を「消えた」と誤判定させない）
+    assert.deepEqual(body.months, ["202610"]);
+    assert.deepEqual(body.range, { from: "2026-09-15", to: "2026-10-31" });
+
+    const recent = JSON.parse((await get("/api/money/transactions?from=2026-10-10")).raw as string);
+    assert.deepEqual(recent.entries.map((e: { id: number }) => e.id), [3, 4]);
+    assert.deepEqual(recent.months, []);
+    assert.deepEqual(recent.range, { from: "2026-10-10", to: null });
+
+    const until = JSON.parse((await get("/api/money/transactions?to=2026-09-30")).raw as string);
+    assert.deepEqual(until.entries.map((e: { id: number }) => e.id), [1]);
+    assert.deepEqual(until.months, ["202609"]);
+  });
+
+  it("不正な期間は400", async () => {
+    await seed();
+    for (const q of ["from=2026-13-01", "to=20261001", "from=2026-02-30", "from=2026-10-02&to=2026-10-01"]) {
+      const got = await get(`/api/money/transactions?${q}`);
+      assert.equal(got.status, 400, q);
+      assert.ok(JSON.parse(got.raw as string).error, q);
+    }
+  });
+
+  it("If-None-Match が一致すれば本文無しの304を返し、鮮度ヘッダーは付ける", async () => {
+    await seed();
+    const first = await get("/api/money/transactions");
+    const etag = first.headers["ETag"]!;
+    assert.match(etag, /^W\/"/);
+    assert.ok(first.headers["X-AIDE-Fetched-At"]);
+    assert.ok(first.headers["X-AIDE-Age-Minutes"] !== undefined);
+    assert.ok(first.headers["X-AIDE-Stale"] === "true" || first.headers["X-AIDE-Stale"] === "false");
+
+    const second = await get("/api/money/transactions", { "if-none-match": etag });
+    assert.equal(second.status, 304);
+    assert.equal(second.raw, undefined);
+    assert.equal(second.headers["ETag"], etag);
+    assert.equal(second.headers["X-AIDE-Fetched-At"], first.headers["X-AIDE-Fetched-At"]);
+
+    // 期間が違えば別のETag
+    const ranged = await get("/api/money/transactions?from=2026-10-01", { "if-none-match": etag });
+    assert.equal(ranged.status, 200);
+    assert.notEqual(ranged.headers["ETag"], etag);
+  });
+
+  it("巡回し直す・手動再取得の内訳が重なるとETagが変わる", async () => {
+    await seed();
+    const before = (await get("/api/money/transactions")).headers["ETag"];
+    await writeCache(ZAIM_MONEY_CACHE_KEY, "test", {
+      entries: [row(1, "2026-09-30"), { ...row(2, "2026-10-01"), itemsStatus: "failed" }],
+      months: ["202609", "202610"],
+    });
+    const afterSync = (await get("/api/money/transactions")).headers["ETag"];
+    assert.notEqual(afterSync, before);
+
+    await writeCache("zaim-money-detail-2", "test", {
+      entry: { id: 2, date: "2026-10-01", amount: 100, itemsStatus: "complete", items: [] },
+      fetchedAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const afterRefresh = await get("/api/money/transactions", { "if-none-match": afterSync! });
+    assert.equal(afterRefresh.status, 200, "手動再取得の差し替えを304で隠さない");
+    await rm(join(cacheDir, "zaim-money-detail-2.json"), { force: true });
+  });
+
+  it("Accept-Encoding: gzip なら圧縮して返す（q=0 は圧縮しない）", async () => {
+    await seed();
+    const { gunzipSync } = await import("node:zlib");
+    const got = await get("/api/money/transactions", { "accept-encoding": "br, gzip" });
+    assert.equal(got.status, 200);
+    assert.equal(got.headers["Content-Encoding"], "gzip");
+    assert.equal(got.headers["Vary"], "Accept-Encoding");
+    const body = JSON.parse(gunzipSync(got.raw as Buffer).toString("utf8"));
+    assert.equal(body.entries.length, 4);
+
+    const refused = await get("/api/money/transactions", { "accept-encoding": "gzip;q=0" });
+    assert.equal(refused.headers["Content-Encoding"], undefined);
+    assert.equal(JSON.parse(refused.raw as string).entries.length, 4);
+  });
+});

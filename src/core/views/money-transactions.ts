@@ -26,8 +26,42 @@ export interface MoneyTransactionsView {
   failedMonths?: ZaimFailedMonth[];
   /** 明細JSONの1件が持っていた項目の名前（値は含まない。aide#759）。旧キャッシュでは省略する。 */
   sourceFields?: string[];
+  /**
+   * 期間指定（`?from=&to=`。aide#785）で呼ばれたときだけ付く。`entries` はこの範囲の日付だけで、
+   * `months` もこの範囲に**月まるごと**入る月だけに絞ってある（範囲外の明細を「消えた」と誤判定させないため）。
+   */
+  range?: MoneyTransactionsRange;
   entries: MoneyTransactionEntry[];
   note: string;
+}
+
+/** 期間指定（両端を含む `YYYY-MM-DD`）。片側だけの指定は null。 */
+export interface MoneyTransactionsRange {
+  from: string | null;
+  to: string | null;
+}
+
+/** 日付が期間に入るか（`YYYY-MM-DD` は文字列比較で順序が保たれる）。 */
+function inRange(date: string, range: MoneyTransactionsRange): boolean {
+  if (range.from !== null && date < range.from) return false;
+  if (range.to !== null && date > range.to) return false;
+  return true;
+}
+
+/**
+ * 暦月（`YYYYMM`）が期間に**まるごと**入るか。
+ *
+ * `months` は asset-manager が「この月に無い明細は消えた」と判定する範囲なので、期間が月の途中で
+ * 切れる月を残すと、範囲外で返さなかった明細を消えたと誤判定させる。途中で切れる月は落とす。
+ */
+function monthWithinRange(month: string, range: MoneyTransactionsRange): boolean {
+  const year = Number(month.slice(0, 4));
+  const mon = Number(month.slice(4, 6));
+  if (!Number.isInteger(year) || !Number.isInteger(mon) || mon < 1 || mon > 12) return false;
+  const first = `${month.slice(0, 4)}-${month.slice(4, 6)}-01`;
+  const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+  const last = `${month.slice(0, 4)}-${month.slice(4, 6)}-${String(lastDay).padStart(2, "0")}`;
+  return inRange(first, range) && inRange(last, range);
 }
 
 /**
@@ -108,7 +142,10 @@ const NAME_TRUNCATION_NOTE =
  * **巡回結果はキャッシュを読むだけで、取得は行わない**（Playwrightで数十秒かかるため。
  * README「取得と提供の分離」）。
  */
-export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
+export async function buildMoneyTransactions(
+  options: { range?: MoneyTransactionsRange } = {},
+): Promise<MoneyTransactionsView> {
+  const range = options.range;
   const cached = await readCache<ZaimMoneyList>(ZAIM_MONEY_CACHE_KEY);
   if (!cached) {
     return {
@@ -116,6 +153,7 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
       fetchedAt: null,
       ageMinutes: null,
       stale: true,
+      ...(range ? { range } : {}),
       entries: [],
       note: "まだ一度も取得していない。worker の zaim-money-sync ジョブを実行する必要がある。",
     };
@@ -134,16 +172,29 @@ export async function buildMoneyTransactions(): Promise<MoneyTransactionsView> {
     );
   }
 
+  if (range) {
+    notes.push(
+      "期間指定のため、entries は range の日付だけ、months は range に月まるごと入る月だけに絞ってある。",
+    );
+  }
+
+  // 重ね合わせ（手動再取得のキャッシュ読み）の前に絞り、範囲外の取引のキャッシュを引かない。
+  const entries = range ? cached.data.entries.filter((e) => inRange(e.date, range)) : cached.data.entries;
+  const months = cached.data.months && range
+    ? cached.data.months.filter((m) => monthWithinRange(m, range))
+    : cached.data.months;
+
   return {
     empty: false,
     fetchedAt: cached.fetchedAt,
     ageMinutes: cached.ageMinutes,
     stale,
-    ...(cached.data.months ? { months: cached.data.months } : {}),
+    ...(months ? { months } : {}),
     ...(cached.data.requestedMonths ? { requestedMonths: cached.data.requestedMonths } : {}),
     ...(cached.data.failedMonths ? { failedMonths: cached.data.failedMonths } : {}),
     ...(cached.data.sourceFields ? { sourceFields: cached.data.sourceFields } : {}),
-    entries: await overlayReceiptDetails(cached.data.entries, cached.fetchedAt),
+    ...(range ? { range } : {}),
+    entries: await overlayReceiptDetails(entries, cached.fetchedAt),
     note: notes.join(" "),
   };
 }
