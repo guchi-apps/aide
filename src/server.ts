@@ -46,6 +46,7 @@ import {
   handleStatusLogout,
   type LoginOptions,
 } from "./web/login.ts";
+import { handleMailAction, handleMailListPage, handleMailMessagePage } from "./web/mail.ts";
 import { handleMapIssue, handleMapPage } from "./web/map.ts";
 
 /**
@@ -110,7 +111,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // iOSアプリのUniversal Links用（#464）。認証もリダイレクトも通さない。
   if (handleAasa(req.method, path, res)) return;
 
-  // ---- 画面（アプリ連携 #328・機能一覧 #332） ----
+  // ---- 画面（アプリ連携 #328・機能一覧 #332・メール #770） ----
   // **どちらもログインの内側に置く。** 公開してよい静的ファイル（上のアイコン等）とは扱いが違う。
   // 認証はMCPのOAuthではなく画面用のCookie（src/web/session.ts）。
   // Supabaseが設定されていれば許可メールだけのGoogleログイン、無ければパスワード。
@@ -127,6 +128,19 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 「機能を同期」の結果からIssueを起案する（#355）。ログインの関門は handleMapIssue が通す。
   if (path === "/map/issue" && req.method === "POST") {
     await handleMapIssue(req, res, loginOptions);
+    return;
+  }
+  // メール（#770）。Gmailの受信メールの一覧・本文・整理。ログインの関門は各ハンドラが通す。
+  if (path === "/mail" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleMailListPage(req, res, loginOptions);
+    return;
+  }
+  if (path === "/mail/message" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleMailMessagePage(req, res, loginOptions);
+    return;
+  }
+  if (path === "/mail/action" && req.method === "POST") {
+    await handleMailAction(req, res, loginOptions);
     return;
   }
   if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {
