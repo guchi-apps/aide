@@ -142,6 +142,30 @@ Research DeskのブラウザからGmail APIを直接叩くことも技術的に�
   どちらも無い送信は断る。Cookieの `SameSite=Lax` は同じ登録ドメインの別アプリからの送信を止めないため
 - MCPツールには出さない（[Gmailを載せていない理由](#gmailを載せていない理由aide173)の判断はMCP層について据え置き）
 
+#### メール画面のIMAP取得元（#782）
+
+Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP（`src/core/connectors/imap-inbox/`）を足した。
+上の例外の範囲（元に戻せる整理だけ・本人のみ・本文を残さない）をそのまま引き継ぐ。
+
+- **実行時依存として `imapflow` を追加した**（IMAPをNode標準で話せないため。#782でユーザー承認済み）。
+  本文のMIME解析は自前（`imap-inbox/mime.ts`）で、`mailparser` は入れない。配布物に `package-lock.json` を
+  含めるので、gateの `npm ci --omit=dev` が本番へ入れる
+- **取得元は1つの環境で1つ。** `AIDE_MAIL_SOURCE`（`gmail` / `imap`）で明示でき、省略時はGmailの読み取り用
+  トークンがあればGmail、無くてIMAPの接続情報があればIMAP。Gmailとの切り替え・併用画面は持たない
+- 接続情報は `AIDE_IMAP_HOST`・`AIDE_IMAP_USER`・`AIDE_IMAP_PASSWORD`（アプリパスワード）、任意で
+  `AIDE_IMAP_PORT`（既定993）・`AIDE_IMAP_OWNER_EMAIL`。**TLS（`secure: true`）のみ**で平文は使わない。
+  接続は1回の表示・操作ごとに開いて閉じ、常駐させない
+- **持ち主本人の確認**: ログイン中のメールアドレスが `AIDE_IMAP_OWNER_EMAIL`（無ければ `AIDE_IMAP_USER` で、
+  メールアドレスの形のとき）と一致するときだけ開ける。どちらもアドレスでなければ開けない
+- **IDの表し方**: IMAPのUIDはフォルダごとの採番なので、メッセージIDは `<フォルダ(base64url)>.<UIDVALIDITY>.<UID>`。
+  UIDVALIDITY が変わったIDは別のメールを指しうるので `not_found` にして、操作も何もしない
+- **画面の対応**: 受信トレイ＝INBOX、未読＝INBOXの未読、スター＝INBOXの `\Flagged`、ゴミ箱＝`\Trash`、
+  すべて＝`\All`（無ければINBOX）。ほかのフォルダはラベルのタブとして出す。ページ送りはUID降順の位置、
+  検索は語での全文検索（Gmailの検索式は使えない）
+- **持たない操作**: ラベルの付け外し（IMAPに無い）・完全削除（`EXPUNGE`）・送信。ゴミ箱とアーカイブは
+  `\Trash` / `\Archive` のフォルダへの移動で、フォルダが見つからなければ失敗にする
+- **実サーバーでの確認は未実施**（無人実行では外部への実接続をしない）。テストは `ImapFlow` を差し替えたフェイクで行う
+
 **この例外を前例として使わない。** 返信・送信・完全削除や、他のサービスの「状態を変える画面」を
 持ち込むときは、この節を根拠にせず改めて判断する。
 

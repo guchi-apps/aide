@@ -113,13 +113,30 @@ export function labelChangeFor(
   }
 }
 
+/**
+ * メール画面（`src/web/mail.ts`）が使う取得元の共通の形。Gmail API（`GmailInbox`）とIMAP
+ * （`imap-inbox/client.ts`の`ImapInbox`。#782）が実装する。画面はどちらか1つだけを使う。
+ */
+export interface MailInbox {
+  readonly kind: "gmail" | "imap";
+  /** ラベルの付け外しを持つか。IMAPには無いので、画面はラベルの操作を出さない。 */
+  readonly supportsLabels: boolean;
+  profileEmail(): Promise<GmailResult<string>>;
+  labels(): Promise<GmailResult<GmailLabel[]>>;
+  list(query: ListQuery): Promise<GmailResult<MailPage>>;
+  get(id: string): Promise<GmailResult<MailDetail>>;
+  apply(ids: string[], action: MailAction, labelId: string | null): Promise<GmailResult<void>>;
+}
+
 export interface GmailInboxDeps {
   fetchImpl?: typeof fetch;
   credentials?: GmailCredentials | null;
 }
 
 /** 1リクエスト（画面の1回の表示・1回の操作）の間だけ使うクライアント。アクセストークンはその間だけ持つ。 */
-export class GmailInbox {
+export class GmailInbox implements MailInbox {
+  readonly kind = "gmail" as const;
+  readonly supportsLabels = true;
   private readonly fetchImpl: typeof fetch;
   private readonly accessToken: string;
 
