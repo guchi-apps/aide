@@ -154,6 +154,8 @@ Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP
   トークンがあればGmail、無くてIMAPの接続情報があればIMAP。Gmailとの切り替え・併用画面は持たない
 - 接続情報は `AIDE_IMAP_HOST`・`AIDE_IMAP_USER`・`AIDE_IMAP_PASSWORD`（アプリパスワード）、任意で
   `AIDE_IMAP_PORT`（既定993）・`AIDE_IMAP_OWNER_EMAIL`。**TLS（`secure: true`）のみ**で平文は使わない。
+  サポートするのは**暗黙のTLS（IMAPS）で待ち受けるポート**で、993以外でも使える（本番はrepository variable
+  `AIDE_IMAP_PORT` で渡す。#786）。STARTTLS（143など）で平文から始まる接続は対象外
   接続は1回の表示・操作ごとに開いて閉じ、常駐させない
 - **持ち主本人の確認**: ログイン中のメールアドレスが `AIDE_IMAP_OWNER_EMAIL`（無ければ `AIDE_IMAP_USER` で、
   メールアドレスの形のとき）と一致するときだけ開ける。どちらもアドレスでなければ開けない
@@ -2796,6 +2798,27 @@ curl -s -H "Authorization: Bearer $AIDE_READ_SECRET" http://127.0.0.1:3114/api/m
 **`name`（品目名）は、1件の明細に複数品目があると先頭の1件しか取れず、末尾が「…」で省略されることがある。**
 これはZaim Web版の一覧表示そのものの仕様で、一覧のJSONは代表の品名と合計しか持たない。全品目は
 `items` で返す（#596）。
+
+#### 必要な分だけ受け取る（期間指定・304・gzip。#785）
+
+パラメータもヘッダーも付けなければ、従来どおり全件を返す。取り込みの通信量を減らしたい呼び出し側は、
+次を組み合わせて使える。
+
+| 指定 | 挙動 |
+|---|---|
+| `?from=YYYY-MM-DD&to=YYYY-MM-DD`（片側だけも可・両端を含む） | `entries` をその期間の日付だけに絞り、応答に `range: {from, to}` を付ける。不正な日付・`from > to` は400 |
+| `If-None-Match: <前回のETag>` | 中身が前回と同じなら本文無しの `304 Not Modified` |
+| `Accept-Encoding: gzip` | 圧縮して返す（`Content-Encoding: gzip`・`Vary: Accept-Encoding`） |
+
+- **期間指定時の `months` は「全日を読めた暦月のうち、期間に月まるごと入る月」だけ。** 月の途中で切れる月を
+  残すと、範囲外で返さなかった明細を asset-manager が「消えた」と誤判定するため。直近数日だけを指定すると
+  `months` は空になり、消えた明細の判定はできない（要るなら月初〜月末で呼ぶ）
+- **`ETag` は弱いETag（`W/"..."`）で、`ageMinutes`・`stale`・`note` を除いた中身から作る。** `fetchedAt` だけでなく
+  `entries` も含むので、巡回の間に手動再取得した商品内訳の差し替え（`itemsFetchedAt`）でも値が変わる。
+  期間指定ごとに別の値になる。gzipの有無では変わらない
+- **鮮度は304でも分かるよう、ヘッダーでも返す。** `X-AIDE-Fetched-At`（キャッシュが空なら付かない）・
+  `X-AIDE-Age-Minutes`（同）・`X-AIDE-Stale`
+- 「前回以降に変わった明細だけ」を返す `?since=` は、明細ごとの変更時刻と削除の記録が要るため入れていない
 
 #### 種別・口座id・子明細id・集計の設定（#759）と、読めなかった月（#760）
 
