@@ -82,7 +82,7 @@ describe("アイコン配信", () => {
     assert.equal(versioned("/icons/icon-192.png"), `/icons/icon-192.png?v=${ASSET_VERSION}`);
   });
 
-  it("トップページはアイコンを指すだけの空のページを返す", async () => {
+  it("トップページはアイコンを指し、開いた人をログインの内側の画面へ送る（#776）", async () => {
     const { handled, captured } = await get("/");
     assert.ok(handled);
     assert.equal(captured.status, 200);
@@ -90,7 +90,10 @@ describe("アイコン配信", () => {
     const html = String(captured.body);
     assert.match(html, /rel="icon"[^>]*favicon-32\.png/);
     assert.match(html, /rel="icon"[^>]*icon-192\.png/);
-    assert.match(html, /<body><\/body>/);
+    // 収集サービスがアイコンを見失わないよう、302ではなく200のまま meta refresh で送る
+    assert.match(html, /<meta http-equiv="refresh" content="0; url=\/map">/);
+    // 真っ白にしない（meta refresh が効かない環境でも辿れるリンクを置く）
+    assert.match(html, /<a href="\/map">/);
     assert.equal((await get("/", "HEAD")).captured.body, undefined);
   });
 

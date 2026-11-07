@@ -137,6 +137,13 @@ export function headTags(options: { manifest: boolean } = { manifest: true }): s
 }
 
 /**
+ * トップページを開いた人を送る先。ログインの内側の既定の画面（`src/web/login.ts` の
+ * `DEFAULT_LANDING`）と同じ。未ログインならログイン画面が出て、ログイン後にここへ戻る。
+ * login.ts からimportしないのは、画面側のモジュールがこのファイルを読み込んでおり循環するため。
+ */
+const TOP_LANDING = "/map";
+
+/**
  * アイコン・マニフェスト・トップページのGET/HEADを処理する。担当外のパスなら false を返し、
  * 呼び出し元（`src/server.ts`）が他のルートを探せるようにする。
  */
@@ -150,20 +157,27 @@ export async function handleAsset(method: string | undefined, path: string, res:
     return true;
   }
 
-  // トップページはアイコンを指すだけの空のページにする（#125 の続き）。
+  // トップページはアイコンを指すページにする（#125 の続き）。
   // Claudeアプリのコネクタ一覧には `serverInfo.icons` ではなく親ドメイン（gucchii.com）の絵が
   // 出ていた。接続先のファビコンを外部の収集サービス経由で引いているとみられ、そうしたサービスは
   // まずトップページの <link rel="icon"> を探すので、`/` が404のままだと親ドメインで代用される。
+  // **302にはしない。** 収集サービスがリダイレクトを辿らないと、またアイコンを見失うため、
+  // 200で <link rel="icon"> を返したうえで、人が開いたときだけ meta refresh で画面へ送る
+  // （以前は <body> が空で、ブラウザで開くと真っ白なままだった。#776）。
   // **中身は載せない。** 機能一覧などはログインの内側（/map・/features）に置いたままにする。
   if (path === "/") {
     const html = `<!doctype html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0; url=${TOP_LANDING}">
 <title>AIde</title>
 ${headTags({ manifest: false })}
 </head>
-<body></body>
+<body>
+<p><a href="${TOP_LANDING}">AIdeを開く</a></p>
+</body>
 </html>
 `;
     res
