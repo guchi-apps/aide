@@ -23,6 +23,19 @@ describe("decodeBody", () => {
   it("知らない charset は UTF-8 で読む", () => {
     assert.equal(decodeBody(b64url("abc"), "x-unknown-charset"), "abc");
   });
+
+  it("Content-Type に charset が無くても、HTMLの meta の指定で読む", () => {
+    const html = Buffer.concat([Buffer.from('<html><head><meta charset="Shift_JIS"></head><body>'), Buffer.from("82a0", "hex")]);
+    assert.ok(decodeBody(b64url(html), null).endsWith("あ"));
+  });
+
+  it("charset が無く meta も無いShift_JISは、UTF-8で化けさせずに読む", () => {
+    assert.equal(decodeBody(b64url(Buffer.from("82a082a2", "hex")), null), "あい");
+  });
+
+  it("charset が無いISO-2022-JPは、ESCを手掛かりに読む", () => {
+    assert.equal(decodeBody(b64url(Buffer.from("1b2442246b1b2842", "hex")), null), "る");
+  });
 });
 
 describe("charsetOf", () => {

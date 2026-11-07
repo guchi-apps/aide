@@ -101,16 +101,44 @@ export function charsetOf(contentType: string): string | null {
   return match ? match[1]!.toLowerCase() : null;
 }
 
-/** base64url（Gmail API の `body.data`）を、指定の文字コードで文字列へ戻す。 */
+/**
+ * 本文の先頭に書かれた `<meta charset=...>`・`<meta http-equiv="Content-Type" content="...; charset=...">`
+ * から文字コードを拾う。`Content-Type` ヘッダに charset が無いHTMLメールの救済用。
+ */
+export function sniffMetaCharset(bytes: Uint8Array): string | null {
+  const head = Buffer.from(bytes.subarray(0, 2048)).toString("latin1");
+  const match = /<meta[^>]+charset\s*=\s*["']?\s*([a-z0-9_:.-]+)/i.exec(head);
+  return match ? match[1]!.toLowerCase() : null;
+}
+
+function tryDecode(label: string, bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder(label, { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * base64url（Gmail API の `body.data`）を、指定の文字コードで文字列へ戻す。
+ * charset が無い・知らない名前のときは、HTMLの meta → ISO-2022-JP（ESCを含むとき）→ UTF-8 → 日本語の文字コード
+ * （ISO-2022-JP → Shift_JIS）の順に、エラー無く読めたものを使う。
+ */
 export function decodeBody(data: string, charset: string | null): string {
   const bytes = Buffer.from(data.replaceAll("-", "+").replaceAll("_", "/"), "base64");
-  const label = charset ?? "utf-8";
-  try {
-    return new TextDecoder(label).decode(bytes);
-  } catch {
-    // 知らない charset 名（`x-unknown` など）。読めるところまで読ませる。
-    return new TextDecoder("utf-8").decode(bytes);
+  const declared = charset ?? sniffMetaCharset(bytes);
+  if (declared) {
+    const out = tryDecode(declared, bytes);
+    if (out !== null) return out;
   }
+  // ISO-2022-JP は全バイトが7bitに収まりUTF-8としても「読めてしまう」ので、ESC があれば先に試す。
+  const jis = bytes.includes(0x1b) ? tryDecode("iso-2022-jp", bytes) : null;
+  if (jis !== null) return jis;
+  const utf8 = tryDecode("utf-8", bytes);
+  if (utf8 !== null) return utf8;
+  const sjis = tryDecode("shift_jis", bytes);
+  if (sjis !== null) return sjis;
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 function isAttachment(part: GmailPart): boolean {
