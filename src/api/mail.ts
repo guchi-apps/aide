@@ -33,6 +33,7 @@ import { bearerToken, secretMatches } from "./secret.ts";
  *
  * **一覧は一部のアカウントが読めなくても200で返すが、`partial: true` と `failedAccounts`（アカウント名）を載せる。**
  * `partial` のとき `messages` には欠落がある。Morrowは巡回の成功記録（既読位置など）を進めず、次回に再取得する。
+ * 複数アカウントの構成では `accounts: [{ key, name, failed }]`（メインを含む全件）も載せる（#821）。
  *
  * **応答には持ち主のメールアドレス（`owner`）を載せる。** トークンが表すのは「Morrowのサーバー」で利用者ではない
  * ため、ログイン中の人がメールボックスの持ち主本人かどうかの照合はMorrow側が `owner` で行う。
@@ -269,6 +270,8 @@ export async function handleMailApiList(req: IncomingMessage, res: ServerRespons
     // 一部のアカウントが読めなかったときは partial: true。欠落があるので、Morrowは巡回の成功記録を進めず再試行する（#801）。
     partial: failedAccounts.length > 0,
     failedAccounts,
+    // 複数アカウントの構成のみ。タブの元にできるよう、鍵・名前・今回読めなかったかを返す（#821）。
+    ...(page.value.accounts ? { accounts: page.value.accounts } : {}),
     view: state.view.key,
     labels: labels.ok ? labels.value : [],
     messages,

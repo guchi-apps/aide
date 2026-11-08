@@ -214,6 +214,7 @@ export class MultiMailInbox implements MailInbox {
     const messages: MailSummary[] = [];
     const next: Record<string, string> = {};
     const failedAccounts: string[] = [];
+    const failedKeys = new Set<string>();
     let estimate = 0;
     let firstFailure: { kind: Extract<GmailResult<never>, { ok: false }>["kind"]; reason: string } | null = null;
     let anyOk = false;
@@ -222,6 +223,7 @@ export class MultiMailInbox implements MailInbox {
       if (!r.ok) {
         console.warn(`[mail] account:${m.info.key}: list ${r.kind} ${r.reason}`);
         failedAccounts.push(m.info.name);
+        failedKeys.add(m.info.key);
         firstFailure ??= { kind: r.kind, reason: r.reason };
         continue;
       }
@@ -240,6 +242,7 @@ export class MultiMailInbox implements MailInbox {
     // 接続できなかったアカウントは、メインの一覧失敗の種類（kind）を隠さないよう最後に足す。
     for (const u of unreachableTargets) {
       failedAccounts.push(u.name);
+      failedKeys.add(u.key);
       firstFailure ??= { kind: "failed", reason: "接続できません" };
     }
     if (!anyOk && firstFailure) return { ok: false, ...firstFailure };
@@ -251,6 +254,8 @@ export class MultiMailInbox implements MailInbox {
         nextPageToken: encodeToken(next),
         resultSizeEstimate: estimate,
         ...(failedAccounts.length ? { failedAccounts } : {}),
+        // 絞り込みで読まなかったアカウントも含める（failed は今回読んだうえで失敗したものだけ）。
+        accounts: this.accounts.map((a) => ({ key: a.key, name: a.name, failed: failedKeys.has(a.key) })),
       },
     };
   }
