@@ -544,15 +544,17 @@ function logFailure(where: string, kind: MailFailure, reason: string): void {
   if (kind !== "unconfigured") console.warn(`[mail] ${where}: ${kind} ${reason}`);
 }
 
+/** Morrow向けのAPI（`src/api/mail.ts`。#795）も同じ粒度でログを残す。 */
+export const logMailFailure = logFailure;
+
 /**
- * Gmailへつなぎ、ログイン中の人がメールボックスの持ち主本人かを確かめる。
- * **一覧・本文・操作のすべてがここを通る。** 画面ごとに判定を書くと、片方だけ抜けて素通しになる。
+ * 取得元へつなぎ、メールボックスの持ち主のメールアドレス（Gmailは `users.getProfile`、IMAPは
+ * `AIDE_IMAP_OWNER_EMAIL` など。複数のアカウントを束ねるときはメインのアカウント）を引く。画面（`openMailbox`）とMorrow向けのAPI（`src/api/mail.ts`。#795）が
+ * 共用する。持ち主との照合は呼び出し側が行う（画面はログイン中の人と、APIは応答に載せて呼び出し元が）。
  */
-export async function openMailbox(
-  session: StatusSession,
+export async function connectMailbox(
   deps: MailDeps,
-): Promise<{ ok: true; inbox: MailInbox } | { ok: false; kind: MailFailure }> {
-  if (!session.email) return { ok: false, kind: "not_owner" };
+): Promise<{ ok: true; inbox: MailInbox; owner: string } | { ok: false; kind: MailFailure }> {
   const inbox = await connect(deps);
   if (!inbox.ok) {
     logFailure("connect", inbox.kind, inbox.reason);
@@ -563,12 +565,26 @@ export async function openMailbox(
     logFailure("profile", profile.kind, profile.reason);
     return { ok: false, kind: profile.kind };
   }
-  if (profile.value.trim().toLowerCase() !== session.email.trim().toLowerCase()) {
+  return { ok: true, inbox: inbox.value, owner: profile.value.trim().toLowerCase() };
+}
+
+/**
+ * Gmailへつなぎ、ログイン中の人がメールボックスの持ち主本人かを確かめる。
+ * **一覧・本文・操作のすべてがここを通る。** 画面ごとに判定を書くと、片方だけ抜けて素通しになる。
+ */
+export async function openMailbox(
+  session: StatusSession,
+  deps: MailDeps,
+): Promise<{ ok: true; inbox: MailInbox } | { ok: false; kind: MailFailure }> {
+  if (!session.email) return { ok: false, kind: "not_owner" };
+  const mailbox = await connectMailbox(deps);
+  if (!mailbox.ok) return mailbox;
+  if (mailbox.owner !== session.email.trim().toLowerCase()) {
     // 誰が開こうとしたかは残すが、Gmail側のアドレスはログに出さない。
     console.warn("[mail] 持ち主ではないログインからのアクセスを断りました");
     return { ok: false, kind: "not_owner" };
   }
-  return { ok: true, inbox: inbox.value };
+  return { ok: true, inbox: mailbox.inbox };
 }
 
 export async function handleMailListPage(
