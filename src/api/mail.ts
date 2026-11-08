@@ -357,7 +357,9 @@ export async function handleMailApiAction(req: IncomingMessage, res: ServerRespo
       return json(res, 400, { ok: false, error: "invalid_request", message: result.reason });
     }
     logMailFailure(`api:action:${parsed.action}`, result.kind, result.reason);
-    return failure(res, result.kind);
+    // reason は固定文言（本文・件名を含まない）。Morrowが原因を表示できるよう message として返す（#828）。
+    const status = result.kind === "not_found" ? 404 : result.kind === "unconfigured" ? 503 : 502;
+    return json(res, status, { ok: false, error: result.kind, message: result.reason });
   }
   json(res, 200, { ok: true, owner: mailbox.owner, action: parsed.action, count: parsed.ids.length });
 }

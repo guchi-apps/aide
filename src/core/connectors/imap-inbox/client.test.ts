@@ -228,6 +228,27 @@ describe("ImapInbox", () => {
     assert.equal(label.ok, false);
   });
 
+  it("操作: \\Archive が無く \\All だけ（Gmail）なら、アーカイブは \\All へ移動し、戻しは INBOX へ移動する", async () => {
+    const { session, rec } = fakeSession();
+    session.list = async () => [
+      { path: "INBOX" },
+      { path: "[Gmail]/All Mail", specialUse: "\\All" },
+      { path: "[Gmail]/Trash", specialUse: "\\Trash" },
+    ];
+    const inbox = await inboxWith(session);
+    assert.equal((await inbox.apply([encodeMessageId("INBOX", 7, 10)], "archive", null)).ok, true);
+    assert.equal((await inbox.apply([encodeMessageId("[Gmail]/All Mail", 7, 20)], "inbox", null)).ok, true);
+    assert.deepEqual(rec.moved, [["10", "[Gmail]/All Mail"], ["20", "INBOX"]]);
+  });
+
+  it("操作: \\Archive も \\All も無ければアーカイブは失敗する", async () => {
+    const { session, rec } = fakeSession();
+    session.list = async () => [{ path: "INBOX" }];
+    const result = await (await inboxWith(session)).apply([encodeMessageId("INBOX", 7, 10)], "archive", null);
+    assert.equal(!result.ok && result.kind, "failed");
+    assert.deepEqual(rec.moved, []);
+  });
+
   it("操作: UIDVALIDITY が変わっていれば何も変えない", async () => {
     const { session, rec } = fakeSession({ uidValidity: 9 });
     const result = await (await inboxWith(session)).apply([encodeMessageId("INBOX", 7, 10)], "trash", null);
