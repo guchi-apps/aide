@@ -12,7 +12,7 @@ import { toDetail, toSummary, type GmailApiMessage, type MailDetail } from "../g
 import { parseMime } from "./mime.ts";
 
 /**
- * メール画面（`/mail`）のIMAP版の取得元（#782）。Gmail以外のメールアドレスを読む。
+ * Morrow向けメールAPI（`/api/mail/*`）のIMAP版の取得元（#782）。Gmail以外のメールアドレスを読む。
  *
  * **接続は1操作ごとに開いて閉じる。** 画面の1回の表示・1回の操作の間だけ持ち、常駐させない
  * （`GmailInbox` がアクセストークンをその間だけ持つのと同じ）。TLS（暗号化接続）が前提で、平文は使わない。

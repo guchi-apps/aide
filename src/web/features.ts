@@ -80,18 +80,6 @@ export const ENDPOINTS: FeatureItem[] = [
       "アプリ連携の画面。AIDEを中心に、どのアプリがAIDEを使い、AIDEがどこへ読みに行き・書き込むのかを図で示す。「機能を同期」（?sync=1）で、図に載っていない機能・実在しない機能を突き合わせて出す。許可されたGoogleアカウントでのログインが要る（未設定の環境ではパスワード）。",
   },
   {
-    name: "/mail",
-    meta: "GET",
-    description:
-      "メールの画面（#770）。Gmailの受信トレイ・未読・スター・ラベル別の一覧と検索（Gmailの検索式）。`/mail/message` で本文を開く。HTMLメールはスクリプトを動かさない枠に閉じ込め、外部画像は「画像を表示」を押すまで読み込まない。メール本文はAIDEに保存しない。ログインが要り、さらにGmailで認可したアカウントと同じメールアドレスでログインした本人だけが開ける。Gmail以外のメールアドレスはIMAP（AIDE_IMAP_*。#782）で読める（フォルダ別の一覧と検索、ラベルは使えない）。取得元は環境で1つ。",
-  },
-  {
-    name: "/mail/action",
-    meta: "POST",
-    description:
-      "メールの整理（#770）。既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻し。**返信・送信・完全削除は持たない**（どれもGmail上で元に戻せる操作だけ）。複数アカウントを束ねている環境では、1回の操作で選べるのは1アカウントのメールだけ（またがる選択は1件も変更せず拒否。#810）。ログインと、AIDE自身の画面からの送信（Origin）が要る。結果は元の画面へ戻して出す。",
-  },
-  {
     name: "/map/issue",
     meta: "POST",
     description:
@@ -281,7 +269,7 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/api/mail/messages",
     meta: "GET",
     description:
-      "Morrow向けのメール一覧（#795）。`/mail` 画面と同じ取得元（Gmail / IMAP）から1ページ分を返す（view・label・q・page。since で新着だけに絞る）。応答に持ち主のメールアドレスを載せ、ログイン中の人が本人かの照合はMorrow側で行う。専用の共有トークン（AIDE_MAIL_API_TOKEN）で認証する。メール本文はAIDEに保存しない。",
+      "Morrow向けのメール一覧（#795）。取得元（Gmail / IMAP。環境で1つ。#782）から1ページ分を返す（view・label・q・page。since で新着だけに絞る）。応答に持ち主のメールアドレスを載せ、ログイン中の人が本人かの照合はMorrow側で行う。専用の共有トークン（AIDE_MAIL_API_TOKEN）で認証する。メール本文はAIDEに保存しない。",
   },
   {
     name: "/api/mail/messages/<id>",
@@ -292,7 +280,7 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/api/mail/actions",
     meta: "POST",
     description:
-      "Morrow向けのメール整理（#795）。`/mail/action` と同じ、元に戻せる操作だけ（既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻し）。返信・送信・完全削除は持たない。",
+      "Morrow向けのメール整理（#795）。元に戻せる操作だけ（既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻し）。返信・送信・完全削除は持たない。",
   },
   {
     name: "/api/news-mail/send",
