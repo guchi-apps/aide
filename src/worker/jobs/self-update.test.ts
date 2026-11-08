@@ -67,6 +67,21 @@ test("復帰先のローカル develop が origin/develop より先行してい�
   assert.ok(!calls.some(({ file }) => file === "systemctl"));
 });
 
+test("復帰先のローカル develop の判定が git の失敗（不在など）なら、切り替えずにそのまま投げる", async () => {
+  const calls: Call[] = [];
+  const options: SelfUpdateOptions = {
+    execute: async (_file, args) => {
+      calls.push({ file: "git", args });
+      if (args[0] === "merge-base" && args[2] === "develop") {
+        throw Object.assign(new Error("fatal: Not a valid object name develop"), { code: 128 });
+      }
+      return { stdout: args[0] === "branch" ? "main\n" : "", stderr: "" };
+    },
+  };
+  await assert.rejects(() => runSelfUpdate(options), /Not a valid object name/);
+  assert.ok(!calls.some(({ args }) => args[0] === "switch"));
+});
+
 test("取り込み済みか判定できない git の失敗は、未取り込みと取り違えずにそのまま投げる", async () => {
   const options: SelfUpdateOptions = {
     execute: async (_file, args) => {

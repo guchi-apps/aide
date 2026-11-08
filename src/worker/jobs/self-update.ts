@@ -52,6 +52,8 @@ async function output(execute: Execute, file: string, args: string[]): Promise<s
  * その HEAD が origin/develop に取り込み済みなら develop へ戻して続行する（#807）。
  * 取り込み済みなら develop へ戻しても失われるコミットが無いため。取り込まれていないコミットが
  * ある場合だけ、従来どおり失敗として止めて人に判断を委ねる。
+ * 戻り先のローカル develop が origin/develop の祖先または同一でない場合（未pushの先行コミットなど）も、
+ * 切り替え前に失敗として止める（#814）。
  */
 export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<SelfUpdateResult> {
   const cwd = options.cwd ?? process.cwd();
