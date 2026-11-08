@@ -9,6 +9,11 @@ export interface SelfUpdateResult {
   before: string;
   after: string;
   dependenciesInstalled: boolean;
+  /**
+   * develop 以外に置き去りにされていたチェックアウトを develop へ戻したときの、元のブランチ名
+   * （detached HEAD なら "detached HEAD"）。戻していなければ null（#807）。
+   */
+  returnedFrom: string | null;
 }
 
 interface CommandResult {
@@ -42,6 +47,11 @@ async function output(execute: Execute, file: string, args: string[]): Promise<s
  *
  * 更新対象を develop に固定し、追跡済みの未コミット変更があれば何も書き換えない。
  * 未追跡ファイルは実機に常設のメモがあるため、この判定から除く。
+ *
+ * 本体チェックアウトが develop 以外（作業ブランチ・detached HEAD）に置き去りにされていても、
+ * その HEAD が origin/develop に取り込み済みなら develop へ戻して続行する（#807）。
+ * 取り込み済みなら develop へ戻しても失われるコミットが無いため。取り込まれていないコミットが
+ * ある場合だけ、従来どおり失敗として止めて人に判断を委ねる。
  */
 export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<SelfUpdateResult> {
   const cwd = options.cwd ?? process.cwd();
@@ -52,15 +62,24 @@ export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<Se
   if (dirty) throw new Error("追跡済みの未コミット変更があるため更新を見送ります");
 
   const branch = await output(execute, "git", ["branch", "--show-current"]);
+  await execute("git", ["fetch", "origin", "develop"]);
+
+  let returnedFrom: string | null = null;
   if (branch !== "develop") {
-    throw new Error(`追跡ブランチが develop ではありません（現在: ${branch || "detached HEAD"}）`);
+    const current = branch || "detached HEAD";
+    if (!(await isMergedIntoRemoteDevelop(execute))) {
+      throw new Error(
+        `追跡ブランチが develop ではなく、origin/develop に未取り込みのコミットがあるため更新を見送ります（現在: ${current}）`,
+      );
+    }
+    await execute("git", ["switch", "develop"]);
+    returnedFrom = current;
   }
 
-  await execute("git", ["fetch", "origin", "develop"]);
   const before = await output(execute, "git", ["rev-parse", "HEAD"]);
   const remote = await output(execute, "git", ["rev-parse", "origin/develop"]);
   if (before === remote) {
-    return { updated: false, before, after: before, dependenciesInstalled: false };
+    return { updated: false, before, after: before, dependenciesInstalled: false, returnedFrom };
   }
 
   await execute("git", ["pull", "--ff-only", "origin", "develop"]);
@@ -73,5 +92,21 @@ export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<Se
   await execute(setupScript, ["--only", "systemd"]);
   await execute("systemctl", ["--user", "restart", "aide-zaim-web.service"]);
 
-  return { updated: true, before, after, dependenciesInstalled };
+  return { updated: true, before, after, dependenciesInstalled, returnedFrom };
+}
+
+/**
+ * 現在の HEAD が origin/develop の祖先（＝取り込み済み）かを返す。
+ *
+ * `git merge-base --is-ancestor` は「祖先でない」を終了コード1で表し、execFile はそれを例外にする。
+ * 終了コード1だけを「未取り込み」とみなし、それ以外の失敗（リポジトリ破損など）はそのまま投げる。
+ */
+async function isMergedIntoRemoteDevelop(execute: Execute): Promise<boolean> {
+  try {
+    await execute("git", ["merge-base", "--is-ancestor", "HEAD", "origin/develop"]);
+    return true;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 1) return false;
+    throw error;
+  }
 }
