@@ -3205,7 +3205,7 @@ Morrowのサーバーが、メールの一覧・本文・整理に使う（実�
 |---|---|
 | `GET /api/mail/messages?view=&label=&q=&page=&since=` | 1ページ分の一覧。`view` は `inbox`・`unread`・`starred`・`all`・`trash`。`since`（UNIX時刻・ミリ秒）を付けると、**そのページのうち**受信がそれ以降のものだけを返す（ページをまたいでは探さない） |
 | `GET /api/mail/messages/<id>` | 本文1件。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める（`/mail/message` の `emailSrcdoc()` と同じ扱い） |
-| `POST /api/mail/actions` | `{ "action": "archive", "ids": ["..."], "labelId": "Label_1" }`。`action` は `/mail/action` と同じ10種類。`ids` は1〜100件 |
+| `POST /api/mail/actions` | `{ "action": "archive", "ids": ["..."], "labelId": "Label_1" }`。`action` は `/mail/action` と同じ10種類。`ids` は1〜100件。複数アカウントを束ねている環境では、**1アカウントのメールだけ**を指定する（またがると1件も変更せず400 `invalid_request`。#810） |
 
 - **認証**: `Authorization: Bearer <AIDE_MAIL_API_TOKEN>`。値はissue-deckの共有トークン（同名）から取り、
   取れなければ環境変数（手元での確認用。本番の `.env` へは配らない）。どちらも無ければ503、違えば401
