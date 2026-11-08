@@ -539,9 +539,32 @@ async function connect(deps: MailDeps): Promise<GmailResult<MailInbox>> {
   return GmailInbox.connect(deps);
 }
 
-function logFailure(where: string, kind: MailFailure, reason: string): void {
+export function logMailFailure(where: string, kind: MailFailure, reason: string): void {
   // 件名・差出人・本文・IDは出さない。失敗の種類と理由（ステータスコード程度）だけ。
   if (kind !== "unconfigured") console.warn(`[mail] ${where}: ${kind} ${reason}`);
+}
+
+const logFailure = logMailFailure;
+
+/**
+ * 取得元へつなぎ、メールボックスの持ち主のメールアドレス（Gmailは `users.getProfile`、IMAPは
+ * `AIDE_IMAP_OWNER_EMAIL` など）を引く。画面（`openMailbox`）とMorrow向けのAPI（`src/api/mail.ts`。#795）が
+ * 共用する。持ち主との照合は呼び出し側が行う（画面はログイン中の人と、APIは応答に載せて呼び出し元が）。
+ */
+export async function connectMailbox(
+  deps: MailDeps,
+): Promise<{ ok: true; inbox: MailInbox; owner: string } | { ok: false; kind: MailFailure }> {
+  const inbox = await connect(deps);
+  if (!inbox.ok) {
+    logFailure("connect", inbox.kind, inbox.reason);
+    return { ok: false, kind: inbox.kind };
+  }
+  const profile = await inbox.value.profileEmail();
+  if (!profile.ok) {
+    logFailure("profile", profile.kind, profile.reason);
+    return { ok: false, kind: profile.kind };
+  }
+  return { ok: true, inbox: inbox.value, owner: profile.value.trim().toLowerCase() };
 }
 
 /**
@@ -553,22 +576,14 @@ export async function openMailbox(
   deps: MailDeps,
 ): Promise<{ ok: true; inbox: MailInbox } | { ok: false; kind: MailFailure }> {
   if (!session.email) return { ok: false, kind: "not_owner" };
-  const inbox = await connect(deps);
-  if (!inbox.ok) {
-    logFailure("connect", inbox.kind, inbox.reason);
-    return { ok: false, kind: inbox.kind };
-  }
-  const profile = await inbox.value.profileEmail();
-  if (!profile.ok) {
-    logFailure("profile", profile.kind, profile.reason);
-    return { ok: false, kind: profile.kind };
-  }
-  if (profile.value.trim().toLowerCase() !== session.email.trim().toLowerCase()) {
+  const mailbox = await connectMailbox(deps);
+  if (!mailbox.ok) return mailbox;
+  if (mailbox.owner !== session.email.trim().toLowerCase()) {
     // 誰が開こうとしたかは残すが、Gmail側のアドレスはログに出さない。
     console.warn("[mail] 持ち主ではないログインからのアクセスを断りました");
     return { ok: false, kind: "not_owner" };
   }
-  return { ok: true, inbox: inbox.value };
+  return { ok: true, inbox: mailbox.inbox };
 }
 
 export async function handleMailListPage(

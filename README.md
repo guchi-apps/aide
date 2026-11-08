@@ -51,6 +51,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `POST /mail/action`（#770） | メール画面からの受信メールの整理（既読/未読・アーカイブ・スター・ラベル・ゴミ箱） | **例外**（下記） | `AIDE_GMAIL_INBOX_REFRESH_TOKEN`（`gmail.modify`。送信用の `AIDE_GMAIL_REFRESH_TOKEN` とは別。OAuthクライアントだけ共用） | **例外**（下記。Gmail上で元に戻せる操作だけ） |
+| `POST /api/mail/actions`（#795） | Morrowのサーバーからの受信メールの整理（`/mail/action` と同じ操作） | **例外**（下記。#770の延長） | 専用の共有トークン `AIDE_MAIL_API_TOKEN`（issue-deck）＋メール画面と同じ `gmail.modify` / IMAPの資格情報 | **例外**（下記。#770と同じ、元に戻せる操作だけ） |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_update_event` / `aide_delete_event`（aide#493） | DaySpan経由での既存の予定の変更・削除 | 満たす（下記） | 同上（作成と共用） | **例外**（下記。削除は現在のタイトルの一致が要る） |
 | `aide_create_task` / `aide_update_task` / 状態変更4本（#562） | YoteiFlow経由での固定タスクDBの正式操作 | **狭い例外**（下記） | `AIDE_DAYSPAN_TASKS_WRITE_TOKEN` とOAuth `tasks:write`（読取り双方から分離） | **例外**（下記。YoteiFlowが競合・冪等性・繰り返しを処理） |
@@ -170,6 +171,21 @@ Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP
 
 **この例外を前例として使わない。** 返信・送信・完全削除や、他のサービスの「状態を変える画面」を
 持ち込むときは、この節を根拠にせず改めて判断する。
+
+#### Morrow向けメールAPIは #770 の例外の延長（#795）
+
+メール画面と「必要なメールのお知らせ」を Morrow（`guchi-apps/morrow`）へ移すにあたり、**Gmail/IMAPの
+資格情報と取得処理はAIDEに残す**ことを #795 で利用者が決めた（Morrowへ丸ごと移す案と比べたうえで）。
+Morrowの**サーバー**が `/api/mail/*` を叩き、画面の描画・通知の要否判定（Codex）はMorrow側で行う。
+契約は[Morrow向けのメールAPI](#morrow向けのメールapi795)。
+
+- **条件1・3は #770 と同じ例外**で、持つ操作も `/mail/action` と同じ元に戻せるものだけ（新しい操作は足さない）
+- **条件2**: 認証は専用の共有トークン `AIDE_MAIL_API_TOKEN`（issue-deck）で、他の口のトークンとは共用しない。
+  Gmail/IMAPの資格情報はメール画面と共用し、Morrowへは渡さない（資格情報を1か所に閉じ込める。#230と同じ理由）
+- **トークンが表すのは「Morrowのサーバー」で利用者ではない。** 持ち主本人かどうかの照合はMorrow側が、
+  応答の `owner`（持ち主のメールアドレス）とログイン中の人とで行う
+- MCPツールには出さない（[Gmailを載せていない理由](#gmailを載せていない理由aide173)はMCP層について据え置き）
+- AIDEの `/mail` 画面は、Morrowのメール画面が本番に出たあと別のIssueで消す
 
 #### MCP経由のZaim登録は条件1を満たす（aide#135・廃止済み）
 
@@ -3151,6 +3167,24 @@ HTMLパートより先に置く**（RFC 2046の「後のパートほど優先し
 画像メールと同じ理由で、[公開URLからの遮断](#公開urlからの遮断)のApache設定には `news-mail` を
 入れない。
 
+
+## Morrow向けのメールAPI（#795）
+
+Morrowのサーバーが、メールの一覧・本文・整理に使う（実装は `src/api/mail.ts`）。取得元（Gmail / IMAP）の
+選び方・メッセージIDの形・持つ操作は `/mail` 画面と同じで、画面と同じ `connectMailbox()`（`src/web/mail.ts`）を通す。
+
+| メソッド・パス | 内容 |
+|---|---|
+| `GET /api/mail/messages?view=&label=&q=&page=&since=` | 1ページ分の一覧。`view` は `inbox`・`unread`・`starred`・`all`・`trash`。`since`（UNIX時刻・ミリ秒）を付けると、**そのページのうち**受信がそれ以降のものだけを返す（ページをまたいでは探さない） |
+| `GET /api/mail/messages/<id>` | 本文1件。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める（`/mail/message` の `emailSrcdoc()` と同じ扱い） |
+| `POST /api/mail/actions` | `{ "action": "archive", "ids": ["..."], "labelId": "Label_1" }`。`action` は `/mail/action` と同じ10種類。`ids` は1〜100件 |
+
+- **認証**: `Authorization: Bearer <AIDE_MAIL_API_TOKEN>`。値はissue-deckの共有トークン（同名）から取り、
+  取れなければ環境変数（手元での確認用。本番の `.env` へは配らない）。どちらも無ければ503、違えば401
+  （失敗が続くと429。`src/auth/ratelimit.ts`）
+- **応答**: 成功は `{ ok: true, owner, source, supportsLabels, ... }`。失敗は `{ ok: false, error }` で、
+  `error` は `unconfigured`（503）・`not_found`（404）・`unauthorized`・`failed`（取得元の失敗。502）・`invalid_request`（400）
+- **メール本文はAIDEに残さない。** ログに出すのは失敗の種類と理由だけで、件名・差出人・本文・IDは出さない
 
 ## ChatGPTからAsset Managerへ請求情報を取り込む（MCP）
 
