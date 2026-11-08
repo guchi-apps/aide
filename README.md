@@ -170,7 +170,7 @@ Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP
 
 #### メールの複数アカウント（#794）
 
-メインの取得元に加えて、`AIDE_MAIL_ACCOUNTS`（JSON配列。`name`・`label`・`host`・`user`・`password`・任意で`port`）に
+メインの取得元に加えて、`AIDE_MAIL_ACCOUNTS`（JSON配列を base64url に符号化した1行。要素は`name`・`label`・`host`・`user`・`password`・任意で`port`）に
 書いたIMAPアカウントを、1つの受信トレイへ日付順に混ぜて表示する（`src/core/connectors/mail-accounts.ts`）。
 Gmailを足すときはアプリパスワードで `imap.gmail.com` につなぐ（OAuthトークンは増やさない）。
 
@@ -180,6 +180,8 @@ Gmailを足すときはアプリパスワードで `imap.gmail.com` につなぐ
   ラベルは付け外しできない。`name` は英小文字・数字12字まで、`main` は予約、最大5件
 - ページ送りは各アカウントの次ページ位置を1つのトークンにまとめる。1アカウントが読めなくても残りを出し、
   読めなかったアカウント名を一覧に注記する
+- 値を符号化するのは、デプロイのgateが書く `.env` が `"` を含む値を扱えないため（`deploy.yml` の検査も `"` を拒否する）。
+  作り方: `node -e 'console.log(Buffer.from(JSON.stringify([...])).toString("base64url"))'`
 - パスワードを含むため `AIDE_MAIL_ACCOUNTS` はsecret。ログにはアカウントの鍵と失敗の種類だけを出す
 
 **この例外を前例として使わない。** 返信・送信・完全削除や、他のサービスの「状態を変える画面」を

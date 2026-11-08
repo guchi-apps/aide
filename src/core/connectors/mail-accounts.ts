@@ -38,8 +38,10 @@ export interface ExtraMailAccount extends MailAccountInfo {
 }
 
 /**
- * `AIDE_MAIL_ACCOUNTS`（JSON配列）を読む。
- * 例: `[{"name":"sub","label":"サブ","host":"imap.gmail.com","user":"sub@example.com","password":"...","port":993}]`
+ * `AIDE_MAIL_ACCOUNTS` を読む。値はJSON配列を **base64url に符号化した1行**。
+ * デプロイのgateが書く `.env` は `"` を含む値を正しく扱えないため、JSONそのままでは本番に渡せない。
+ * `[` で始まる値は符号化していないJSONとして読む（手元の確認用）。
+ * JSON配列の例: `[{"name":"sub","label":"サブ","host":"imap.gmail.com","user":"sub@example.com","password":"...","port":993}]`
  * 不正な要素は読み飛ばす（パスワード等を含みうるので、ログに内容は出さない）。
  */
 export function loadExtraMailAccounts(raw: string | undefined = process.env["AIDE_MAIL_ACCOUNTS"]): ExtraMailAccount[] {
@@ -47,16 +49,19 @@ export function loadExtraMailAccounts(raw: string | undefined = process.env["AID
   if (!text) return [];
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(text.startsWith("[") ? text : Buffer.from(text, "base64url").toString("utf8"));
   } catch {
-    console.warn("[mail] AIDE_MAIL_ACCOUNTS がJSONとして読めないため、追加アカウントを使いません");
+    console.warn("[mail] AIDE_MAIL_ACCOUNTS がbase64url符号化したJSONとして読めないため、追加アカウントを使いません");
     return [];
   }
   if (!Array.isArray(parsed)) return [];
   const accounts: ExtraMailAccount[] = [];
   const seen = new Set<string>([MAIN_ACCOUNT_KEY]);
   for (const item of parsed) {
-    if (accounts.length >= MAX_EXTRA_ACCOUNTS) break;
+    if (accounts.length >= MAX_EXTRA_ACCOUNTS) {
+      console.warn(`[mail] AIDE_MAIL_ACCOUNTS は最大${MAX_EXTRA_ACCOUNTS}件までのため、超えた分を使いません`);
+      break;
+    }
     if (typeof item !== "object" || item === null) continue;
     const o = item as Record<string, unknown>;
     const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -135,7 +140,10 @@ export class MultiMailInbox implements MailInbox {
     const members: Member[] = [{ info: { key: MAIN_ACCOUNT_KEY, name: "メイン" }, inbox: main }];
     for (const extra of extras) {
       const inbox = await ImapInbox.connect({ ...imap, credentials: extra.credentials });
-      if (!inbox.ok) continue;
+      if (!inbox.ok) {
+        console.warn(`[mail] account:${extra.key}: connect ${inbox.kind} ${inbox.reason}`);
+        continue;
+      }
       members.push({ info: { key: extra.key, name: extra.name }, inbox: inbox.value });
     }
     return { ok: true, value: new MultiMailInbox(members) };

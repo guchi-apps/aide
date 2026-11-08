@@ -40,6 +40,7 @@ describe("loadExtraMailAccounts", () => {
     ]);
     const accounts = loadExtraMailAccounts(raw);
     assert.deepEqual(accounts.map((a) => [a.key, a.name, a.credentials.port]), [["sub", "サブ", 993]]);
+    assert.deepEqual(loadExtraMailAccounts(Buffer.from(raw, "utf8").toString("base64url")).map((a) => a.key), ["sub"]);
     assert.deepEqual(loadExtraMailAccounts("{oops"), []);
     assert.deepEqual(loadExtraMailAccounts(undefined), []);
   });
