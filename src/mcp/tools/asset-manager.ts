@@ -21,7 +21,12 @@ const PAYMENT_FIELDS = [
   "amountNote",
   "originalAmount",
   "originalCurrency",
+  "review",
+  "items",
 ] as const;
+
+/** `items` の件数の上限。Asset Manager の `MAX_ITEMS`（asset-manager#1216）と同じ値。 */
+const MAX_IMPORT_ITEMS = 100;
 
 /** 金額が不確かな理由の上限。Asset Manager の列（VarChar(191)）に収まる長さで、向こうの検証と同じ値（#341）。 */
 const MAX_AMOUNT_NOTE_LENGTH = 191;
@@ -261,6 +266,32 @@ function buildPayload(args: Record<string, unknown>): Record<string, unknown> | 
     }
   }
 
+  if (args["review"] !== undefined && typeof args["review"] !== "boolean") {
+    return "review は true / false で指定してください";
+  }
+
+  // 品目の形。判定基準はAsset Managerの `validatePaymentImportInput` に揃えてある（asset-manager#1216）。
+  // 合計と amount の不一致は断らない（向こうが確認待ちに倒す）。
+  if (args["items"] !== undefined) {
+    const items = args["items"];
+    if (!Array.isArray(items) || items.length === 0 || items.length > MAX_IMPORT_ITEMS) {
+      return `items は1〜${MAX_IMPORT_ITEMS}件の配列で指定してください`;
+    }
+    for (const [index, raw] of items.entries()) {
+      const label = `items[${index}]`;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${label} はオブジェクトで指定してください`;
+      const row = raw as Record<string, unknown>;
+      if (typeof row["name"] !== "string" || !row["name"].trim()) return `${label}.name は必須です`;
+      if (typeof row["amount"] !== "number" || !Number.isSafeInteger(row["amount"]) || row["amount"] <= 0) {
+        return `${label}.amount は正の整数（円）で指定してください`;
+      }
+      const quantity = row["quantity"];
+      if (quantity !== undefined && quantity !== null && (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity <= 0)) {
+        return `${label}.quantity は正の数で指定してください`;
+      }
+    }
+  }
+
   const payload: Record<string, unknown> = { source: "gmail" };
   for (const field of PAYMENT_FIELDS) {
     if (args[field] !== undefined) payload[field] = args[field];
@@ -331,7 +362,12 @@ export const assetManagerImportPaymentTool: Tool = {
     "date は本文に購入時刻が印字されているときだけ時刻まで付け、読み取れないときは日付だけを送る。" +
     "ドル建てなど外貨建ての請求メールでは、originalAmount（外貨の元の金額）と originalCurrency（通貨コード）を必ず付け、" +
     "amount には円へ換算して整数へ丸めた金額を入れる（amount は整数のみ。換算レートと丸めは amountNote に書く）。" +
-    "外貨建ての明細は概算として扱われ、Asset Managerの突合せタブで確定する。",
+    "外貨建ての明細は概算として扱われ、Asset Managerの突合せタブで確定する。" +
+    "レシートのように品目が分かれていれば items（name・amount・quantity）に分け、品目の amount（値引き後）の合計は amount と一致させる" +
+    "（合わないと確認待ちになる）。items を渡すときは name と amount を省ける（amount は品目の合計になる）。" +
+    "review: true を付けると、分類・信頼度によらず確認待ちで作り、確定も家計簿への登録もしない（place・amount も省ける）。" +
+    "利用者がAsset Managerのレシート編集画面（/receipts/<receiptId>）で品目・カテゴリを直してから確定する流れに使う。" +
+    "receiptId は duplicate の結果にも含まれるので、同じレシートを開き直すのに使える。",
   inputSchema: {
     type: "object",
     properties: {
@@ -391,6 +427,30 @@ export const assetManagerImportPaymentTool: Tool = {
       rawSender: { type: "string" },
       confidence: { type: "number", minimum: 0, maximum: 1, description: "抽出結果の確信度。必須。" },
       sourceMetadata: { type: "object" },
+      review: {
+        type: "boolean",
+        description:
+          "true で確認待ちで止める。分類・信頼度によらず確認待ちで作り、確定・家計簿への登録をしない。" +
+          "このとき place・amount は省略できる（読み取れないまま、利用者がレシート編集画面で直す）。",
+      },
+      items: {
+        type: "array",
+        minItems: 1,
+        maxItems: MAX_IMPORT_ITEMS,
+        description:
+          "品目ごとの明細（1〜100件）。品目が分かれていれば1行にまとめずここに分け、amount（値引き後の円）の合計を全体の amount と一致させる。" +
+          "品目ごとに分類される。items があるときは name を省略でき、amount を省くと品目の合計になる。",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "品名。" },
+            amount: { type: "integer", minimum: 1, description: "この品目の金額（円・値引き後・整数）。" },
+            quantity: { type: "number", exclusiveMinimum: 0, description: "数量。省略可。" },
+          },
+          required: ["name", "amount"],
+          additionalProperties: false,
+        },
+      },
     },
     required: ["gmailMessageId", "confidence"],
     additionalProperties: false,

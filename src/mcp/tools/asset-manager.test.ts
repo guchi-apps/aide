@@ -131,6 +131,59 @@ describe("asset_manager_import_payment", () => {
     }
   });
 
+  it("review と items をそのままAsset Managerへ渡し、receiptId を返す", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const items = [{ name: "牛乳", amount: 200, quantity: 2 }, { name: "パン", amount: 150 }];
+    const fetchMock = mock.method(globalThis, "fetch", async (_input: string | URL, init?: RequestInit) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        source: "gmail",
+        gmailMessageId: "message-review",
+        confidence: 0.6,
+        review: true,
+        items,
+      });
+      return new Response(JSON.stringify({ status: "pendingReview", receiptId: "r-review" }), { status: 200 });
+    });
+    try {
+      const result = await assetManagerImportPaymentTool.handler(
+        { gmailMessageId: "message-review", confidence: 0.6, review: true, items },
+        { sessionId: null },
+      );
+      assert.equal(result.isError, false);
+      assert.deepEqual(parsed(result), { status: "pendingReview", receiptId: "r-review" });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("review・items の不正な値は送信せずに断る", async () => {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    const fetchMock = mock.method(globalThis, "fetch");
+    try {
+      const base = { gmailMessageId: "message-bad", confidence: 0.6 };
+      const bad: Record<string, unknown>[] = [
+        { review: "yes" },
+        { items: [] },
+        { items: "牛乳" },
+        { items: [null] },
+        { items: [{ name: "", amount: 100 }] },
+        { items: [{ name: "牛乳", amount: 0 }] },
+        { items: [{ name: "牛乳", amount: 10.5 }] },
+        { items: [{ name: "牛乳", amount: 100, quantity: 0 }] },
+        { items: Array.from({ length: 101 }, () => ({ name: "a", amount: 1 })) },
+      ];
+      for (const extra of bad) {
+        const result = await assetManagerImportPaymentTool.handler({ ...base, ...extra }, { sessionId: null });
+        assert.equal((parsed(result) as { status: string }).status, "error", JSON.stringify(extra));
+      }
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
   it("secret未設定時は外部へ送信しない", async () => {
     delete process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"];
     const fetchMock = mock.method(globalThis, "fetch");

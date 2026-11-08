@@ -76,7 +76,7 @@
 | `aide_claude_sessions` | サブPCのセッション | C B | 読 | ops-dashboard | サブPCのキャッシュ | 2.0KB | 約1.3KB（2件） | 維持 |
 | `aide_zaim_master` | 登録に渡すID候補 | C B | 読 | なし | Zaim（24hキャッシュ） | 0.9KB | 約9KB | 維持。ジャンル約115件はカテゴリと組で選ぶ必要があり、削ると登録が壊れる |
 | `aide_zaim_payment` | 支出を登録 | C B | **書** | Zaim | Zaim | 3.4KB | 小 | 維持。取り消せないので分離・aide-bot名指しを保つ |
-| `asset_manager_import_payment` | 請求メール取り込み | G | **書** | Asset Manager API | Asset Manager | 4.3KB | 小 | 維持（G専用。定期タスクの入口） |
+| `asset_manager_import_payment` | 請求メール取り込み | G | **書** | Asset Manager API | Asset Manager | 約6.6KB | 小 | 維持（G専用。定期タスクの入口）。#832で `review`・`items` を追加 |
 | `asset_manager_subscriptions` | サブスク明細 | C B | 読 | Asset Manager API | Asset Manager | 2.3KB | **約40KB超→約16〜18KB** | **改善**（下記） |
 | `asset_manager_create_subscription` | サブスク登録 | C G B | **書** | Asset Manager API | Asset Manager | 2.4KB | 小 | 維持 |
 | `asset_manager_add_subscription_price` | 料金改定を追加 | C G B | **書** | Asset Manager API | Asset Manager | 1.4KB | 小 | 維持 |
