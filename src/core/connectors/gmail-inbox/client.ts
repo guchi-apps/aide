@@ -141,6 +141,16 @@ export interface GmailInboxDeps {
   credentials?: GmailCredentials | null;
 }
 
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const parsed = JSON.parse(await response.text()) as { error?: { message?: unknown } };
+    const message = parsed.error?.message;
+    return typeof message === "string" && message ? `: ${message.slice(0, 200)}` : "";
+  } catch {
+    return "";
+  }
+}
+
 /** 1リクエスト（画面の1回の表示・1回の操作）の間だけ使うクライアント。アクセストークンはその間だけ持つ。 */
 export class GmailInbox implements MailInbox {
   readonly kind = "gmail" as const;
@@ -164,7 +174,10 @@ export class GmailInbox implements MailInbox {
     return { ok: true, value: new GmailInbox(fetchImpl, token.accessToken) };
   }
 
-  private async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<GmailResult<T>> {
+  private async request<T>(
+    path: string,
+    init: { method?: string; body?: unknown; withDetail?: boolean } = {},
+  ): Promise<GmailResult<T>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
@@ -184,7 +197,10 @@ export class GmailInbox implements MailInbox {
             : response.status === 404
               ? "not_found"
               : "failed";
-        return { ok: false, kind, reason: `Gmail APIがエラーを返しました（${response.status}）` };
+        // 失敗の理由（Pub/Subの権限不足など）が要る呼び出しだけ、Googleが返したメッセージを添える。
+        // 本文はメールの内容を含まないエラー応答なので、ログに残してよい。
+        const detail = init.withDetail ? await readErrorMessage(response) : "";
+        return { ok: false, kind, reason: `Gmail APIがエラーを返しました（${response.status}）${detail}` };
       }
       // batchModify は本文の無い 204 を返す。
       if (response.status === 204) return { ok: true, value: undefined as T };
@@ -211,6 +227,25 @@ export class GmailInbox implements MailInbox {
       return { ok: false, kind: "failed", reason: "Gmailのプロフィール応答が不正です" };
     }
     return { ok: true, value: email };
+  }
+
+  /**
+   * 受信トレイの変更をPub/Subのトピックへ通知させる（`users.watch`。#829）。
+   * 期限は7日（応答の `expiration`＝ミリ秒のエポック）なので、呼び出し側が毎日かけ直す。
+   * 同じ内容でかけ直しても上書きされるだけで害はない。
+   */
+  async watch(topicName: string): Promise<GmailResult<{ historyId: string; expiration: string }>> {
+    const result = await this.request<{ historyId?: string; expiration?: string }>("/watch", {
+      method: "POST",
+      body: { labelIds: ["INBOX"], labelFilterBehavior: "INCLUDE", topicName },
+      withDetail: true,
+    });
+    if (!result.ok) return result;
+    const { historyId, expiration } = result.value ?? {};
+    if (typeof historyId !== "string" || typeof expiration !== "string") {
+      return { ok: false, kind: "failed", reason: "Gmailのwatch応答が不正です" };
+    }
+    return { ok: true, value: { historyId, expiration } };
   }
 
   async labels(): Promise<GmailResult<GmailLabel[]>> {
