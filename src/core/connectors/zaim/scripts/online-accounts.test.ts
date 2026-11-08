@@ -140,6 +140,23 @@ describe("extractOnlineAccounts", () => {
     ]);
   });
 
+  it("名前の取れない連携できない行が複数あっても、名前が重ならない", () => {
+    const row = (stamp: string) =>
+      new StubElement("li", "", [
+        new StubElement("span", "help_outline"),
+        new StubElement("a", "連携できない"),
+        new StubElement("span", `最終更新：${stamp}`),
+      ]);
+    const page = new StubElement("body", "", [
+      new StubElement("ul", "", [row("2026年06月05日 09:00:00"), row("2026年06月06日 09:00:00")]),
+    ]);
+
+    assert.deepEqual(
+      extractOnlineAccounts(flatten(page)).map((account) => account.name),
+      ["口座名を取得できない連携口座・連携できない", "口座名を取得できない連携口座・連携できない 2"],
+    );
+  });
+
   it("最終更新が無い要素は拾わない", () => {
     const page = new StubElement("body", "", [
       new StubElement("div", "", [

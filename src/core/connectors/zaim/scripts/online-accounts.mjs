@@ -38,6 +38,7 @@ export function extractOnlineAccounts(elements) {
             : [node.querySelector?.("h1, h2, h3, h4, h5, strong, a")].filter(Boolean)
     const results = []
     const seen = new Set()
+    let unnamed = 0
 
     for (const element of elements) {
         const text = clean(element.textContent)
@@ -64,7 +65,8 @@ export function extractOnlineAccounts(elements) {
             // 見出しが無いレイアウトでは、ブロックのテキストから最終更新と金額を落として使う。
             const stripped = cleanName(
                 clean(node.textContent)
-                    .replace(stamp, " ")
+                    // 親が複数行を含むと別の行の最終更新が残るため、すべて落とす。
+                    .replace(new RegExp(pattern.source, "g"), " ")
                     .replace(/[￥¥]\s*-?[\d,]+/g, " ")
             )
             if (stripped && stripped.length <= 60) {
@@ -73,7 +75,11 @@ export function extractOnlineAccounts(elements) {
             }
         }
         // 金融機関名が取れなくても、連携できない行は警告から外さず状態を口座名の代わりに出す。
-        if (!name && status) name = `口座名を取得できない連携口座・${status}`
+        // parse側は口座名だけで重複を除くため、代替名は2件目以降に連番を付けて一意にする。
+        if (!name && status) {
+            unnamed += 1
+            name = `口座名を取得できない連携口座・${status}${unnamed > 1 ? ` ${unnamed}` : ""}`
+        }
         if (!name) continue
 
         const key = `${name}\u0000${stamp}`
