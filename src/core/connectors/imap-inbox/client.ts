@@ -371,9 +371,11 @@ export class ImapInbox implements MailInbox {
               break;
             }
             case "archive": {
-              const archive = await this.folderOf(session, "\\Archive");
+              // GmailのIMAPには \Archive が無く、All Mail（\All）へ移すと受信トレイのラベルが外れる＝アーカイブになる（#828）。
+              const archive = (await this.folderOf(session, "\\Archive")) ?? (await this.folderOf(session, "\\All"));
               if (!archive) return failure<void>("failed", "アーカイブフォルダが見つかりません");
-              await session.messageMove(range, archive, { uid: true });
+              // すでにそのフォルダにあるメールは移す先が無い（All Mail内のメール）。
+              if (archive !== folder) await session.messageMove(range, archive, { uid: true });
               break;
             }
             case "inbox":
