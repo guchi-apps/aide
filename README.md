@@ -2632,6 +2632,16 @@ systemctl --user list-timers 'aide-*'
 を実行し、更新後は `~/apps/subpc/setup.sh --only systemd` でunitを反映してから
 `aide-zaim-web.service` を再起動する。更新の成功も更新なしの定期実行も通知しない。
 
+**本体チェックアウトが `develop` 以外のブランチ（detached HEAD を含む）に置き去りにされていても、
+作業ツリーがクリーンで、その HEAD が `origin/develop` に取り込み済みなら `develop` へ戻して更新を続ける**
+（#807。判定は `git merge-base --is-ancestor HEAD origin/develop`）。取り込み済みなら戻しても失われる
+コミットが無いためである。以前は `develop` 以外なら一律に止めていたため、本体チェックアウトで直接
+作業ブランチへ切り替えたまま戻し忘れただけで、毎時の更新が約20時間失敗し続けた（status-hub#648）。
+`origin/develop` に未取り込みのコミットがあるブランチだけは、従来どおり更新せず失敗として通知する
+（そのコミットの扱いは人が決める）。切り替える前に、**戻り先のローカル `develop` も `origin/develop` の
+祖先または同一であること**（`git merge-base --is-ancestor develop origin/develop`）を確かめ、未pushの
+先行コミットがある・分岐している・存在しない場合は、切り替えも再起動もせず失敗として通知する（#814）。戻したときはジョブの記録の結果に元のブランチ名が残る。
+
 このタイマーも `guchi-apps/subpc` の `SYSTEMD_USER_UNITS` に登録して有効化する。unitファイルの配置と
 `daemon-reload` をaide側で重複して行ってはいけない。`setup.sh` が差分検出・未コミット変更の見送り・
 配布元コミットの記録をまとめて担うためである。
