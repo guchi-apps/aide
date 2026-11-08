@@ -130,3 +130,23 @@ describe("aide_create_event ハンドラ", () => {
     assert.equal(payload["kind"], "invalid");
   });
 });
+
+describe("aide_create_event の冪等キー", () => {
+  it("idempotencyKey は任意（required に含めない）で、スキーマに宣言している", () => {
+    const properties = createEventTool.inputSchema["properties"] as Record<string, unknown>;
+    assert.ok(properties["idempotencyKey"]);
+    assert.deepEqual(createEventTool.inputSchema["required"], ["title", "date"]);
+  });
+
+  it("不正な idempotencyKey は invalid を返す", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
+    try {
+      const payload = parse(await createEventTool.handler({ title: "歯医者", date: "2026-09-10", idempotencyKey: "x" }, CTX));
+      assert.equal(payload["ok"], false);
+      assert.equal(payload["kind"], "invalid");
+    } finally {
+      delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    }
+  });
+});

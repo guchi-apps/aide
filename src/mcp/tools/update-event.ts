@@ -35,6 +35,7 @@ export const updateEventTool: Tool = {
     "日をまたぐ時刻予定は date に開始日、endDate に終了日を指定する。" +
     "終日にするなら allDay: true（時刻とは同時に指定しない）、終日から時刻ありへ戻すなら startTime・endTime を指定する。" +
     "場所を消すなら location に空文字を渡す。" +
+    "同じ内容での再送は結果が変わらない（冪等）ので、タイムアウト時はそのまま呼び直してよい（idempotencyKey は無い）。" +
     "繰り返しの元の予定（シリーズ全体）は変更できない（1回分の id を指定する）。" +
     "予定を消すのは aide_delete_event。" +
     "**内容があやふやなときは dryRun: true で呼ぶ**と、変更せずに「何を送るか」だけを返す。",

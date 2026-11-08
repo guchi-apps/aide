@@ -160,3 +160,13 @@ describe("MCPツールの登録簿", () => {
     }
   });
 });
+
+describe("annotations（#823）", () => {
+  it("読み取りの道具は readOnlyHint: true、書き込みの道具には付けない", () => {
+    const tools = new Map(buildToolRegistry().list().map((t) => [t.name, t]));
+    assert.equal(tools.get("aide_schedule")?.annotations?.readOnlyHint, true);
+    assert.equal(tools.get("aide_create_event")?.annotations, undefined);
+    assert.equal(tools.get("aide_delete_event")?.annotations?.destructiveHint, true);
+    assert.notEqual(tools.get("aide_delete_event")?.annotations?.readOnlyHint, true);
+  });
+});

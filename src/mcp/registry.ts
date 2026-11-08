@@ -1,4 +1,4 @@
-import type { Tool, ToolDefinition } from "./types.ts";
+import type { Tool, ToolAnnotations, ToolDefinition } from "./types.ts";
 
 /**
  * ツールの登録簿。
@@ -22,11 +22,19 @@ export class ToolRegistry {
   }
 
   list(): ToolDefinition[] {
-    return [...this.#tools.values()].map(({ name, description, inputSchema }) => ({
+    return [...this.#tools.values()].map(({ name, description, inputSchema, annotations }) => ({
       name,
       description,
       inputSchema,
+      ...(annotations ? { annotations } : {}),
     }));
+  }
+
+  /** 登録済みの名前に宣言を付ける。名前が無ければ例外（表の綴り違いを黙って見逃さない）。 */
+  annotate(name: string, annotations: ToolAnnotations): void {
+    const tool = this.#tools.get(name);
+    if (!tool) throw new Error(`annotations の対象ツールが未登録です: ${name}`);
+    tool.annotations = annotations;
   }
 
   get(name: string): Tool | undefined {
