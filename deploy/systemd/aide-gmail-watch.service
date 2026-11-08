@@ -1,0 +1,16 @@
+[Unit]
+# メインのGmailの受信トレイへ users.watch をかけ直す（#829）。
+# Morrowの「必要なメールのお知らせ」へPub/Sub経由でpushを出させるためのもので、期限が7日なので毎日かける。
+Description=AIDE: Gmailのwatchのかけ直し（Pub/Sub push用）
+Documentation=https://github.com/guchi-apps/aide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# HTTPが2本（トークン取得とwatch）で、各15秒のタイムアウトを掛けてある。
+TimeoutStartSec=2min
+
+# node は mise のshim経由で、ログインシェルでしか PATH に乗らない。
+ExecStart=/bin/bash -lc 'cd %h/apps/aide && node --env-file-if-exists=.env src/worker/run.ts gmail-watch'

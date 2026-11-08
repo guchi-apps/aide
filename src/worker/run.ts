@@ -1,5 +1,6 @@
 import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runClaudeSessionsSync } from "./jobs/claude-sessions-sync.ts";
+import { runGmailWatch } from "./jobs/gmail-watch.ts";
 import { runPrinterWatch } from "./jobs/printer-watch.ts";
 import { runSelfUpdate } from "./jobs/self-update.ts";
 import { runWeatherSync } from "./jobs/weather-sync.ts";
@@ -41,6 +42,7 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   "weather-sync": runWeatherSync,
   "claude-sessions-sync": runClaudeSessionsSync,
   "printer-watch": runPrinterWatch,
+  "gmail-watch": runGmailWatch,
 };
 
 /**

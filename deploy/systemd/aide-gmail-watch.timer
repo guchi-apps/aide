@@ -1,0 +1,13 @@
+[Unit]
+Description=AIDE: Gmailのwatchのかけ直し（1日1回・04:00 JST）
+
+[Timer]
+# subpc のシステムTZは UTC のため、JSTを明示する。
+# watchの期限は7日。1日1回かけ直せば、数回失敗しても切れる前に気づいて直せる。
+OnCalendar=*-*-* 04:00:00 Asia/Tokyo
+# 停止中に逃した実行を起動直後に走らせる。
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

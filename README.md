@@ -1966,6 +1966,23 @@ AIDE が畳むときの読み方:
 **キャッシュを挟まない。** 進捗も完了も鮮度そのものが価値で、ジョブ間隔ぶん古くなると「終わったか」に
 答えられなくなる（README「どこまでを『重い取得』とみなすか」の右側）。
 
+### Gmailのpush通知のかけ直し（`gmail-watch`。#829）
+
+Morrow の「必要なメールのお知らせ」を、受信から数秒で判定できるようにするための `users.watch`。pushの受け口は
+Morrow（`POST /api/mail/push`。Pub/SubのOIDCトークンを検証）で、AIDEは**Gmailの資格情報を持つ側として
+`users.watch`（`labelIds: ["INBOX"]`）をかけ続ける**だけ。実装は `src/worker/jobs/gmail-watch.ts`、
+Gmail呼び出しは `GmailInbox.watch`（`gmail-inbox/client.ts`）。
+
+- **watchの期限は7日**なので、`aide-gmail-watch.timer` が毎日（04:00 JST）かけ直す。上書きなので重なっても害はない
+- **トピック名は `AIDE_GMAIL_WATCH_TOPIC`**（`projects/<プロジェクト>/topics/<トピック>`）。未設定なら何も呼ばず成功で終わる
+- **サブPCのworkerが動かすので、サブPCの `.env` に** `AIDE_GMAIL_WATCH_TOPIC` と Gmail資格情報（`AIDE_GMAIL_CLIENT_ID`・
+  `AIDE_GMAIL_CLIENT_SECRET`・`AIDE_GMAIL_INBOX_REFRESH_TOKEN`）が要る。VPSには配線しない（`deploy-env-wiring.test.ts` の対象外）。
+  トピックが設定されているのに資格情報が無ければ失敗にする（黙って止めない）
+- 失敗は他のworkerジョブと同じ経路（終了コード・Discord通知・実行記録）に流れる。失敗理由にはGoogleのエラー文
+  （Pub/Subの権限不足など）を添える。追加のIMAPアカウントは対象外
+- GCP側のトピック作成・`gmail-api-push@system.gserviceaccount.com` への Publisher 付与は人の作業（guchi-apps/morrow 側のIssue）。
+  タイマーの有効化は `guchi-apps/subpc` の `SYSTEMD_USER_UNITS` に `aide-gmail-watch.timer` を足す（手で `cp` しない）
+
 ### 状態遷移の通知（`printer-watch`）
 
 サブPCの systemd timer が2分ごとに `printer-watch` を走らせ、myroom の内部APIを読んで前回の記録と
@@ -2536,6 +2553,7 @@ npm run worker zaim-keep-alive  # セッション延長のみ（軽い、30分�
 npm run worker weather-sync     # 天気予報を取得（軽い、1時間ごと想定）
 npm run worker claude-sessions-sync  # Claude Codeのセッションを収集（軽い、2分ごと想定）
 npm run worker printer-watch    # 3Dプリンターの完了・停止・エラーを通知（軽い、2分ごと想定。#378）
+npm run worker gmail-watch      # Gmail受信トレイへusers.watchをかけ直す（軽い、1日1回想定。#829）
 ```
 
 常駐させずワンショットで実行し、スケジューリングは外（cron / systemd timer / PM2）に任せる。常駐プロセスを増やさずに済み、失敗しても次回実行で自然に復旧する。失敗時は終了コード1を返すので、スケジューラ側から検知できる。
