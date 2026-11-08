@@ -54,6 +54,15 @@ ChatGPT定期タスクは、Gmailから抽出した明細を `asset_manager_impo
   引き落としのお知らせ（例: 「三井住友カード ご利用のお知らせ」）。同じカード会社のカードを2枚持つと
   どちらか分からず、同じ支払いがカード明細として必ず入るため、重複の確認が増えるだけになる
 
+**確認待ちで止める指定と品目ごとの明細（#832。Asset Manager側は asset-manager#1216）。**
+
+- `review: true`: 分類・信頼度によらず確認待ちで作り、確定も家計簿への登録もしない。`place`・`amount` は省略できる。
+  利用者がAsset Managerのレシート編集画面（`/receipts/<receiptId>`）で直してから確定する流れに使う（morrow#781）
+- `items: [{ name, amount, quantity? }]`（1〜100件）: 品目ごとの行が作られる。`name`・`amount` は省略でき、`amount` は品目の合計になる。
+  合計が `amount` と合わないときは、Asset Managerが断らず確認待ちに倒す
+- `receiptId` は Asset Manager の応答をそのまま返す（`duplicate` でも含まれる）
+- **リリース順**: 旧版のAsset Managerは `review` を無視して自動登録に進みうるので、asset-manager#1216 の本番反映後に本番へ出す
+
 ツールの `description` にも同じ線引きを書いている。定期タスクのプロンプト側にも同じ線引きを入れる
 （ユーザー自身がChatGPTの画面で直す）。
 
