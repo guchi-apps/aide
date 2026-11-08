@@ -59,6 +59,8 @@ export interface MailPage {
   messages: MailSummary[];
   /** 複数アカウントのとき、読めなかったアカウントの名前（#794）。 */
   failedAccounts?: string[];
+  /** 複数アカウントのとき、全アカウント（メイン含む）の鍵・名前と、今回の取得で読めなかったか（#821）。 */
+  accounts?: { key: string; name: string; failed: boolean }[];
   nextPageToken: string | null;
   /** Gmailの推定件数。正確ではない。 */
   resultSizeEstimate: number;
