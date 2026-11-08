@@ -54,6 +54,7 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",
   AIDE_MYROOM_URL: "既定 http://127.0.0.1:8000 で足りる",
   AIDE_DISCORD_WEBHOOK_URL: "workerジョブの通知用。workerはサブPCで動く",
+  AIDE_GMAIL_WATCH_TOPIC: "Gmailのwatch（#829）のトピック名。かけ直すのはサブPCのworker（gmail-watch）だけで、VPSでは読まない",
   AIDE_WEATHER_LAT: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
   AIDE_WEATHER_LON: "天気予報の地点。取得するのはサブPCのworkerで、既定値でも足りる",
   AIDE_WEATHER_LOCATION_NAME:

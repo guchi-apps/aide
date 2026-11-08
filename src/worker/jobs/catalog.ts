@@ -103,6 +103,18 @@ export const JOB_CATALOG = [
     // 2分間隔なので、5回ぶん飛んだら気づけるように10分。停止・エラーの通知が遅れるほど価値が下がる。
     staleAfterMinutes: 10,
   },
+  {
+    name: "gmail-watch",
+    description:
+      "メインのGmailの受信トレイへ users.watch をかけ直し、新着をPub/Subのトピックへ通知させる" +
+      "（Morrowの「必要なメールのお知らせ」を受信から数秒で判定するため。#829）。watchの期限は7日なので" +
+      "毎日かけ直す。トピック名（AIDE_GMAIL_WATCH_TOPIC）が未設定なら何もしない。" +
+      "Gmailの資格情報（AIDE_GMAIL_CLIENT_ID・AIDE_GMAIL_CLIENT_SECRET・AIDE_GMAIL_INBOX_REFRESH_TOKEN）が" +
+      "サブPCの .env に要る。",
+    interval: "1日1回（04:00 JST）",
+    // 24時間ごとで期限は7日。2回ぶん飛んでも切れないが、気づけるように36時間。
+    staleAfterMinutes: 36 * 60,
+  },
 ] as const satisfies readonly JobInfo[];
 
 export type JobName = (typeof JOB_CATALOG)[number]["name"];
