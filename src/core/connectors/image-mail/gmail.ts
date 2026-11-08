@@ -129,7 +129,7 @@ export function loadNewsMailAddresses(): { addresses: MailAddresses } | { error:
 export type TokenOutcome = { ok: true; accessToken: string } | { ok: false; kind: "unauthorized" | "failed"; reason: string };
 
 /**
- * リフレッシュトークンからアクセストークンを得る。メール画面（#770）も、別のリフレッシュトークンで同じ処理を使う。
+ * リフレッシュトークンからアクセストークンを得る。メールAPI（#770・#795）も、別のリフレッシュトークンで同じ処理を使う。
  * 失敗の文言は「何も送信されていない」前提の送信向けだが、取得前の失敗なのでどちらの用途でも正しい。
  */
 export async function fetchAccessToken(

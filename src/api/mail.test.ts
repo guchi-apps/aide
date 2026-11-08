@@ -8,8 +8,13 @@ import {
   handleMailApiAction,
   handleMailApiList,
   handleMailApiMessage,
+  isLabelId,
+  isMessageId,
   messageIdFromPath,
   parseActionBody,
+  parseListState,
+  selectMailSource,
+  toListQuery,
   type MailApiDeps,
 } from "./mail.ts";
 
@@ -215,5 +220,65 @@ describe("Morrow向けメールAPI（#795）", () => {
       ids: ["a1"],
       labelId: "Label_1",
     });
+  });
+});
+
+describe("一覧の条件（旧メール画面から移動）", () => {
+  it("タブ・ラベル・検索・ページを読み、検索条件へ写す", () => {
+    const state = parseListState(new URLSearchParams("view=unread&q=%20from%3Ax%20&page=123"));
+    assert.equal(state.view.key, "unread");
+    assert.equal(state.q, "from:x");
+    assert.deepEqual(toListQuery(state).labelIds, ["INBOX", "UNREAD"]);
+  });
+
+  it("ユーザーラベルで絞ると、そのラベルだけを条件にする。不正な値は捨てる", () => {
+    assert.deepEqual(toListQuery(parseListState(new URLSearchParams("label=Label_5"))).labelIds, ["Label_5"]);
+    const bad = parseListState(new URLSearchParams("label=a%20b&page=x%2Fy&view=nope"));
+    assert.equal(bad.labelId, null);
+    assert.equal(bad.pageToken, null);
+    assert.equal(bad.view.key, "inbox");
+  });
+
+  it("ゴミ箱だけ includeSpamTrash を付ける", () => {
+    assert.equal(toListQuery(parseListState(new URLSearchParams("view=trash"))).includeSpamTrash, true);
+    assert.equal(toListQuery(parseListState(new URLSearchParams(""))).includeSpamTrash, false);
+  });
+
+  it("IMAPのメッセージID・フォルダのラベルIDを受け、危険な文字は受けない", () => {
+    assert.ok(isMessageId("SU5CT1g.7.42"));
+    assert.ok(isLabelId("F5LuL5LqL"));
+    assert.ok(!isMessageId("../etc/passwd"));
+    assert.ok(!isMessageId("a/b"));
+    assert.ok(!isLabelId("a b"));
+  });
+});
+
+describe("取得元の選択（#782）", () => {
+  const names = ["AIDE_MAIL_SOURCE", "AIDE_GMAIL_CLIENT_ID", "AIDE_GMAIL_CLIENT_SECRET", "AIDE_GMAIL_INBOX_REFRESH_TOKEN", "AIDE_IMAP_HOST", "AIDE_IMAP_USER", "AIDE_IMAP_PASSWORD"];
+  const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+  const reset = () => {
+    for (const n of names) {
+      if (saved[n] === undefined) delete process.env[n];
+      else process.env[n] = saved[n];
+    }
+  };
+
+  it("取得元: 明示 > Gmailのトークン > IMAPの接続情報 > Gmail（未設定）", () => {
+    try {
+      for (const n of names) delete process.env[n];
+      assert.equal(selectMailSource(), "gmail");
+      process.env["AIDE_IMAP_HOST"] = "imap.example.com";
+      process.env["AIDE_IMAP_USER"] = "me@example.com";
+      process.env["AIDE_IMAP_PASSWORD"] = "pw";
+      assert.equal(selectMailSource(), "imap");
+      process.env["AIDE_GMAIL_CLIENT_ID"] = "id";
+      process.env["AIDE_GMAIL_CLIENT_SECRET"] = "secret";
+      process.env["AIDE_GMAIL_INBOX_REFRESH_TOKEN"] = "token";
+      assert.equal(selectMailSource(), "gmail");
+      process.env["AIDE_MAIL_SOURCE"] = "imap";
+      assert.equal(selectMailSource(), "imap");
+    } finally {
+      reset();
+    }
   });
 });

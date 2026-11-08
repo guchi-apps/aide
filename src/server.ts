@@ -47,7 +47,6 @@ import {
   handleStatusLogout,
   type LoginOptions,
 } from "./web/login.ts";
-import { handleMailAction, handleMailListPage, handleMailMessagePage } from "./web/mail.ts";
 import { handleMapIssue, handleMapPage } from "./web/map.ts";
 
 /**
@@ -129,19 +128,6 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 「機能を同期」の結果からIssueを起案する（#355）。ログインの関門は handleMapIssue が通す。
   if (path === "/map/issue" && req.method === "POST") {
     await handleMapIssue(req, res, loginOptions);
-    return;
-  }
-  // メール（#770）。Gmailの受信メールの一覧・本文・整理。ログインの関門は各ハンドラが通す。
-  if (path === "/mail" && (req.method === "GET" || req.method === "HEAD")) {
-    await handleMailListPage(req, res, loginOptions);
-    return;
-  }
-  if (path === "/mail/message" && (req.method === "GET" || req.method === "HEAD")) {
-    await handleMailMessagePage(req, res, loginOptions);
-    return;
-  }
-  if (path === "/mail/action" && req.method === "POST") {
-    await handleMailAction(req, res, loginOptions);
     return;
   }
   if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {

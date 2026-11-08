@@ -333,12 +333,11 @@ export interface NavItem {
 }
 
 /** ヘッダーのナビに並べる画面。ページを増やしたらここへ足す。 */
-export type NavKey = "map" | "features" | "mail";
+export type NavKey = "map" | "features";
 
 const NAV: { key: NavKey; href: string; label: string }[] = [
   { key: "map", href: "/map", label: "アプリ連携" },
   { key: "features", href: "/features", label: "機能一覧" },
-  { key: "mail", href: "/mail", label: "メール" },
 ];
 
 /**
