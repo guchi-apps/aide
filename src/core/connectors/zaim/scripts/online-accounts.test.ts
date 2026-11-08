@@ -13,10 +13,12 @@ class StubElement {
   readonly ownText: string;
   readonly children: StubElement[];
   parentElement: StubElement | null = null;
+  className = "";
 
   // Node 24 の型ストリッピングは parameter property（constructor 引数への修飾子）を
   // 実行できないため、フィールドは明示的に宣言する。
-  constructor(tag: string, ownText = "", children: StubElement[] = []) {
+  constructor(tag: string, ownText = "", children: StubElement[] = [], className = "") {
+    this.className = className;
     this.tag = tag;
     this.ownText = ownText;
     this.children = children;
@@ -25,6 +27,16 @@ class StubElement {
 
   get textContent(): string {
     return [this.ownText, ...this.children.map((child) => child.textContent)].join(" ");
+  }
+
+  querySelectorAll(selector: string): StubElement[] {
+    const tags = selector.split(",").map((part) => part.trim());
+    const found: StubElement[] = [];
+    for (const child of this.children) {
+      if (tags.includes(child.tag)) found.push(child);
+      found.push(...child.querySelectorAll(selector));
+    }
+    return found;
   }
 
   querySelector(selector: string): StubElement | null {
@@ -92,6 +104,40 @@ describe("extractOnlineAccounts", () => {
       extractOnlineAccounts(flatten(page)).map((account) => account.name),
       ["SBI証券", "楽天証券"],
     );
+  });
+
+  it("連携できない行では、アイコン文字と状態表示を口座名にせず金融機関名を取る", () => {
+    const page = new StubElement("body", "", [
+      new StubElement("div", "", [
+        new StubElement("h3", "三菱UFJ銀行"),
+        new StubElement("div", "", [
+          new StubElement("i", "help_outline", [], "material-icons"),
+          new StubElement("a", "連携できない"),
+        ]),
+        new StubElement("p", "最終更新：2026年06月05日 09:00:00"),
+      ]),
+    ]);
+
+    assert.deepEqual(extractOnlineAccounts(flatten(page)), [
+      { name: "三菱UFJ銀行", lastUpdatedAt: "最終更新：2026年06月05日 09:00:00" },
+    ]);
+  });
+
+  it("金融機関名が取れない連携できない行は、状態が分かる名前にする", () => {
+    const page = new StubElement("body", "", [
+      new StubElement("li", "", [
+        new StubElement("span", "help_outline"),
+        new StubElement("a", "連携できない"),
+        new StubElement("span", "最終更新：2026年06月05日 09:00:00"),
+      ]),
+    ]);
+
+    assert.deepEqual(extractOnlineAccounts(flatten(page)), [
+      {
+        name: "口座名を取得できない連携口座・連携できない",
+        lastUpdatedAt: "最終更新：2026年06月05日 09:00:00",
+      },
+    ]);
   });
 
   it("最終更新が無い要素は拾わない", () => {
