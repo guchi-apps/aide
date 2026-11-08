@@ -47,6 +47,9 @@ export const createEventTool: Tool = {
     "**idempotencyKey は任意だが、タイムアウトや結果不明で呼び直す可能性があるなら必ず付ける。**" +
     "1回の登録につき1つ決め、再送では**同じ値・同じ内容**で呼ぶと、予定を重複して作らず最初の結果を返す" +
     "（内容を変えるなら新しいキー。同じキーで内容が違うと idempotency_conflict）。" +
+    "**タイムアウト・通信断で結果不明（outcomeUnknown: true）になったときは、予定が作られている可能性がある。**" +
+    "同じキーで再送しても作成は再実行せず、同じ結果不明を返すだけ。先に aide_schedule で予定が作られたか確認し、" +
+    "無いと分かったときだけ**新しいキー**で作り直すこと（確認せずに作り直すと重複する）。" +
     "**日時があやふやなまま登録したくないときは dryRun: true で呼ぶ**と、" +
     "登録せずに「何が入るか」だけを返す。",
   inputSchema: {
@@ -135,7 +138,24 @@ export const createEventTool: Tool = {
     } else {
       outcome = await createDaySpanEvent(config, normalized.input);
     }
-    if (!outcome.ok) return json({ ok: false, kind: outcome.kind, reason: outcome.reason });
+    if (!outcome.ok) {
+      if (outcome.outcomeUnknown) {
+        return json({
+          ok: false,
+          kind: outcome.kind,
+          outcomeUnknown: true,
+          reason: outcome.reason,
+          note:
+            "予定が作られたか分かりません（DaySpan側で作成済みの可能性があります）。" +
+            "aide_schedule で該当の予定があるか確認してください。" +
+            (keyResult.key
+              ? "同じ idempotencyKey での再送は作成をやり直しません。予定が無いと確認できたときだけ、新しい idempotencyKey で作り直してください。"
+              : "確認せずに作り直すと重複します。"),
+          ...(replayed ? { replayed: true } : {}),
+        });
+      }
+      return json({ ok: false, kind: outcome.kind, reason: outcome.reason });
+    }
 
     return json({
       ok: true,

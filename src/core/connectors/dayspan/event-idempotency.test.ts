@@ -50,6 +50,47 @@ describe("EventIdempotencyStore", () => {
     assert.equal(calls, 2);
   });
 
+  it("結果不明の失敗は覚え、同じキーの再送ではPOSTし直さない（#833）", async () => {
+    const store = new EventIdempotencyStore();
+    let calls = 0;
+    const unknown = { ok: false as const, outcomeUnknown: true };
+    const a = await store.run("k1234567", "f", async () => (++calls, unknown));
+    const b = await store.run("k1234567", "f", async () => (++calls, { ok: true as const }));
+    assert.equal(calls, 1);
+    assert.deepEqual(a, { replay: false, outcome: unknown });
+    assert.deepEqual(b, { replay: true, outcome: unknown });
+  });
+
+  it("結果不明の失敗でも、内容を変えれば conflict で、新しいキーなら作れる", async () => {
+    const store = new EventIdempotencyStore();
+    await store.run("k1234567", "a", async () => ({ ok: false, outcomeUnknown: true }));
+    assert.deepEqual(await store.run("k1234567", "b", async () => ({ ok: true })), { conflict: true });
+    assert.deepEqual(await store.run("k7654321", "a", async () => ({ ok: true })), { replay: false, outcome: { ok: true } });
+  });
+
+  it("上限を超えても、実行中と結果不明の保留は成功済みより後まで落とさない", async () => {
+    const store = new EventIdempotencyStore();
+    await store.run("unknown-key1", "f", async () => ({ ok: false, outcomeUnknown: true }));
+    for (let i = 0; i < 520; i++) await store.run(`ok-key-${i}`, "f", async () => ({ ok: true }));
+    let calls = 0;
+    const again = await store.run("unknown-key1", "f", async () => (++calls, { ok: true }));
+    assert.equal(calls, 0);
+    assert.deepEqual(again, { replay: true, outcome: { ok: false, outcomeUnknown: true } });
+  });
+
+  it("実行中の同時再送は結果不明を共有する", async () => {
+    const store = new EventIdempotencyStore();
+    let calls = 0;
+    const run = async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 5));
+      return { ok: false as const, outcomeUnknown: true };
+    };
+    const [a, b] = await Promise.all([store.run("k1234567", "f", run), store.run("k1234567", "f", run)]);
+    assert.equal(calls, 1);
+    assert.deepEqual([a, b].map((r) => "outcome" in r && r.outcome.outcomeUnknown), [true, true]);
+  });
+
   it("期限が切れたら作り直す", async () => {
     let now = 0;
     const store = new EventIdempotencyStore(() => now);

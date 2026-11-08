@@ -164,6 +164,12 @@ export interface WriteFailure {
   reason: string;
   /** `title_mismatch` のとき、予定の現在のタイトル。復唱と違う予定だったと利用者へ伝えるのに使う。 */
   currentTitle?: string;
+  /**
+   * 作成のPOSTが先方へ届いたかもしれず、予定が作られたか分からない失敗（#833）。
+   * タイムアウト・通信断・読めない応答・想定外のHTTPステータスが該当する。
+   * 先方が応答で拒否した失敗（入力不正・認可・カレンダー無し等）は「作られていない」と確定するので付けない。
+   */
+  outcomeUnknown?: true;
 }
 
 export type CreateEventOutcome = { ok: true; id: string; url: string | null } | WriteFailure;
@@ -259,16 +265,23 @@ export async function createDaySpanEvent(
       body: JSON.stringify(input),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) return await classifyResponseFailure(res);
+    if (!res.ok) return markUnknownIfFailed(await classifyResponseFailure(res));
 
     const payload = (await res.json()) as { id?: unknown; url?: unknown };
     if (typeof payload.id !== "string") {
-      return { ok: false, kind: "failed", reason: "DaySpanの応答から予定のIDを読めませんでした" };
+      return { ok: false, kind: "failed", reason: "DaySpanの応答から予定のIDを読めませんでした", outcomeUnknown: true };
     }
     return { ok: true, id: payload.id, url: typeof payload.url === "string" ? payload.url : null };
   } catch (cause) {
-    return classifyThrown(cause);
+    return markUnknownIfFailed(classifyThrown(cause));
   }
+}
+
+/** 作成POSTの `failed`（拒否と確定できない失敗）に、結果不明の印を付ける。 */
+function markUnknownIfFailed(failure: WriteFailure): WriteFailure {
+  // 500 は「対象ユーザーを決められない設定不備」と分類するが、作成後に落ちた汎用500や中継の500とも区別できないため、
+  // 作成POSTでは結果不明として扱う（重複より、確認してもらうほうを選ぶ）。
+  return failure.kind === "failed" || failure.kind === "unresolvable" ? { ...failure, outcomeUnknown: true } : failure;
 }
 
 const EVENT_ID_KEY = /^[A-Za-z0-9_-]+$/;

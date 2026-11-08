@@ -6,10 +6,12 @@
  * メモリに一定時間だけ覚え、同じキー・同じ内容の再送には作り直さず同じ結果を返す。
  *
  * - **メモリのみ**（`data/` へは書かない）。AIDE の再起動を挟むと忘れる。想定は「タイムアウトで呼び直す」
- *   数分以内の再送で、再起動をまたぐ保証は持たない。
+ *   再送（保持は最長24時間）で、再起動をまたぐ保証は持たない。
  * - 実行中に同じキーが来たら、同じ呼び出しの完了を待って同じ結果を返す（二重送信しない）。
- * - 失敗（`ok: false`）は覚えない。DaySpan が予定を作ったか不明な失敗でも、再送で作り直せるようにするため。
- *   これは「作られたか不明」のときに重複しうるという残りの穴で、確実に防ぐには DaySpan 側の対応が要る。
+ * - 失敗は原則覚えない（先方が拒否した失敗は「作られていない」と確定するので、直して再送できてよい）。
+ *   ただし **結果不明の失敗（`outcomeUnknown`。タイムアウト・通信断など）は覚えて保留する**（#833）。
+ *   先方では作成済みかもしれず、同じキーの再送でPOSTし直すと予定が重複するため。同じキー・同じ内容の再送は
+ *   POSTせず、保留した失敗をそのまま返す。呼び出し側は予定を照会して、作られていなければ新しいキーで作り直す。
  */
 
 const KEY_PATTERN = /^[\x21-\x7e]{8,191}$/;
@@ -29,6 +31,8 @@ interface Entry {
   expiresAt: number;
   promise: Promise<unknown>;
   settled: boolean;
+  /** 結果不明の失敗として保留しているか。 */
+  unknown: boolean;
 }
 
 export type IdempotentResult<T> =
@@ -43,8 +47,8 @@ export class EventIdempotencyStore {
     this.#now = now;
   }
 
-  /** `run` の結果が `ok: true` のときだけ覚える。 */
-  async run<T extends { ok: boolean }>(
+  /** `run` の結果が `ok: true` か、結果不明の失敗（`outcomeUnknown`）のときだけ覚える。 */
+  async run<T extends { ok: boolean; outcomeUnknown?: boolean }>(
     key: string,
     fingerprint: string,
     run: () => Promise<T>,
@@ -61,11 +65,13 @@ export class EventIdempotencyStore {
       expiresAt: this.#now() + TTL_MS,
       promise: Promise.resolve(),
       settled: false,
+      unknown: false,
     };
     entry.promise = run().then(
       (outcome) => {
         entry.settled = true;
-        if (!outcome.ok) this.#entries.delete(key);
+        entry.unknown = !outcome.ok && outcome.outcomeUnknown === true;
+        if (!outcome.ok && outcome.outcomeUnknown !== true) this.#entries.delete(key);
         return outcome;
       },
       (cause: unknown) => {
@@ -82,10 +88,13 @@ export class EventIdempotencyStore {
     for (const [key, entry] of this.#entries) {
       if (entry.settled && entry.expiresAt <= now) this.#entries.delete(key);
     }
-    while (this.#entries.size >= MAX_ENTRIES) {
-      const oldest = this.#entries.keys().next().value;
-      if (oldest === undefined) break;
-      this.#entries.delete(oldest);
+    // 上限を超えたら、実行中のものは落とさず（同時再送が二重POSTになる）、結果不明の保留も後回しにして古い順に落とす。
+    for (const keepUnknown of [false, true]) {
+      for (const [key, entry] of this.#entries) {
+        if (this.#entries.size < MAX_ENTRIES) return;
+        if (!entry.settled || (!keepUnknown && entry.unknown)) continue;
+        this.#entries.delete(key);
+      }
     }
   }
 }
