@@ -397,3 +397,32 @@ describe("IMAP取得元（#782）", () => {
     assert.ok(!list.includes("Gmailの検索式"));
   });
 });
+
+describe("複数アカウントの受信トレイ（#794）", () => {
+  it("アカウントのタブと各行のバッジを出し、絞り込みをURLに残す", () => {
+    const state = parseListState(new URLSearchParams("acct=sub"));
+    assert.equal(state.account, "sub");
+    assert.equal(toListQuery(state).account, "sub");
+    assert.equal(listHref(state), "/mail?acct=sub");
+    const html = renderMailList({
+      state,
+      labels: [],
+      page: {
+        messages: [{ id: "sub~1", threadId: "1", from: "a", subject: "件名", snippet: "", receivedAt: 1, labelIds: ["INBOX"], unread: true, starred: false, account: "サブ" }],
+        nextPageToken: null,
+        resultSizeEstimate: 1,
+        failedAccounts: ["フォーマル"],
+      },
+      failure: null,
+      params: new URLSearchParams(),
+      headerAction: "",
+      authEnabled: true,
+      now: new Date(),
+      accounts: [{ key: "main", name: "メイン" }, { key: "sub", name: "サブ" }],
+    });
+    assert.match(html, /表示するアカウント/);
+    assert.match(html, /class="mail-acct">サブ</);
+    assert.match(html, /読み込めなかったアカウントがあります: フォーマル/);
+    assert.ok(isMessageId("sub~abc.1.2"));
+  });
+});
