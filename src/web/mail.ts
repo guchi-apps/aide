@@ -12,11 +12,13 @@ import {
   type MailInbox,
   type MailPage,
 } from "../core/connectors/gmail-inbox/client.ts";
+import { CROSS_ACCOUNT_REASON, loadExtraMailAccounts, MultiMailInbox, type ExtraMailAccount } from "../core/connectors/mail-accounts.ts";
 import { ImapInbox, loadImapCredentials, type ImapInboxDeps } from "../core/connectors/imap-inbox/client.ts";
 import { loadGmailInboxCredentials } from "../core/connectors/gmail-inbox/client.ts";
 import { displayName, type MailDetail, type MailSummary } from "../core/connectors/gmail-inbox/message.ts";
 import { escapeHtml, renderPage, siteNav } from "./layout.ts";
 import { accountAction, currentSession, handleGatedPage, type LoginOptions } from "./login.ts";
+import type { MailAccountInfo } from "../core/connectors/mail-accounts.ts";
 import type { StatusSession } from "./session.ts";
 
 /**
@@ -66,16 +68,16 @@ const DEFAULT_VIEW = MAIL_VIEWS[0]!;
  * `<フォルダ(base64url)>.<UIDVALIDITY>.<UID>`（#782）なので、英数字・`_`・`-`・`.` の範囲で受ける。
  */
 export function isMessageId(value: string | null | undefined): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_.-]{1,300}$/.test(value);
+  return typeof value === "string" && /^[A-Za-z0-9_.~-]{1,320}$/.test(value);
 }
 
 /** ラベルID（Gmailの `INBOX`・`Label_12` など。IMAPはフォルダを表す `F<base64url>`）。 */
 export function isLabelId(value: string | null | undefined): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value);
+  return typeof value === "string" && /^[A-Za-z0-9_~-]{1,220}$/.test(value);
 }
 
 function isPageToken(value: string | null | undefined): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(value);
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,700}$/.test(value);
 }
 
 /**
@@ -92,6 +94,8 @@ export interface ListState {
   view: MailView;
   /** ユーザーラベルで絞っているときのラベルID。 */
   labelId: string | null;
+  /** 複数アカウントのときに絞っているアカウントの鍵（#794）。null は全アカウント。 */
+  account: string | null;
   q: string;
   pageToken: string | null;
 }
@@ -101,9 +105,11 @@ export function parseListState(params: URLSearchParams): ListState {
   const label = params.get("label");
   const q = (params.get("q") ?? "").trim().slice(0, 200);
   const page = params.get("page");
+  const acct = params.get("acct");
   return {
     view,
     labelId: isLabelId(label) ? label : null,
+    account: acct && /^[a-z0-9]{1,12}$/.test(acct) ? acct : null,
     q,
     pageToken: isPageToken(page) ? page : null,
   };
@@ -114,6 +120,7 @@ export function toListQuery(state: ListState): ListQuery {
     labelIds: state.labelId ? [state.labelId] : state.view.labelIds,
     q: state.q,
     pageToken: state.pageToken,
+    account: state.account,
     includeSpamTrash: state.labelId ? false : (state.view.includeSpamTrash ?? false),
   };
 }
@@ -123,6 +130,7 @@ export function listHref(state: ListState, overrides: { pageToken?: string | nul
   const params = new URLSearchParams();
   if (state.labelId) params.set("label", state.labelId);
   else if (state.view !== DEFAULT_VIEW) params.set("view", state.view.key);
+  if (state.account && !state.labelId) params.set("acct", state.account);
   if (state.q) params.set("q", state.q);
   const page = overrides.pageToken === undefined ? state.pageToken : overrides.pageToken;
   if (page) params.set("page", page);
@@ -239,22 +247,33 @@ const MAIL_STYLE = `<style>
 .mail-text{margin:0;padding:.9rem;background:var(--panel);border:1px solid var(--line);white-space:pre-wrap;
  overflow-wrap:anywhere;font-size:.88rem;line-height:1.65}
 .mail-select{font:inherit;font-size:.82rem;padding:.3rem;border:1px solid var(--line);background:var(--panel);color:var(--ink);max-width:14rem}
+.mail-acct{font-size:.7rem;color:var(--accent);border:1px solid var(--accent);padding:0 .3rem;margin-right:.35rem}
 .mail-note{margin:0;font-size:.78rem;color:var(--muted)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 </style>`;
 
-function tabsHtml(state: ListState, labels: GmailLabel[]): string {
+function tabsHtml(state: ListState, labels: GmailLabel[], accounts: readonly MailAccountInfo[]): string {
+  const accountTabs =
+    accounts.length > 1
+      ? `<ul class="mail-tabs" aria-label="表示するアカウント">${[{ key: null, name: "すべてのアカウント" }, ...accounts]
+          .map((a) => {
+            const on = !state.labelId && state.account === a.key;
+            const href = listHref({ ...state, labelId: null, account: a.key, q: "", pageToken: null });
+            return `<li><a href="${escapeHtml(href)}"${on ? ' class="on" aria-current="page"' : ""}>${escapeHtml(a.name)}</a></li>`;
+          })
+          .join("")}</ul>`
+      : "";
   const viewTabs = MAIL_VIEWS.map((view) => {
     const on = !state.labelId && view === state.view;
-    const href = listHref({ view, labelId: null, q: "", pageToken: null });
+    const href = listHref({ view, labelId: null, account: state.account, q: "", pageToken: null });
     return `<li><a href="${escapeHtml(href)}"${on ? ' class="on" aria-current="page"' : ""}>${escapeHtml(view.label)}</a></li>`;
   });
   const labelTabs = userLabels(labels).map((label) => {
     const on = state.labelId === label.id;
-    const href = listHref({ view: DEFAULT_VIEW, labelId: label.id, q: "", pageToken: null });
+    const href = listHref({ view: DEFAULT_VIEW, labelId: label.id, account: null, q: "", pageToken: null });
     return `<li><a href="${escapeHtml(href)}"${on ? ' class="on" aria-current="page"' : ""}>${escapeHtml(label.name)}</a></li>`;
   });
-  return `<ul class="mail-tabs" aria-label="表示するメール">${[...viewTabs, ...labelTabs].join("")}</ul>`;
+  return `${accountTabs}<ul class="mail-tabs" aria-label="表示するメール">${[...viewTabs, ...labelTabs].join("")}</ul>`;
 }
 
 function userLabels(labels: GmailLabel[]): GmailLabel[] {
@@ -264,9 +283,8 @@ function userLabels(labels: GmailLabel[]): GmailLabel[] {
 function searchHtml(state: ListState, source: MailSource): string {
   const hidden = state.labelId
     ? `<input type="hidden" name="label" value="${escapeHtml(state.labelId)}">`
-    : state.view !== DEFAULT_VIEW
-      ? `<input type="hidden" name="view" value="${escapeHtml(state.view.key)}">`
-      : "";
+    : (state.view !== DEFAULT_VIEW ? `<input type="hidden" name="view" value="${escapeHtml(state.view.key)}">` : "") +
+      (state.account ? `<input type="hidden" name="acct" value="${escapeHtml(state.account)}">` : "");
   return `<form class="mail-search" method="get" action="/mail" role="search">${hidden}
 <input type="search" name="q" value="${escapeHtml(state.q)}" placeholder="${source === "imap" ? "検索する語（件名・差出人・本文）" : "Gmailの検索式（from:… subject:…）"}" aria-label="メールを検索">
 <button class="mail-btn" type="submit">検索</button></form>`;
@@ -282,7 +300,7 @@ function flashHtml(params: URLSearchParams): string {
   const error = params.get("error");
   if (error) {
     const kind = (Object.keys(FAILURE_MESSAGES) as MailFailure[]).find((k) => k === error);
-    const message = kind ? FAILURE_MESSAGES[kind] : "操作できませんでした。";
+    const message = error === "cross_account" ? CROSS_ACCOUNT_REASON : kind ? FAILURE_MESSAGES[kind] : "操作できませんでした。";
     return `<p class="err" role="alert">${escapeHtml(message)}</p>`;
   }
   return "";
@@ -311,7 +329,7 @@ function rowHtml(message: MailSummary, back: string, now: Date): string {
   const unreadLabel = message.unread ? `<span class="sr">未読 </span>` : "";
   return `<li${message.unread ? ' class="unread"' : ""}>
 <input type="checkbox" name="id" value="${escapeHtml(message.id)}" aria-label="選択: ${escapeHtml(message.subject || "(件名なし)")}">
-<a class="row" href="${escapeHtml(href)}"><span class="from">${unreadLabel}${star}${escapeHtml(displayName(message.from) || "(差出人なし)")}</span><span class="at">${escapeHtml(formatListDate(message.receivedAt, now))}</span><span class="subj">${escapeHtml(message.subject || "(件名なし)")}</span><span class="snip">${escapeHtml(message.snippet)}</span></a></li>`;
+<a class="row" href="${escapeHtml(href)}"><span class="from">${unreadLabel}${star}${message.account ? `<span class="mail-acct">${escapeHtml(message.account)}</span>` : ""}${escapeHtml(displayName(message.from) || "(差出人なし)")}</span><span class="at">${escapeHtml(formatListDate(message.receivedAt, now))}</span><span class="subj">${escapeHtml(message.subject || "(件名なし)")}</span><span class="snip">${escapeHtml(message.snippet)}</span></a></li>`;
 }
 
 export interface MailListView {
@@ -325,6 +343,8 @@ export interface MailListView {
   now: Date;
   /** 取得元。省略はGmail。 */
   source?: MailSource;
+  /** 複数アカウントを束ねているときのアカウント一覧（#794）。 */
+  accounts?: readonly MailAccountInfo[];
 }
 
 export function renderMailList(view: MailListView): string {
@@ -345,7 +365,10 @@ export function renderMailList(view: MailListView): string {
       ? `<a href="${escapeHtml(listHref(state, { pageToken: view.page.nextPageToken }))}">次のページ →</a>`
       : "";
     const first = state.pageToken ? `<a href="${escapeHtml(listHref(state, { pageToken: null }))}">← 最初のページ</a>` : "<span></span>";
-    content = `<form method="post" action="/mail/action">
+    const failed = view.page.failedAccounts?.length
+      ? `<p class="err" role="alert">読み込めなかったアカウントがあります: ${escapeHtml(view.page.failedAccounts.join("、"))}</p>`
+      : "";
+    content = `${failed}<form method="post" action="/mail/action">
 <input type="hidden" name="back" value="${escapeHtml(back)}">
 <div class="mail-bar" role="group" aria-label="選択したメールの操作">${bulkButtons(state)}</div>
 <ul class="mail-list">${rows}</ul>
@@ -359,7 +382,7 @@ export function renderMailList(view: MailListView): string {
 
   const body = `${MAIL_STYLE}
 <section class="hero"><div class="hero-top"><h1>${escapeHtml(title)}</h1></div>
-${tabsHtml(state, view.labels)}
+${tabsHtml(state, view.labels, view.accounts ?? [])}
 ${searchHtml(state, view.source ?? "gmail")}</section>
 ${authWarning}${flashHtml(view.params)}
 ${content}`;
@@ -472,6 +495,7 @@ ${buttons}</form>`;
     : "";
 
   const meta = [
+    ...(message.account ? [["アカウント", message.account]] : []),
     ["差出人", message.from],
     ["宛先", message.to],
     ...(message.cc ? [["CC", message.cc]] : []),
@@ -480,7 +504,7 @@ ${buttons}</form>`;
     .map(([k, v]) => `<dt>${escapeHtml(k!)}</dt><dd>${escapeHtml(v!)}</dd>`)
     .join("");
 
-  const gmailLink = source === "imap" ? "<span></span>" : `<a href="https://mail.google.com/mail/u/0/#all/${encodeURIComponent(message.threadId)}" target="_blank" rel="noopener noreferrer">Gmailで開く</a>`;
+  const gmailLink = source === "imap" || (message.account && message.account !== "メイン") ? "<span></span>" : `<a href="https://mail.google.com/mail/u/0/#all/${encodeURIComponent(message.threadId)}" target="_blank" rel="noopener noreferrer">Gmailで開く</a>`;
 
   const authWarning = view.authEnabled
     ? ""
@@ -513,6 +537,8 @@ export interface MailDeps extends GmailInboxDeps {
   imap?: ImapInboxDeps;
   /** 取得元の指定（テスト用）。省略時は環境変数から決める。 */
   source?: MailSource;
+  /** 追加アカウントの指定（テスト用）。省略時は `AIDE_MAIL_ACCOUNTS` から読む（#794）。 */
+  extraAccounts?: ExtraMailAccount[];
   currentSession?: typeof currentSession;
   now?: () => Date;
 }
@@ -533,15 +559,48 @@ function sourceOf(deps: MailDeps): MailSource {
   return deps.source ?? selectMailSource();
 }
 
-async function connect(deps: MailDeps): Promise<GmailResult<MailInbox>> {
+async function connectMain(deps: MailDeps): Promise<GmailResult<MailInbox>> {
   if (deps.connect) return deps.connect(deps);
   if (sourceOf(deps) === "imap") return ImapInbox.connect(deps.imap ?? {});
   return GmailInbox.connect(deps);
 }
 
+/** メインの取得元に、追加アカウントがあれば束ねる（#794）。無ければメインだけで従来どおり。 */
+async function connect(deps: MailDeps): Promise<GmailResult<MailInbox>> {
+  const main = await connectMain(deps);
+  if (!main.ok) return main;
+  const extras = deps.extraAccounts ?? loadExtraMailAccounts();
+  if (extras.length === 0) return main;
+  return MultiMailInbox.connect(main.value, extras, deps.imap ?? {});
+}
+
 function logFailure(where: string, kind: MailFailure, reason: string): void {
   // 件名・差出人・本文・IDは出さない。失敗の種類と理由（ステータスコード程度）だけ。
   if (kind !== "unconfigured") console.warn(`[mail] ${where}: ${kind} ${reason}`);
+}
+
+/** Morrow向けのAPI（`src/api/mail.ts`。#795）も同じ粒度でログを残す。 */
+export const logMailFailure = logFailure;
+
+/**
+ * 取得元へつなぎ、メールボックスの持ち主のメールアドレス（Gmailは `users.getProfile`、IMAPは
+ * `AIDE_IMAP_OWNER_EMAIL` など。複数のアカウントを束ねるときはメインのアカウント）を引く。画面（`openMailbox`）とMorrow向けのAPI（`src/api/mail.ts`。#795）が
+ * 共用する。持ち主との照合は呼び出し側が行う（画面はログイン中の人と、APIは応答に載せて呼び出し元が）。
+ */
+export async function connectMailbox(
+  deps: MailDeps,
+): Promise<{ ok: true; inbox: MailInbox; owner: string } | { ok: false; kind: MailFailure }> {
+  const inbox = await connect(deps);
+  if (!inbox.ok) {
+    logFailure("connect", inbox.kind, inbox.reason);
+    return { ok: false, kind: inbox.kind };
+  }
+  const profile = await inbox.value.profileEmail();
+  if (!profile.ok) {
+    logFailure("profile", profile.kind, profile.reason);
+    return { ok: false, kind: profile.kind };
+  }
+  return { ok: true, inbox: inbox.value, owner: profile.value.trim().toLowerCase() };
 }
 
 /**
@@ -553,22 +612,14 @@ export async function openMailbox(
   deps: MailDeps,
 ): Promise<{ ok: true; inbox: MailInbox } | { ok: false; kind: MailFailure }> {
   if (!session.email) return { ok: false, kind: "not_owner" };
-  const inbox = await connect(deps);
-  if (!inbox.ok) {
-    logFailure("connect", inbox.kind, inbox.reason);
-    return { ok: false, kind: inbox.kind };
-  }
-  const profile = await inbox.value.profileEmail();
-  if (!profile.ok) {
-    logFailure("profile", profile.kind, profile.reason);
-    return { ok: false, kind: profile.kind };
-  }
-  if (profile.value.trim().toLowerCase() !== session.email.trim().toLowerCase()) {
+  const mailbox = await connectMailbox(deps);
+  if (!mailbox.ok) return mailbox;
+  if (mailbox.owner !== session.email.trim().toLowerCase()) {
     // 誰が開こうとしたかは残すが、Gmail側のアドレスはログに出さない。
     console.warn("[mail] 持ち主ではないログインからのアクセスを断りました");
     return { ok: false, kind: "not_owner" };
   }
-  return { ok: true, inbox: inbox.value };
+  return { ok: true, inbox: mailbox.inbox };
 }
 
 export async function handleMailListPage(
@@ -595,6 +646,7 @@ export async function handleMailListPage(
     if (!page.ok) logFailure("list", page.kind, page.reason);
     return renderMailList({
       ...base,
+      accounts: mailbox.inbox.accounts ?? [],
       labels: labels.ok ? labels.value : [],
       page: page.ok ? page.value : null,
       failure: page.ok ? null : page.kind,
@@ -735,7 +787,7 @@ export async function handleMailAction(
   const result = await mailbox.inbox.apply(ids, action, labelId);
   if (!result.ok) {
     logFailure(`action:${action}`, result.kind, result.reason);
-    redirect(res, withParams(back, { error: result.kind }));
+    redirect(res, withParams(back, { error: result.reason === CROSS_ACCOUNT_REASON ? "cross_account" : result.kind }));
     return;
   }
   const destination = form.has("list") && LEAVES_LIST.has(action) ? list : back;

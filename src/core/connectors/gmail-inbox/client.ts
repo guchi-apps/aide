@@ -51,10 +51,14 @@ export interface ListQuery {
   q: string;
   pageToken: string | null;
   includeSpamTrash: boolean;
+  /** 複数アカウントのときに、読むアカウントの鍵を絞る（#794）。省略は全アカウント。 */
+  account?: string | null;
 }
 
 export interface MailPage {
   messages: MailSummary[];
+  /** 複数アカウントのとき、読めなかったアカウントの名前（#794）。 */
+  failedAccounts?: string[];
   nextPageToken: string | null;
   /** Gmailの推定件数。正確ではない。 */
   resultSizeEstimate: number;
@@ -121,6 +125,8 @@ export interface MailInbox {
   readonly kind: "gmail" | "imap";
   /** ラベルの付け外しを持つか。IMAPには無いので、画面はラベルの操作を出さない。 */
   readonly supportsLabels: boolean;
+  /** 複数アカウントを束ねているときの一覧（#794）。1アカウントなら無い。 */
+  readonly accounts?: readonly { key: string; name: string }[];
   profileEmail(): Promise<GmailResult<string>>;
   labels(): Promise<GmailResult<GmailLabel[]>>;
   list(query: ListQuery): Promise<GmailResult<MailPage>>;

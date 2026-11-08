@@ -200,6 +200,13 @@ export const CALLERS: Caller[] = [
     uses: ["/api/image-mail/send", "/api/news-mail/send"],
   },
   {
+    id: "morrow",
+    name: "Morrow",
+    via: "API",
+    what: "メールを読む・整理する／必要なメールを知らせる（#795）",
+    uses: ["/api/mail/messages", "/api/mail/messages/<id>", "/api/mail/actions"],
+  },
+  {
     id: "ops-dashboard",
     name: "StatusHub",
     via: "API",
@@ -327,8 +334,16 @@ export const GROUPS: DestinationGroup[] = [
         id: "gmail",
         name: "Gmail",
         dir: "both",
-        what: "画像・週報を社用メールへ／メール画面で受信メールを読む・整理する（#770）",
-        uses: ["/api/image-mail/send", "/api/news-mail/send", "/mail", "/mail/action"],
+        what: "画像・週報を社用メールへ／受信メールを読む・整理する（AIDEの画面 #770・Morrow向けAPI #795）",
+        uses: [
+          "/api/image-mail/send",
+          "/api/news-mail/send",
+          "/mail",
+          "/mail/action",
+          "/api/mail/messages",
+          "/api/mail/messages/<id>",
+          "/api/mail/actions",
+        ],
       },
       {
         id: "aide-bot",

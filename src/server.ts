@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { handleAppVersion } from "./api/app-version.ts";
 import { handleImageMailSend } from "./api/image-mail.ts";
+import { handleMailApiAction, handleMailApiList, handleMailApiMessage } from "./api/mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
@@ -306,6 +307,22 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // には入れない——Research Desk側から直接届く必要があるため。
   if (path === "/api/image-mail/send") {
     await handleImageMailSend(req, res);
+    return;
+  }
+
+  // ---- Morrow向けメールAPI（#795） ----
+  // Morrow**のサーバー**がメールの一覧・本文・整理に使う。資格情報と取得処理はAIDEに残し、画面と通知は
+  // Morrow側で持つ。サーバー間通信のためCORS対応は不要で、認証は専用の共有トークン（AIDE_MAIL_API_TOKEN）。
+  if (path === "/api/mail/messages" && (req.method === "GET" || req.method === "HEAD")) {
+    await handleMailApiList(req, res);
+    return;
+  }
+  if (path.startsWith("/api/mail/messages/") && (req.method === "GET" || req.method === "HEAD")) {
+    await handleMailApiMessage(req, res, path);
+    return;
+  }
+  if (path === "/api/mail/actions" && req.method === "POST") {
+    await handleMailApiAction(req, res);
     return;
   }
 

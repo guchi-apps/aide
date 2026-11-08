@@ -52,6 +52,8 @@ export interface MailSummary {
   labelIds: string[];
   unread: boolean;
   starred: boolean;
+  /** 複数アカウントのときの、メールが届いたアカウントの表示名（#794）。 */
+  account?: string;
 }
 
 export interface MailAttachment {

@@ -71,6 +71,9 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
     "Web版登録の受け口（#215）が待ち受けるアドレス。常駐するのはサブPCだけで、" +
     "VPSは中継する側なのでこの受け口を起動しない",
   AIDE_ZAIM_WEB_PORT: "同上。既定 4748 で足りる",
+  AIDE_MAIL_API_TOKEN:
+    "Morrow向けメールAPI（#795）の認証値。本番はissue-deckの共有トークン（同名）から取り、Morrowも同じ共有トークンを読む。" +
+    "環境変数は共有トークンAPIを持たない手元での確認用のフォールバックで、本番へは配らない（値を2か所に増やさない）",
 };
 
 async function collectSourceFiles(dir: string): Promise<string[]> {

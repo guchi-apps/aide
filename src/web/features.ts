@@ -89,7 +89,7 @@ export const ENDPOINTS: FeatureItem[] = [
     name: "/mail/action",
     meta: "POST",
     description:
-      "メールの整理（#770）。既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻し。**返信・送信・完全削除は持たない**（どれもGmail上で元に戻せる操作だけ）。ログインと、AIDE自身の画面からの送信（Origin）が要る。結果は元の画面へ戻して出す。",
+      "メールの整理（#770）。既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻し。**返信・送信・完全削除は持たない**（どれもGmail上で元に戻せる操作だけ）。複数アカウントを束ねている環境では、1回の操作で選べるのは1アカウントのメールだけ（またがる選択は1件も変更せず拒否。#810）。ログインと、AIDE自身の画面からの送信（Origin）が要る。結果は元の画面へ戻して出す。",
   },
   {
     name: "/map/issue",
@@ -276,6 +276,23 @@ export const ENDPOINTS: FeatureItem[] = [
     meta: "POST",
     description:
       "Research Deskのサーバーからmultipart/form-dataで届く画像ZIPを、AIDEが保持するGmail資格情報で社用メールへ送信する。件名は「[画像] {title}」固定、宛先・BCCも環境変数で固定する。専用の共有シークレットで認証し、idempotencyKeyで二重送信を防ぐ。",
+  },
+  {
+    name: "/api/mail/messages",
+    meta: "GET",
+    description:
+      "Morrow向けのメール一覧（#795）。`/mail` 画面と同じ取得元（Gmail / IMAP）から1ページ分を返す（view・label・q・page。since で新着だけに絞る）。応答に持ち主のメールアドレスを載せ、ログイン中の人が本人かの照合はMorrow側で行う。専用の共有トークン（AIDE_MAIL_API_TOKEN）で認証する。メール本文はAIDEに保存しない。",
+  },
+  {
+    name: "/api/mail/messages/<id>",
+    meta: "GET",
+    description: "Morrow向けのメール本文1件（#795）。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める。",
+  },
+  {
+    name: "/api/mail/actions",
+    meta: "POST",
+    description:
+      "Morrow向けのメール整理（#795）。`/mail/action` と同じ、元に戻せる操作だけ（既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻し）。返信・送信・完全削除は持たない。",
   },
   {
     name: "/api/news-mail/send",
