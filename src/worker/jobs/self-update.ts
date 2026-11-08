@@ -67,9 +67,16 @@ export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<Se
   let returnedFrom: string | null = null;
   if (branch !== "develop") {
     const current = branch || "detached HEAD";
-    if (!(await isMergedIntoRemoteDevelop(execute))) {
+    if (!(await isAncestorOfRemoteDevelop(execute, "HEAD"))) {
       throw new Error(
         `追跡ブランチが develop ではなく、origin/develop に未取り込みのコミットがあるため更新を見送ります（現在: ${current}）`,
+      );
+    }
+    // 戻り先のローカル develop が origin/develop に未取り込みのコミットを持つなら、
+    // 切り替えて setup・再起動まで進むと未レビューのコミットが稼働する。切り替える前に止める。
+    if (!(await isAncestorOfRemoteDevelop(execute, "develop"))) {
+      throw new Error(
+        `復帰先のローカル develop に origin/develop へ未取り込みのコミットがあるため、切り替えと再起動を見送ります（現在: ${current}）`,
       );
     }
     await execute("git", ["switch", "develop"]);
@@ -96,14 +103,14 @@ export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<Se
 }
 
 /**
- * 現在の HEAD が origin/develop の祖先（＝取り込み済み）かを返す。
+ * ref が origin/develop の祖先または同一（＝取り込み済み）かを返す。
  *
  * `git merge-base --is-ancestor` は「祖先でない」を終了コード1で表し、execFile はそれを例外にする。
  * 終了コード1だけを「未取り込み」とみなし、それ以外の失敗（リポジトリ破損など）はそのまま投げる。
  */
-async function isMergedIntoRemoteDevelop(execute: Execute): Promise<boolean> {
+async function isAncestorOfRemoteDevelop(execute: Execute, ref: string): Promise<boolean> {
   try {
-    await execute("git", ["merge-base", "--is-ancestor", "HEAD", "origin/develop"]);
+    await execute("git", ["merge-base", "--is-ancestor", ref, "origin/develop"]);
     return true;
   } catch (error) {
     if ((error as { code?: unknown }).code === 1) return false;

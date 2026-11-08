@@ -49,6 +49,24 @@ test("develop 以外のブランチに origin/develop へ未取り込みのコ�
   ]);
 });
 
+test("復帰先のローカル develop が origin/develop より先行していれば、切り替えも再起動もせず更新を見送る", async () => {
+  const calls: Call[] = [];
+  const outputs = ["", "issue-771\n", ""];
+  const options: SelfUpdateOptions = {
+    setupScript: "/home/test/apps/subpc/setup.sh",
+    execute: async (file, args) => {
+      calls.push({ file, args });
+      if (args[0] === "merge-base" && args[2] === "develop") {
+        throw Object.assign(new Error("not ancestor"), { code: 1 });
+      }
+      return { stdout: outputs.shift() ?? "", stderr: "" };
+    },
+  };
+  await assert.rejects(() => runSelfUpdate(options), /ローカル develop.*未取り込みのコミット.*issue-771/);
+  assert.ok(!calls.some(({ args }) => args[0] === "switch" || args[0] === "pull"));
+  assert.ok(!calls.some(({ file }) => file === "systemctl"));
+});
+
 test("取り込み済みか判定できない git の失敗は、未取り込みと取り違えずにそのまま投げる", async () => {
   const options: SelfUpdateOptions = {
     execute: async (_file, args) => {
@@ -61,22 +79,23 @@ test("取り込み済みか判定できない git の失敗は、未取り込み
 
 test("origin/develop に取り込み済みのブランチに置き去りなら develop へ戻して更新を続ける", async () => {
   const { options, calls } = optionsFor([
-    "", "issue-771\n", "", "", "", "before\n", "after\n", "", "after\n", "src/server.ts\n", "", "",
+    "", "issue-771\n", "", "", "", "", "before\n", "after\n", "", "after\n", "src/server.ts\n", "", "",
   ]);
   const result = await runSelfUpdate(options);
   assert.deepEqual(result, {
     updated: true, before: "before", after: "after", dependenciesInstalled: false, returnedFrom: "issue-771",
   });
-  assert.deepEqual(calls.slice(2, 6).map(({ args }) => args), [
+  assert.deepEqual(calls.slice(2, 7).map(({ args }) => args), [
     ["fetch", "origin", "develop"],
     ["merge-base", "--is-ancestor", "HEAD", "origin/develop"],
+    ["merge-base", "--is-ancestor", "develop", "origin/develop"],
     ["switch", "develop"],
     ["rev-parse", "HEAD"],
   ]);
 });
 
 test("detached HEAD でも取り込み済みなら develop へ戻し、差分が無ければそこで終える", async () => {
-  const { options, calls } = optionsFor(["", "\n", "", "", "", "abc\n", "abc\n"]);
+  const { options, calls } = optionsFor(["", "\n", "", "", "", "", "abc\n", "abc\n"]);
   const result = await runSelfUpdate(options);
   assert.deepEqual(result, {
     updated: false, before: "abc", after: "abc", dependenciesInstalled: false, returnedFrom: "detached HEAD",
