@@ -12,7 +12,7 @@ import {
   type MailInbox,
   type MailPage,
 } from "../core/connectors/gmail-inbox/client.ts";
-import { loadExtraMailAccounts, MultiMailInbox, type ExtraMailAccount } from "../core/connectors/mail-accounts.ts";
+import { CROSS_ACCOUNT_REASON, loadExtraMailAccounts, MultiMailInbox, type ExtraMailAccount } from "../core/connectors/mail-accounts.ts";
 import { ImapInbox, loadImapCredentials, type ImapInboxDeps } from "../core/connectors/imap-inbox/client.ts";
 import { loadGmailInboxCredentials } from "../core/connectors/gmail-inbox/client.ts";
 import { displayName, type MailDetail, type MailSummary } from "../core/connectors/gmail-inbox/message.ts";
@@ -300,7 +300,7 @@ function flashHtml(params: URLSearchParams): string {
   const error = params.get("error");
   if (error) {
     const kind = (Object.keys(FAILURE_MESSAGES) as MailFailure[]).find((k) => k === error);
-    const message = kind ? FAILURE_MESSAGES[kind] : "操作できませんでした。";
+    const message = error === "cross_account" ? CROSS_ACCOUNT_REASON : kind ? FAILURE_MESSAGES[kind] : "操作できませんでした。";
     return `<p class="err" role="alert">${escapeHtml(message)}</p>`;
   }
   return "";
@@ -787,7 +787,7 @@ export async function handleMailAction(
   const result = await mailbox.inbox.apply(ids, action, labelId);
   if (!result.ok) {
     logFailure(`action:${action}`, result.kind, result.reason);
-    redirect(res, withParams(back, { error: result.kind }));
+    redirect(res, withParams(back, { error: result.reason === CROSS_ACCOUNT_REASON ? "cross_account" : result.kind }));
     return;
   }
   const destination = form.has("list") && LEAVES_LIST.has(action) ? list : back;
