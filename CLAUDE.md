@@ -56,6 +56,17 @@ AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
 `typescript` と `@types/node` の2つだけ。**実行時依存は増やさない方針**（`imapflow` は例外として承認済み）なので、
 依存を足す判断は下記「依存関係の追加」に従う。
 
+## サブPCの本体チェックアウト（`~/apps/aide`）で作業しない
+
+**サブPCの `/home/guchi/apps/aide` は本番の巡回・受け口が動いている実体で、`aide-self-update` が毎時
+`origin/develop` へ追従させている。** ここでブランチを切り替えたりコミットしたりせず、作業は必ず
+`~/apps/aide-worktrees/issue-<番号>` などの git worktree で行う。
+
+self-update は、`develop` 以外に置き去りにされたチェックアウトでも、クリーンかつ `origin/develop` に
+取り込み済みなら自動で `develop` へ戻す（#807）。**未取り込みのコミットを本体チェックアウトに残すと
+自動では戻らず、毎時の更新が止まり続ける**（status-hub#648 では約20時間止まった）。誤って本体で
+作業してしまったら、コミットをworktreeのブランチへ移してから本体を `develop` へ戻す。
+
 ## iOSアプリ（`ios/`）とのつなぎ目
 
 **`ios/` は AIDE を `WKWebView` で開く殻**（旧 `guchi-apps/aide-ios`。#525 で統合）。subpc には Xcode が無いので、

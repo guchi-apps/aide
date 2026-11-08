@@ -29,16 +29,66 @@ test("追跡済みの変更があれば未追跡ファイルを除外して更�
   ]);
 });
 
-test("develop 以外のブランチは更新しない", async () => {
-  const { options, calls } = optionsFor(["", "main\n"]);
-  await assert.rejects(() => runSelfUpdate(options), /develop ではありません/);
-  assert.equal(calls.length, 2);
+test("develop 以外のブランチに origin/develop へ未取り込みのコミットがあれば戻さずに更新を見送る", async () => {
+  const calls: Call[] = [];
+  const outputs = ["", "issue-771-mail-charset\n", ""];
+  const options: SelfUpdateOptions = {
+    setupScript: "/home/test/apps/subpc/setup.sh",
+    execute: async (file, args) => {
+      calls.push({ file, args });
+      if (args[0] === "merge-base") throw Object.assign(new Error("not ancestor"), { code: 1 });
+      return { stdout: outputs.shift() ?? "", stderr: "" };
+    },
+  };
+  await assert.rejects(() => runSelfUpdate(options), /未取り込みのコミット.*issue-771-mail-charset/);
+  assert.deepEqual(calls.map(({ args }) => args), [
+    ["status", "--porcelain", "--untracked-files=no"],
+    ["branch", "--show-current"],
+    ["fetch", "origin", "develop"],
+    ["merge-base", "--is-ancestor", "HEAD", "origin/develop"],
+  ]);
+});
+
+test("取り込み済みか判定できない git の失敗は、未取り込みと取り違えずにそのまま投げる", async () => {
+  const options: SelfUpdateOptions = {
+    execute: async (_file, args) => {
+      if (args[0] === "merge-base") throw Object.assign(new Error("fatal: bad object"), { code: 128 });
+      return { stdout: args[0] === "branch" ? "main\n" : "", stderr: "" };
+    },
+  };
+  await assert.rejects(() => runSelfUpdate(options), /bad object/);
+});
+
+test("origin/develop に取り込み済みのブランチに置き去りなら develop へ戻して更新を続ける", async () => {
+  const { options, calls } = optionsFor([
+    "", "issue-771\n", "", "", "", "before\n", "after\n", "", "after\n", "src/server.ts\n", "", "",
+  ]);
+  const result = await runSelfUpdate(options);
+  assert.deepEqual(result, {
+    updated: true, before: "before", after: "after", dependenciesInstalled: false, returnedFrom: "issue-771",
+  });
+  assert.deepEqual(calls.slice(2, 6).map(({ args }) => args), [
+    ["fetch", "origin", "develop"],
+    ["merge-base", "--is-ancestor", "HEAD", "origin/develop"],
+    ["switch", "develop"],
+    ["rev-parse", "HEAD"],
+  ]);
+});
+
+test("detached HEAD でも取り込み済みなら develop へ戻し、差分が無ければそこで終える", async () => {
+  const { options, calls } = optionsFor(["", "\n", "", "", "", "abc\n", "abc\n"]);
+  const result = await runSelfUpdate(options);
+  assert.deepEqual(result, {
+    updated: false, before: "abc", after: "abc", dependenciesInstalled: false, returnedFrom: "detached HEAD",
+  });
+  assert.ok(calls.some(({ args }) => args[0] === "switch" && args[1] === "develop"));
+  assert.ok(!calls.some(({ args }) => args[0] === "pull"));
 });
 
 test("差分が無ければ pull・npm ci・再起動をしない", async () => {
   const { options, calls } = optionsFor(["", "develop\n", "", "abc\n", "abc\n"]);
   const result = await runSelfUpdate(options);
-  assert.deepEqual(result, { updated: false, before: "abc", after: "abc", dependenciesInstalled: false });
+  assert.deepEqual(result, { updated: false, before: "abc", after: "abc", dependenciesInstalled: false, returnedFrom: null });
   assert.deepEqual(calls.map(({ file, args }) => [file, args]), [
     ["git", ["status", "--porcelain", "--untracked-files=no"]],
     ["git", ["branch", "--show-current"]],
@@ -53,7 +103,7 @@ test("更新後に package-lock.json が変わったときだけ依存を入れ�
     "", "develop\n", "", "before\n", "after\n", "", "after\n", "package-lock.json\n", "", "", "",
   ]);
   const result = await runSelfUpdate(options);
-  assert.deepEqual(result, { updated: true, before: "before", after: "after", dependenciesInstalled: true });
+  assert.deepEqual(result, { updated: true, before: "before", after: "after", dependenciesInstalled: true, returnedFrom: null });
   assert.deepEqual(calls.slice(-3), [
     { file: "npm", args: ["ci"] },
     { file: "/home/test/apps/subpc/setup.sh", args: ["--only", "systemd"] },

@@ -26,6 +26,7 @@ export const JOB_CATALOG = [
     name: "self-update",
     description:
       "サブPCの aide チェックアウトを origin/develop にfast-forwardし、依存変更時だけ再導入する。" +
+      "develop 以外に置き去りでも、取り込み済みなら develop へ戻して続ける。" +
       "更新後はsystemd unitを反映し、Zaim Web版の受け口を再起動する。",
     interval: "1時間ごと",
     // 毎時なので、3回ぶん飛んだら気づけるように180分。

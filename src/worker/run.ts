@@ -29,9 +29,10 @@ import { recordJobRun } from "./record.ts";
 const RUNNERS: Record<JobName, () => Promise<string>> = {
   "self-update": async () => {
     const result = await runSelfUpdate();
+    const returned = result.returnedFrom ? `${result.returnedFrom} から develop へ戻し、` : "";
     return result.updated
-      ? `${result.before.slice(0, 7)} から ${result.after.slice(0, 7)} へ更新${result.dependenciesInstalled ? "し、依存を再導入" : ""}`
-      : "origin/develop は最新です";
+      ? `${returned}${result.before.slice(0, 7)} から ${result.after.slice(0, 7)} へ更新${result.dependenciesInstalled ? "し、依存を再導入" : ""}`
+      : `${returned}origin/develop は最新です`;
   },
   "zaim-refresh": runZaimRefresh,
   "zaim-sync": runZaimSync,
