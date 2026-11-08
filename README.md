@@ -50,8 +50,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/zaim/payment/web/memo`（aide#354） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のメモの書き換え | **満たす**（下記） | ログイン状態（storage state。新規登録・カテゴリ変更と共用） | **例外**（下記。メモの書き換えのみ） |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
-| `POST /mail/action`（#770） | メール画面からの受信メールの整理（既読/未読・アーカイブ・スター・ラベル・ゴミ箱） | **例外**（下記） | `AIDE_GMAIL_INBOX_REFRESH_TOKEN`（`gmail.modify`。送信用の `AIDE_GMAIL_REFRESH_TOKEN` とは別。OAuthクライアントだけ共用） | **例外**（下記。Gmail上で元に戻せる操作だけ） |
-| `POST /api/mail/actions`（#795） | Morrowのサーバーからの受信メールの整理（`/mail/action` と同じ操作） | **例外**（下記。#770の延長） | 専用の共有トークン `AIDE_MAIL_API_TOKEN`（issue-deck）＋メール画面と同じ `gmail.modify` / IMAPの資格情報 | **例外**（下記。#770と同じ、元に戻せる操作だけ） |
+| `POST /api/mail/actions`（#795） | Morrowのサーバーからの受信メールの整理（既読/未読・アーカイブ・スター・ラベル・ゴミ箱。旧メール画面 #770 の操作を引き継ぐ） | **例外**（下記。#770の延長） | 専用の共有トークン `AIDE_MAIL_API_TOKEN`（issue-deck）＋メール画面と同じ `gmail.modify` / IMAPの資格情報 | **例外**（下記。#770と同じ、元に戻せる操作だけ） |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
 | `aide_update_event` / `aide_delete_event`（aide#493） | DaySpan経由での既存の予定の変更・削除 | 満たす（下記） | 同上（作成と共用） | **例外**（下記。削除は現在のタイトルの一致が要る） |
 | `aide_create_task` / `aide_update_task` / 状態変更4本（#562） | YoteiFlow経由での固定タスクDBの正式操作 | **狭い例外**（下記） | `AIDE_DAYSPAN_TASKS_WRITE_TOKEN` とOAuth `tasks:write`（読取り双方から分離） | **例外**（下記。YoteiFlowが競合・冪等性・繰り返しを処理） |
@@ -114,14 +113,15 @@ Research DeskのブラウザからGmail APIを直接叩くことも技術的に�
 
 詳細は[個人アプリ向けの業界ニュース週報メール送信API](#個人アプリ向けの業界ニュース週報メール送信api)。
 
-#### メール画面での受信メールの整理は条件1・3の例外（#770）
+#### 受信メールの読み取り・整理は条件1・3の例外（#770。画面は #798 で廃止）
 
-`/mail`（一覧・本文）と `POST /mail/action`（整理）は、Gmailの受信メールを読み、既読/未読・アーカイブ・
-受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への移動と戻しを行うメール画面。**AIDEの中に作る
-ことは #770 で利用者が決めた**（新規アプリ・Morrow・公式Gmailコネクタでの運用と比べたうえで）。
+Gmailの受信メールを読み、既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベルの付け外し・ゴミ箱への
+移動と戻しを行う。**AIDEに置くことは #770 で利用者が決めた**（新規アプリ・Morrow・公式Gmailコネクタでの
+運用と比べたうえで）。当初はAIDE自身の画面（`/mail`）だったが、画面はMorrowへ移したため #798 で削除し、
+今は[Morrow向けのメールAPI](#morrow向けのメールapi795)（`/api/mail/*`）だけが残る。
 
 - **条件1の例外**: Gmail自身の画面・公式アプリでも同じことはできる。それでもAIDEに置くのは、
-  生活情報のハブとして他のアプリ（YoteiFlow・Asset Manager）へ流す起点にするため（流す操作は後続のIssue）
+  Gmail/IMAPの資格情報と取得処理を1か所に閉じ込めるため
 - **条件2は満たす**: 読み取り・整理には `gmail.modify` の**別のリフレッシュトークン**
   （`AIDE_GMAIL_INBOX_REFRESH_TOKEN`）を使い、送信用（`gmail.send`）のトークンに力を足さない。
   `src/core/connectors/gmail-inbox/client.ts` は送信用の環境変数を読まない（テストで確かめている）
@@ -131,21 +131,13 @@ Research DeskのブラウザからGmail APIを直接叩くことも技術的に�
 
 あわせて次を守る。
 
-- **開けるのはメールボックスの持ち主本人だけ。** ログインの許可（StatusHubの共通アクセス設定）は本人以外も
-  通りうるため、ログイン中のメールアドレスがGmailで認可したアカウント（`users.getProfile`）と一致する
-  ときだけ一覧・本文・操作を通す。メールアドレスを持たないセッション（`AIDE_AUTH_DISABLED=1`・パスワード
-  でのログイン）では開けない
 - **メール本文をAIDEに残さない。** 開くたびにGmail APIを叩き、`data/`・キャッシュ・ログに件名・
   差出人・本文を書かない（ログには失敗の種類だけ）
-- HTMLメールは `sandbox`（`allow-scripts`・`allow-same-origin` なし）の `iframe srcdoc` に入れ、内側の
-  CSPで外部の読み込みを止める。外部画像は開封の追跡に使われるため、「画像を表示」を押したときだけ許す
-- 整理のPOSTはログインに加えて `Origin`（無ければ `Sec-Fetch-Site`）でAIDE自身の画面からの送信に限り、
-  どちらも無い送信は断る。Cookieの `SameSite=Lax` は同じ登録ドメインの別アプリからの送信を止めないため
 - MCPツールには出さない（[Gmailを載せていない理由](#gmailを載せていない理由aide173)の判断はMCP層について据え置き）
 
-#### メール画面のIMAP取得元（#782）
+#### メールのIMAP取得元（#782）
 
-Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP（`src/core/connectors/imap-inbox/`）を足した。
+Gmail以外のメールアドレスを読むため、メールの取得元にIMAP（`src/core/connectors/imap-inbox/`）を足した。
 上の例外の範囲（元に戻せる整理だけ・本人のみ・本文を残さない）をそのまま引き継ぐ。
 
 - **実行時依存として `imapflow` を追加した**（IMAPをNode標準で話せないため。#782でユーザー承認済み）。
@@ -158,11 +150,11 @@ Gmail以外のメールアドレスを読むため、`/mail` の取得元にIMAP
   サポートするのは**暗黙のTLS（IMAPS）で待ち受けるポート**で、993以外でも使える（本番はrepository variable
   `AIDE_IMAP_PORT` で渡す。#786）。STARTTLS（143など）で平文から始まる接続は対象外
   接続は1回の表示・操作ごとに開いて閉じ、常駐させない
-- **持ち主本人の確認**: ログイン中のメールアドレスが `AIDE_IMAP_OWNER_EMAIL`（無ければ `AIDE_IMAP_USER` で、
-  メールアドレスの形のとき）と一致するときだけ開ける。どちらもアドレスでなければ開けない
+- **持ち主のメールアドレス**: `AIDE_IMAP_OWNER_EMAIL`（無ければ `AIDE_IMAP_USER` で、メールアドレスの形のとき）を
+  `/api/mail/*` の応答の `owner` に載せ、本人かの照合はMorrow側が行う。どちらもアドレスでなければ取得できない
 - **IDの表し方**: IMAPのUIDはフォルダごとの採番なので、メッセージIDは `<フォルダ(base64url)>.<UIDVALIDITY>.<UID>`。
   UIDVALIDITY が変わったIDは別のメールを指しうるので `not_found` にして、操作も何もしない
-- **画面の対応**: 受信トレイ＝INBOX、未読＝INBOXの未読、スター＝INBOXの `\Flagged`、ゴミ箱＝`\Trash`、
+- **ビューの対応**: 受信トレイ＝INBOX、未読＝INBOXの未読、スター＝INBOXの `\Flagged`、ゴミ箱＝`\Trash`、
   すべて＝`\All`（無ければINBOX）。ほかのフォルダはラベルのタブとして出す。ページ送りはUID降順の位置、
   検索は語での全文検索（Gmailの検索式は使えない）
 - **持たない操作**: ラベルの付け外し（IMAPに無い）・完全削除（`EXPUNGE`）・送信。ゴミ箱とアーカイブは
@@ -191,21 +183,21 @@ Gmailを足すときはアプリパスワードで `imap.gmail.com` につなぐ
 
 #### Morrow向けメールAPIは #770 の例外の延長（#795）
 
-メール画面と「必要なメールのお知らせ」を Morrow（`guchi-apps/morrow`）へ移すにあたり、**Gmail/IMAPの
+メールの画面と「必要なメールのお知らせ」を Morrow（`guchi-apps/morrow`）へ移すにあたり、**Gmail/IMAPの
 資格情報と取得処理はAIDEに残す**ことを #795 で利用者が決めた（Morrowへ丸ごと移す案と比べたうえで）。
 Morrowの**サーバー**が `/api/mail/*` を叩き、画面の描画・通知の要否判定（Codex）はMorrow側で行う。
 契約は[Morrow向けのメールAPI](#morrow向けのメールapi795)。
 
-- **条件1・3は #770 と同じ例外**で、持つ操作も `/mail/action` と同じ元に戻せるものだけ（新しい操作は足さない）
+- **条件1・3は #770 と同じ例外**で、持つ操作も元に戻せるものだけ（新しい操作は足さない）
 - **条件2**: 認証は専用の共有トークン `AIDE_MAIL_API_TOKEN`（issue-deck）で、他の口のトークンとは共用しない。
-  Gmail/IMAPの資格情報はメール画面と共用し、Morrowへは渡さない（資格情報を1か所に閉じ込める。#230と同じ理由）
+  Gmail/IMAPの資格情報はAIDEに置いたままで、Morrowへは渡さない（資格情報を1か所に閉じ込める。#230と同じ理由）
 - **トークンが表すのは「Morrowのサーバー」で利用者ではない。** 持ち主本人かどうかの照合はMorrow側が、
   応答の `owner`（持ち主のメールアドレス）とログイン中の人とで行う
 - **一部のアカウントが読めなくても一覧は200で返すが、`partial: true` と `failedAccounts`（アカウント名）を必ず載せる**（#801）。
   接続できなかった追加アカウントも失敗として数える。`partial` の `messages` には欠落があるので、Morrowは巡回の成功記録
   （既読位置など）を進めず再取得する。`partial` は2ページ目以降にも毎ページ付き、読めなかったアカウントは `nextPageToken` では追えないので、再取得は1ページ目からやり直す。全アカウントが読めないときは502
 - MCPツールには出さない（[Gmailを載せていない理由](#gmailを載せていない理由aide173)はMCP層について据え置き）
-- AIDEの `/mail` 画面は、Morrowのメール画面が本番に出たあと別のIssueで消す
+- AIDEの `/mail` 画面は、Morrowのメール画面が本番に出たため #798 で削除した。古い `/mail*` へのアクセスは404（Morrowへの転送はしない）
 
 #### MCP経由のZaim登録は条件1を満たす（aide#135・廃止済み）
 
@@ -518,7 +510,7 @@ Notion にはそれがあり、**Googleカレンダー・Gmailには無い**（a
 |---|---|---|
 | Notion | ある | **出さない**（aide-bot から直接繋げる） |
 | Googleカレンダーの予定 | 無い | **出す**（`aide_schedule`。[コネクタ: DaySpan](#コネクタ-dayspan予定タスク日付リマインド移動)） |
-| Gmail | 無い | 出していない（下記の理由で見送り。Web画面 `/mail` は #770 で別判断） |
+| Gmail | 無い | 出していない（下記の理由で見送り。メールの読み取りは [Morrow向けのメールAPI](#morrow向けのメールapi795) で別判断） |
 
 #### Gmailを載せていない理由（aide#173）
 
@@ -532,9 +524,9 @@ Notion にはそれがあり、**Googleカレンダー・Gmailには無い**（a
 
 必要になった時点で、この節を根拠にせず改めてIssueで判断する。
 
-**Web画面での読み取り・整理（`/mail`。#770）はこの節と別判断。** 利用者がメール画面をAIDEに置くと
-決め、上の2点（restricted スコープの運用・本文に届く資格情報）を引き受けたうえで、`gmail.modify` の
-別トークンを使う（[メール画面での受信メールの整理](#メール画面での受信メールの整理は条件13の例外770)）。
+**メールの読み取り・整理（#770。画面は #798 で廃止し、今は `/api/mail/*`）はこの節と別判断。** 利用者が
+受信メールの取得をAIDEに置くと決め、上の2点（restricted スコープの運用・本文に届く資格情報）を引き受けたうえで、`gmail.modify` の
+別トークンを使う（[受信メールの読み取り・整理](#受信メールの読み取り整理は条件13の例外770画面は-798-で廃止)）。
 同意画面は「本番」（未審査のため警告画面を挟む）にしてトークンの7日失効を避ける。**MCP層へGmailの
 ツールを出すかは、この節のとおり見送ったまま**で、出すなら改めてIssueで判断する。
 
@@ -598,7 +590,7 @@ src/
   core/
     connectors/        外部サービスからの取得
       image-mail/       Gmail送信（画像メール・業界ニュース週報メール共通）・画像メールの冪等記録・履歴（#230）
-      gmail-inbox/      メール画面のGmail読み取り・整理（gmail.modify の別トークン。#770）
+      gmail-inbox/      メールAPI用のGmail読み取り・整理（gmail.modify の別トークン。#770）
       news-mail/         業界ニュース週報メールの冪等記録・履歴（#257）
     models/            共通データモデル
     views/             読み取りのビュー
@@ -3201,13 +3193,14 @@ HTMLパートより先に置く**（RFC 2046の「後のパートほど優先し
 ## Morrow向けのメールAPI（#795）
 
 Morrowのサーバーが、メールの一覧・本文・整理に使う（実装は `src/api/mail.ts`）。取得元（Gmail / IMAP）の
-選び方・メッセージIDの形・持つ操作は `/mail` 画面と同じで、画面と同じ `connectMailbox()`（`src/web/mail.ts`）を通す。
+選び方・メッセージIDの形・持つ操作は[上の例外](#受信メールの読み取り整理は条件13の例外770画面は-798-で廃止)のとおりで、`connectMailbox()`（同じ `src/api/mail.ts`）を通す。
+旧メール画面（`/mail`・`/mail/message`・`/mail/action`）は Morrow へ移したため #798 で削除した。
 
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /api/mail/messages?view=&label=&q=&page=&since=` | 1ページ分の一覧。`view` は `inbox`・`unread`・`starred`・`all`・`trash`。`since`（UNIX時刻・ミリ秒）を付けると、**そのページのうち**受信がそれ以降のものだけを返す（ページをまたいでは探さない） |
-| `GET /api/mail/messages/<id>` | 本文1件。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める（`/mail/message` の `emailSrcdoc()` と同じ扱い） |
-| `POST /api/mail/actions` | `{ "action": "archive", "ids": ["..."], "labelId": "Label_1" }`。`action` は `/mail/action` と同じ10種類。`ids` は1〜100件。複数アカウントを束ねている環境では、**1アカウントのメールだけ**を指定する（またがると1件も変更せず400 `invalid_request`。#810） |
+| `GET /api/mail/messages/<id>` | 本文1件。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める |
+| `POST /api/mail/actions` | `{ "action": "archive", "ids": ["..."], "labelId": "Label_1" }`。`action` は10種類（`MAIL_ACTIONS`）。`ids` は1〜100件。複数アカウントを束ねている環境では、**1アカウントのメールだけ**を指定する（またがると1件も変更せず400 `invalid_request`。#810） |
 
 - **認証**: `Authorization: Bearer <AIDE_MAIL_API_TOKEN>`。値はissue-deckの共有トークン（同名）から取り、
   取れなければ環境変数（手元での確認用。本番の `.env` へは配らない）。どちらも無ければ503、違えば401

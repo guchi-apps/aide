@@ -334,12 +334,10 @@ export const GROUPS: DestinationGroup[] = [
         id: "gmail",
         name: "Gmail",
         dir: "both",
-        what: "画像・週報を社用メールへ／受信メールを読む・整理する（AIDEの画面 #770・Morrow向けAPI #795）",
+        what: "画像・週報を社用メールへ／受信メールを読む・整理する（Morrow向けAPI #795）",
         uses: [
           "/api/image-mail/send",
           "/api/news-mail/send",
-          "/mail",
-          "/mail/action",
           "/api/mail/messages",
           "/api/mail/messages/<id>",
           "/api/mail/actions",

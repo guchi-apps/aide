@@ -2,7 +2,7 @@ import { fetchAccessToken, type GmailCredentials } from "../image-mail/gmail.ts"
 import { toDetail, toSummary, type GmailApiMessage, type MailDetail, type MailSummary } from "./message.ts";
 
 /**
- * メール画面（`/mail`。#770）のための Gmail 読み取り・整理。
+ * Morrow向けメールAPI（`/api/mail/*`。#770・#795）のための Gmail 読み取り・整理。
  *
  * **送信用（`AIDE_GMAIL_REFRESH_TOKEN`・`gmail.send`）とは別のリフレッシュトークンを使う。**
  * README「書き込みをどこまで持つか」の条件2（読み取りとは別の資格情報）に合わせ、送信の資格情報へ
@@ -118,8 +118,8 @@ export function labelChangeFor(
 }
 
 /**
- * メール画面（`src/web/mail.ts`）が使う取得元の共通の形。Gmail API（`GmailInbox`）とIMAP
- * （`imap-inbox/client.ts`の`ImapInbox`。#782）が実装する。画面はどちらか1つだけを使う。
+ * メールAPI（`src/api/mail.ts`）が使う取得元の共通の形。Gmail API（`GmailInbox`）とIMAP
+ * （`imap-inbox/client.ts`の`ImapInbox`。#782）が実装する。APIはどちらか1つだけを使う。
  */
 export interface MailInbox {
   readonly kind: "gmail" | "imap";
@@ -200,7 +200,7 @@ export class GmailInbox implements MailInbox {
     }
   }
 
-  /** 認可したGmailアカウントのメールアドレス。メール画面を開ける人を持ち主本人に絞るのに使う。 */
+  /** 認可したGmailアカウントのメールアドレス。持ち主のメールアドレスとして応答に載せ、Morrow側で本人かを照合するのに使う。 */
   async profileEmail(): Promise<GmailResult<string>> {
     const result = await this.request<{ emailAddress?: string }>("/profile");
     if (!result.ok) return result;
