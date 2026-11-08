@@ -45,8 +45,23 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+/**
+ * ツールの振る舞いの宣言（仕様の `ToolAnnotations`）。クライアントが承認の要否を決める材料で、
+ * たとえば Hermes Agent は `readOnlyHint: true` の無い道具をすべて書き込みとみなして毎回承認を求める。
+ * 宣言は `catalog.ts` の表で一括して付ける（ツールごとの定義へ散らさない）。
+ */
+export interface ToolAnnotations {
+  /** 環境を一切変更しない。 */
+  readOnlyHint?: boolean;
+  /** 既存のものを上書き・削除しうる（readOnly でないときの仕様上の既定は true）。 */
+  destructiveHint?: boolean;
+  /** 同じ引数で繰り返し呼んでも追加の影響が無い。 */
+  idempotentHint?: boolean;
+}
+
 export interface ToolDefinition {
   name: string;
+  annotations?: ToolAnnotations;
   /** Claudeがツール選択に使う。「何をするか」だけでなく「いつ呼ぶか」を書く。 */
   description: string;
   /** `tools/list` で返すだけの宣言。呼び出し元クライアント向けの案内であり、`type`・`maxLength`・

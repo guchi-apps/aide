@@ -130,3 +130,99 @@ describe("aide_create_event ハンドラ", () => {
     assert.equal(payload["kind"], "invalid");
   });
 });
+
+describe("aide_create_event の冪等キー", () => {
+  it("idempotencyKey は任意（required に含めない）で、スキーマに宣言している", () => {
+    const properties = createEventTool.inputSchema["properties"] as Record<string, unknown>;
+    assert.ok(properties["idempotencyKey"]);
+    assert.deepEqual(createEventTool.inputSchema["required"], ["title", "date"]);
+  });
+
+  it("不正な idempotencyKey は invalid を返す", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
+    try {
+      const payload = parse(await createEventTool.handler({ title: "歯医者", date: "2026-09-10", idempotencyKey: "x" }, CTX));
+      assert.equal(payload["ok"], false);
+      assert.equal(payload["kind"], "invalid");
+    } finally {
+      delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    }
+  });
+});
+
+describe("aide_create_event の結果不明（#833）", () => {
+  it("タイムアウト後の同じキー・同じ内容の再送は、POSTし直さず結果不明を返す", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
+    const realFetch = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async () => {
+      posts++;
+      throw new DOMException("timeout", "TimeoutError");
+    }) as typeof fetch;
+    try {
+      const args = { title: "歯医者", date: "2026-09-10", idempotencyKey: "unknown-outcome-833" };
+      const first = parse(await createEventTool.handler(args, CTX));
+      const second = parse(await createEventTool.handler(args, CTX));
+      assert.equal(posts, 1);
+      for (const payload of [first, second]) {
+        assert.equal(payload["ok"], false);
+        assert.equal(payload["outcomeUnknown"], true);
+        assert.match(String(payload["note"]), /aide_schedule/);
+      }
+      assert.equal(second["replayed"], true);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    }
+  });
+
+  it("502・500・id欠落の応答も結果不明として保留する", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
+    const realFetch = globalThis.fetch;
+    const responses = [
+      () => new Response("bad gateway", { status: 502 }),
+      () => new Response("{}", { status: 500 }),
+      () => new Response("{}", { status: 200 }),
+    ];
+    try {
+      for (const [i, make] of responses.entries()) {
+        globalThis.fetch = (async () => make()) as typeof fetch;
+        const payload = parse(
+          await createEventTool.handler(
+            { title: "歯医者", date: "2026-09-10", idempotencyKey: `unknown-variant-${i}-833` },
+            CTX,
+          ),
+        );
+        assert.equal(payload["outcomeUnknown"], true, `case ${i}`);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    }
+  });
+
+  it("先方が拒否した失敗（400）は結果不明にせず、同じキーで直して再送できる", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
+    const realFetch = globalThis.fetch;
+    let posts = 0;
+    globalThis.fetch = (async () => {
+      posts++;
+      return new Response(JSON.stringify({ error: "bad" }), { status: 400 });
+    }) as typeof fetch;
+    try {
+      const args = { title: "歯医者", date: "2026-09-10", idempotencyKey: "rejected-outcome-833" };
+      const first = parse(await createEventTool.handler(args, CTX));
+      await createEventTool.handler(args, CTX);
+      assert.equal(first["kind"], "invalid");
+      assert.equal(first["outcomeUnknown"], undefined);
+      assert.equal(posts, 2);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    }
+  });
+});
