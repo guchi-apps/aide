@@ -50,6 +50,24 @@ describe("EventIdempotencyStore", () => {
     assert.equal(calls, 2);
   });
 
+  it("結果不明の失敗は覚え、同じキーの再送ではPOSTし直さない（#833）", async () => {
+    const store = new EventIdempotencyStore();
+    let calls = 0;
+    const unknown = { ok: false as const, outcomeUnknown: true };
+    const a = await store.run("k1234567", "f", async () => (++calls, unknown));
+    const b = await store.run("k1234567", "f", async () => (++calls, { ok: true as const }));
+    assert.equal(calls, 1);
+    assert.deepEqual(a, { replay: false, outcome: unknown });
+    assert.deepEqual(b, { replay: true, outcome: unknown });
+  });
+
+  it("結果不明の失敗でも、内容を変えれば conflict で、新しいキーなら作れる", async () => {
+    const store = new EventIdempotencyStore();
+    await store.run("k1234567", "a", async () => ({ ok: false, outcomeUnknown: true }));
+    assert.deepEqual(await store.run("k1234567", "b", async () => ({ ok: true })), { conflict: true });
+    assert.deepEqual(await store.run("k7654321", "a", async () => ({ ok: true })), { replay: false, outcome: { ok: true } });
+  });
+
   it("期限が切れたら作り直す", async () => {
     let now = 0;
     const store = new EventIdempotencyStore(() => now);

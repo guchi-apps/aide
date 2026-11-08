@@ -8,8 +8,10 @@
  * - **メモリのみ**（`data/` へは書かない）。AIDE の再起動を挟むと忘れる。想定は「タイムアウトで呼び直す」
  *   数分以内の再送で、再起動をまたぐ保証は持たない。
  * - 実行中に同じキーが来たら、同じ呼び出しの完了を待って同じ結果を返す（二重送信しない）。
- * - 失敗（`ok: false`）は覚えない。DaySpan が予定を作ったか不明な失敗でも、再送で作り直せるようにするため。
- *   これは「作られたか不明」のときに重複しうるという残りの穴で、確実に防ぐには DaySpan 側の対応が要る。
+ * - 失敗は原則覚えない（先方が拒否した失敗は「作られていない」と確定するので、直して再送できてよい）。
+ *   ただし **結果不明の失敗（`outcomeUnknown`。タイムアウト・通信断など）は覚えて保留する**（#833）。
+ *   先方では作成済みかもしれず、同じキーの再送でPOSTし直すと予定が重複するため。同じキー・同じ内容の再送は
+ *   POSTせず、保留した失敗をそのまま返す。呼び出し側は予定を照会して、作られていなければ新しいキーで作り直す。
  */
 
 const KEY_PATTERN = /^[\x21-\x7e]{8,191}$/;
@@ -43,8 +45,8 @@ export class EventIdempotencyStore {
     this.#now = now;
   }
 
-  /** `run` の結果が `ok: true` のときだけ覚える。 */
-  async run<T extends { ok: boolean }>(
+  /** `run` の結果が `ok: true` か、結果不明の失敗（`outcomeUnknown`）のときだけ覚える。 */
+  async run<T extends { ok: boolean; outcomeUnknown?: boolean }>(
     key: string,
     fingerprint: string,
     run: () => Promise<T>,
@@ -65,7 +67,7 @@ export class EventIdempotencyStore {
     entry.promise = run().then(
       (outcome) => {
         entry.settled = true;
-        if (!outcome.ok) this.#entries.delete(key);
+        if (!outcome.ok && outcome.outcomeUnknown !== true) this.#entries.delete(key);
         return outcome;
       },
       (cause: unknown) => {
