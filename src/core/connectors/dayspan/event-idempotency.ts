@@ -6,7 +6,7 @@
  * メモリに一定時間だけ覚え、同じキー・同じ内容の再送には作り直さず同じ結果を返す。
  *
  * - **メモリのみ**（`data/` へは書かない）。AIDE の再起動を挟むと忘れる。想定は「タイムアウトで呼び直す」
- *   数分以内の再送で、再起動をまたぐ保証は持たない。
+ *   再送（保持は最長24時間）で、再起動をまたぐ保証は持たない。
  * - 実行中に同じキーが来たら、同じ呼び出しの完了を待って同じ結果を返す（二重送信しない）。
  * - 失敗は原則覚えない（先方が拒否した失敗は「作られていない」と確定するので、直して再送できてよい）。
  *   ただし **結果不明の失敗（`outcomeUnknown`。タイムアウト・通信断など）は覚えて保留する**（#833）。
@@ -31,6 +31,8 @@ interface Entry {
   expiresAt: number;
   promise: Promise<unknown>;
   settled: boolean;
+  /** 結果不明の失敗として保留しているか。 */
+  unknown: boolean;
 }
 
 export type IdempotentResult<T> =
@@ -63,10 +65,12 @@ export class EventIdempotencyStore {
       expiresAt: this.#now() + TTL_MS,
       promise: Promise.resolve(),
       settled: false,
+      unknown: false,
     };
     entry.promise = run().then(
       (outcome) => {
         entry.settled = true;
+        entry.unknown = !outcome.ok && outcome.outcomeUnknown === true;
         if (!outcome.ok && outcome.outcomeUnknown !== true) this.#entries.delete(key);
         return outcome;
       },
@@ -84,10 +88,14 @@ export class EventIdempotencyStore {
     for (const [key, entry] of this.#entries) {
       if (entry.settled && entry.expiresAt <= now) this.#entries.delete(key);
     }
-    while (this.#entries.size >= MAX_ENTRIES) {
-      const oldest = this.#entries.keys().next().value;
-      if (oldest === undefined) break;
-      this.#entries.delete(oldest);
+    // 上限を超えたら、実行中のものは落とさず（同時再送が二重POSTになる）、結果不明の保留も後回しにして古い順に落とす。
+    for (const keepUnknown of [false, true]) {
+      for (const [key, entry] of this.#entries) {
+        if (this.#entries.size < MAX_ENTRIES) return;
+        if (!entry.settled || (!keepUnknown && entry.unknown)) continue;
+        if (!keepUnknown && entry.unknown) continue;
+        this.#entries.delete(key);
+      }
     }
   }
 }

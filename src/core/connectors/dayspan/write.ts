@@ -279,7 +279,9 @@ export async function createDaySpanEvent(
 
 /** 作成POSTの `failed`（拒否と確定できない失敗）に、結果不明の印を付ける。 */
 function markUnknownIfFailed(failure: WriteFailure): WriteFailure {
-  return failure.kind === "failed" ? { ...failure, outcomeUnknown: true } : failure;
+  // 500 は「対象ユーザーを決められない設定不備」と分類するが、作成後に落ちた汎用500や中継の500とも区別できないため、
+  // 作成POSTでは結果不明として扱う（重複より、確認してもらうほうを選ぶ）。
+  return failure.kind === "failed" || failure.kind === "unresolvable" ? { ...failure, outcomeUnknown: true } : failure;
 }
 
 const EVENT_ID_KEY = /^[A-Za-z0-9_-]+$/;

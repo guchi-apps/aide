@@ -178,6 +178,32 @@ describe("aide_create_event の結果不明（#833）", () => {
     }
   });
 
+  it("502・500・id欠落の応答も結果不明として保留する", async () => {
+    process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
+    process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
+    const realFetch = globalThis.fetch;
+    const responses = [
+      () => new Response("bad gateway", { status: 502 }),
+      () => new Response("{}", { status: 500 }),
+      () => new Response("{}", { status: 200 }),
+    ];
+    try {
+      for (const [i, make] of responses.entries()) {
+        globalThis.fetch = (async () => make()) as typeof fetch;
+        const payload = parse(
+          await createEventTool.handler(
+            { title: "歯医者", date: "2026-09-10", idempotencyKey: `unknown-variant-${i}-833` },
+            CTX,
+          ),
+        );
+        assert.equal(payload["outcomeUnknown"], true, `case ${i}`);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env["AIDE_DAYSPAN_WRITE_TOKEN"];
+    }
+  });
+
   it("先方が拒否した失敗（400）は結果不明にせず、同じキーで直して再送できる", async () => {
     process.env["AIDE_DAYSPAN_WRITE_TOKEN"] = "dummy";
     process.env["AIDE_DAYSPAN_TARGET_EMAIL"] = "me@example.com";
