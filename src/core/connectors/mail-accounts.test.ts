@@ -93,8 +93,9 @@ describe("MultiMailInbox", () => {
 
   it("操作はIDの鍵のアカウントへ振り分ける。別アカウントのラベルは付けられない", async () => {
     const { multi, main, sub } = await setup();
-    assert.ok((await multi.apply(["main~m1", "sub~s1", "main~m2"], "read", null)).ok);
+    assert.ok((await multi.apply(["main~m1", "main~m2"], "read", null)).ok);
     assert.deepEqual(main.calls.apply[0]!.ids, ["m1", "m2"]);
+    assert.ok((await multi.apply(["sub~s1"], "read", null)).ok);
     assert.deepEqual(sub.calls.apply[0]!.ids, ["s1"]);
     assert.ok((await multi.apply(["main~m1"], "label-add", "main~Label_1")).ok);
     assert.equal(main.calls.apply[1]!.label, "Label_1");
@@ -102,6 +103,17 @@ describe("MultiMailInbox", () => {
     assert.equal(cross.ok, false);
     const unknown = await multi.apply(["zzz~x"], "read", null);
     assert.equal(unknown.ok, false);
+  });
+
+  it("複数アカウントにまたがる操作は、どのアカウントも変更せずに拒否する（#810）", async () => {
+    const { multi, main, sub } = await setup();
+    const result = await multi.apply(["main~m1", "sub~s1"], "archive", null);
+    assert.equal(result.ok, false);
+    assert.equal(main.calls.apply.length, 0);
+    assert.equal(sub.calls.apply.length, 0);
+    // 未知のアカウントが混ざっていても、既知のアカウントは変更しない。
+    assert.equal((await multi.apply(["main~m1", "zzz~x"], "read", null)).ok, false);
+    assert.equal(main.calls.apply.length, 0);
   });
 
   it("本文はIDの鍵のアカウントから取り、持ち主の確認はメインで行う", async () => {

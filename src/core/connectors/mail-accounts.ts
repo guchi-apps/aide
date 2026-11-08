@@ -27,6 +27,9 @@ const KEY_PATTERN = /^[a-z0-9]{1,12}$/;
 const MAX_EXTRA_ACCOUNTS = 5;
 const SEPARATOR = "~";
 
+/** 複数アカウントにまたがる操作を拒否したときの理由。呼出元が「接続失敗」と区別して案内するのに使う（#810）。 */
+export const CROSS_ACCOUNT_REASON = "複数のアカウントのメールは同時に操作できません。アカウントごとに選び直してください";
+
 export interface MailAccountInfo {
   key: string;
   /** 画面に出す名前。 */
@@ -270,24 +273,31 @@ export class MultiMailInbox implements MailInbox {
     };
   }
 
+  /**
+   * 変更はアカウント単位でしか送れず、複数アカウントにまたがる操作は途中で失敗したときに先行アカウントだけが
+   * 変更された状態になる（補償も内訳の返却もできない。#810）。そのため、1回の操作で選べるのは1アカウントのメール
+   * だけとし、またがる選択は **1件も変更せず** 拒否する。検証はすべて変更の前に済ませる。
+   */
   async apply(ids: string[], action: MailAction, labelId: string | null): Promise<GmailResult<void>> {
-    const byAccount = new Map<string, string[]>();
+    const keys = new Set<string>();
+    const rests: string[] = [];
     for (const id of ids) {
       const split = splitId(id);
       if (!split || !this.find(split.key)) return { ok: false, kind: "not_found", reason: "メールが見つかりません" };
-      byAccount.set(split.key, [...(byAccount.get(split.key) ?? []), split.rest]);
+      keys.add(split.key);
+      rests.push(split.rest);
     }
+    if (keys.size === 0) return { ok: true, value: undefined };
+    if (keys.size > 1) {
+      return { ok: false, kind: "failed", reason: CROSS_ACCOUNT_REASON };
+    }
+    const key = [...keys][0]!;
     const label = labelId ? splitId(labelId) : null;
-    for (const [key, rests] of byAccount) {
-      const member = this.find(key)!;
-      // ラベルは持ち主のアカウントのものだけを付け外しできる。
-      const own = label && label.key === key ? label.rest : null;
-      if ((action === "label-add" || action === "label-remove") && !own) {
-        return { ok: false, kind: "failed", reason: "別のアカウントのラベルは付け外しできません" };
-      }
-      const result = await member.inbox.apply(rests, action, own);
-      if (!result.ok) return result;
+    // ラベルは持ち主のアカウントのものだけを付け外しできる。
+    const own = label && label.key === key ? label.rest : null;
+    if ((action === "label-add" || action === "label-remove") && !own) {
+      return { ok: false, kind: "failed", reason: "別のアカウントのラベルは付け外しできません" };
     }
-    return { ok: true, value: undefined };
+    return this.find(key)!.inbox.apply(rests, action, own);
   }
 }

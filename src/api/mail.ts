@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { CROSS_ACCOUNT_REASON } from "../core/connectors/mail-accounts.ts";
 import { clientKey, FAILURE_DELAY_MS, lockedFor, recordFailure, recordSuccess } from "../auth/ratelimit.ts";
 import { MAIL_ACTIONS, MAX_BATCH, type MailAction } from "../core/connectors/gmail-inbox/client.ts";
 import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
@@ -207,6 +208,9 @@ export async function handleMailApiAction(req: IncomingMessage, res: ServerRespo
   }
   const result = await mailbox.inbox.apply(parsed.ids, parsed.action, parsed.labelId);
   if (!result.ok) {
+    if (result.reason === CROSS_ACCOUNT_REASON) {
+      return json(res, 400, { ok: false, error: "invalid_request", message: result.reason });
+    }
     logMailFailure(`api:action:${parsed.action}`, result.kind, result.reason);
     return failure(res, result.kind);
   }
