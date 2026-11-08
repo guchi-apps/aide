@@ -124,7 +124,7 @@ export class MultiMailInbox implements MailInbox {
   readonly accounts: readonly MailAccountInfo[];
   private readonly members: Member[];
   /** 接続できなかった追加アカウント。一覧では「読めなかったアカウント」として必ず報告する（#801）。 */
-  private readonly unreachable: Member["info"][];
+  private readonly unreachable: MailAccountInfo[];
 
   constructor(members: Member[], unreachable: MailAccountInfo[] = []) {
     this.members = members;
@@ -214,10 +214,6 @@ export class MultiMailInbox implements MailInbox {
     let estimate = 0;
     let firstFailure: { kind: Extract<GmailResult<never>, { ok: false }>["kind"]; reason: string } | null = null;
     let anyOk = false;
-    for (const u of unreachableTargets) {
-      failedAccounts.push(u.name);
-      firstFailure ??= { kind: "failed", reason: "接続できません" };
-    }
     for (const { m, r } of results) {
       if (r === null) continue;
       if (!r.ok) {
@@ -237,6 +233,11 @@ export class MultiMailInbox implements MailInbox {
           account: m.info.name,
         });
       }
+    }
+    // 接続できなかったアカウントは、メインの一覧失敗の種類（kind）を隠さないよう最後に足す。
+    for (const u of unreachableTargets) {
+      failedAccounts.push(u.name);
+      firstFailure ??= { kind: "failed", reason: "接続できません" };
     }
     if (!anyOk && firstFailure) return { ok: false, ...firstFailure };
     messages.sort((a, b) => (b.receivedAt ?? 0) - (a.receivedAt ?? 0));
