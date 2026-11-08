@@ -539,16 +539,17 @@ async function connect(deps: MailDeps): Promise<GmailResult<MailInbox>> {
   return GmailInbox.connect(deps);
 }
 
-export function logMailFailure(where: string, kind: MailFailure, reason: string): void {
+function logFailure(where: string, kind: MailFailure, reason: string): void {
   // 件名・差出人・本文・IDは出さない。失敗の種類と理由（ステータスコード程度）だけ。
   if (kind !== "unconfigured") console.warn(`[mail] ${where}: ${kind} ${reason}`);
 }
 
-const logFailure = logMailFailure;
+/** Morrow向けのAPI（`src/api/mail.ts`。#795）も同じ粒度でログを残す。 */
+export const logMailFailure = logFailure;
 
 /**
  * 取得元へつなぎ、メールボックスの持ち主のメールアドレス（Gmailは `users.getProfile`、IMAPは
- * `AIDE_IMAP_OWNER_EMAIL` など）を引く。画面（`openMailbox`）とMorrow向けのAPI（`src/api/mail.ts`。#795）が
+ * `AIDE_IMAP_OWNER_EMAIL` など。複数のアカウントを束ねるときはメインのアカウント）を引く。画面（`openMailbox`）とMorrow向けのAPI（`src/api/mail.ts`。#795）が
  * 共用する。持ち主との照合は呼び出し側が行う（画面はログイン中の人と、APIは応答に載せて呼び出し元が）。
  */
 export async function connectMailbox(

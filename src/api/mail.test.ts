@@ -126,6 +126,20 @@ describe("Morrow向けメールAPI（#795）", () => {
     assert.equal(missing.status, 404);
   });
 
+  it("本文もトークンが違えば401で、取得元へつながない", async () => {
+    let connected = false;
+    const deps = fakeDeps(record, {
+      connect: (async () => {
+        connected = true;
+        return { ok: false, kind: "failed", reason: "" };
+      }) as unknown as MailApiDeps["connect"],
+    });
+    const res = response();
+    await handleMailApiMessage(request("/api/mail/messages/abc", { authorization: "Bearer x" }), res, "/api/mail/messages/abc", deps);
+    assert.equal(res.status, 401);
+    assert.equal(connected, false);
+  });
+
   it("パスのIDは形を確かめる", () => {
     assert.equal(messageIdFromPath("/api/mail/messages/abc.1.2"), "abc.1.2");
     assert.equal(messageIdFromPath("/api/mail/messages/a%2Fb"), null);
