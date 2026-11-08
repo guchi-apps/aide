@@ -81,6 +81,26 @@ describe("MultiMailInbox", () => {
     assert.deepEqual(page.value.failedAccounts, ["サブ"]);
   });
 
+  it("応答に全アカウントの鍵・名前・failed を載せる。絞り込み中も全件、読まなかったものは failed でない（#821）", async () => {
+    const { multi } = await setup();
+    const all = await multi.list(query);
+    assert.ok(all.ok);
+    assert.deepEqual(all.value.accounts, [
+      { key: "main", name: "メイン", failed: false },
+      { key: "sub", name: "サブ", failed: false },
+    ]);
+    const filtered = await multi.list({ ...query, account: "sub" });
+    assert.ok(filtered.ok);
+    assert.deepEqual(filtered.value.accounts?.map((a) => a.key), ["main", "sub"]);
+    const failing = await setup({ fail: true });
+    const page = await failing.multi.list(query);
+    assert.ok(page.ok);
+    assert.deepEqual(page.value.accounts, [
+      { key: "main", name: "メイン", failed: false },
+      { key: "sub", name: "サブ", failed: true },
+    ]);
+  });
+
   it("次ページの位置を持つアカウントだけを2ページ目で読む", async () => {
     const { multi, main, sub } = await setup({ next: "5" });
     const first = await multi.list(query);
@@ -141,5 +161,11 @@ describe("MultiMailInbox", () => {
     // 別のアカウントを指定したときは、無関係な失敗を載せない。
     const mainOnly = await multi.list({ ...query, account: "main" });
     assert.ok(mainOnly.ok && !mainOnly.value.failedAccounts);
+    // 接続できなかったアカウントも accounts に含め、failed にする（#821）。
+    assert.deepEqual(page.value.accounts, [
+      { key: "main", name: "メイン", failed: false },
+      { key: "sub", name: "サブ", failed: true },
+    ]);
+    assert.equal(mainOnly.value.accounts?.find((a) => a.key === "sub")?.failed, false);
   });
 });

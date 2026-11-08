@@ -140,6 +140,8 @@ describe("Morrow向けメールAPI（#795）", () => {
     await handleMailApiList(request("/api/mail/messages", auth), full, fakeDeps(record));
     assert.equal(full.body!["partial"], false);
     assert.deepEqual(full.body!["failedAccounts"], []);
+    // 単一アカウントの構成では accounts を載せない（#821）。
+    assert.equal("accounts" in full.body!, false);
   });
 
   it("since を付けると、受信がそれ以降のものだけを返す", async () => {
