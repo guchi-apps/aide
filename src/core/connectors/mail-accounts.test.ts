@@ -115,4 +115,19 @@ describe("MultiMailInbox", () => {
     assert.ok(profile.ok && profile.value === "gmail@example.com");
     assert.equal(splitId("sub~a.b.c")?.rest, "a.b.c");
   });
+
+  it("接続できなかった追加アカウントも失敗として返す（#801）", async () => {
+    const main = fake("gmail", [summary("m1", 300)]);
+    const multi = new MultiMailInbox([{ info: { key: "main", name: "メイン" }, inbox: main.inbox }], [{ key: "sub", name: "サブ" }]);
+    const page = await multi.list(query);
+    assert.ok(page.ok);
+    assert.deepEqual(page.value.failedAccounts, ["サブ"]);
+    assert.equal(page.value.messages.length, 1);
+    // 失敗したアカウントだけを指定したときは、空の成功ではなく失敗にする。
+    const only = await multi.list({ ...query, account: "sub" });
+    assert.equal(only.ok, false);
+    // 別のアカウントを指定したときは、無関係な失敗を載せない。
+    const mainOnly = await multi.list({ ...query, account: "main" });
+    assert.ok(mainOnly.ok && !mainOnly.value.failedAccounts);
+  });
 });
