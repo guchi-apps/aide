@@ -3,6 +3,7 @@ import {
   normalizeCreateEventInput,
   readDaySpanWriteConfig,
 } from "../../core/connectors/dayspan/write.ts";
+import { createEventIdempotency, readEventIdempotencyKey } from "../../core/connectors/dayspan/event-idempotency.ts";
 import type { Tool, ToolResult } from "../types.ts";
 
 /**
@@ -43,6 +44,9 @@ export const createEventTool: Tool = {
     "startTime・endTime は両方指定するか両方省略する（省略すると終日の予定になる）。" +
     "日をまたぐ時刻予定は date に開始日、endDate に終了日を指定して1件で作る（2件に分けない）。" +
     "作成できたら予定の url を返すので、「入れました」の案内に使うこと。" +
+    "**idempotencyKey は任意だが、タイムアウトや結果不明で呼び直す可能性があるなら必ず付ける。**" +
+    "1回の登録につき1つ決め、再送では**同じ値・同じ内容**で呼ぶと、予定を重複して作らず最初の結果を返す" +
+    "（内容を変えるなら新しいキー。同じキーで内容が違うと idempotency_conflict）。" +
     "**日時があやふやなまま登録したくないときは dryRun: true で呼ぶ**と、" +
     "登録せずに「何が入るか」だけを返す。",
   inputSchema: {
@@ -71,6 +75,12 @@ export const createEventTool: Tool = {
           "登録先のカレンダーID。内容に合う既存カレンダーを選べるときは、aide_schedule の events[].calendarId を渡す。" +
           "候補が無い・分類が曖昧なときは省き、DaySpan側の既定の保存先へ登録する。",
       },
+      idempotencyKey: {
+        type: "string",
+        description:
+          "登録要求を識別するキー（印字可能ASCIIの8〜191文字）。再送でも同じ値を使うと、同じ内容の予定を重複して作らない。" +
+          "省略すると重複防止は働かない。",
+      },
       dryRun: {
         type: "boolean",
         description:
@@ -91,6 +101,9 @@ export const createEventTool: Tool = {
       });
     }
 
+    const keyResult = readEventIdempotencyKey(args["idempotencyKey"]);
+    if ("error" in keyResult) return json({ ok: false, kind: "invalid", reason: keyResult.error });
+
     const normalized = normalizeCreateEventInput(args);
     if ("error" in normalized) return json({ ok: false, kind: "invalid", reason: normalized.error });
 
@@ -104,9 +117,31 @@ export const createEventTool: Tool = {
       });
     }
 
-    const outcome = await createDaySpanEvent(config, normalized.input);
+    let outcome;
+    let replayed = false;
+    if (keyResult.key) {
+      const guarded = await createEventIdempotency.run(keyResult.key, JSON.stringify(normalized.input), () =>
+        createDaySpanEvent(config, normalized.input),
+      );
+      if ("conflict" in guarded) {
+        return json({
+          ok: false,
+          kind: "idempotency_conflict",
+          reason: "同じ idempotencyKey で内容が違います。内容を変えるなら新しい idempotencyKey を使う。",
+        });
+      }
+      outcome = guarded.outcome;
+      replayed = guarded.replay;
+    } else {
+      outcome = await createDaySpanEvent(config, normalized.input);
+    }
     if (!outcome.ok) return json({ ok: false, kind: outcome.kind, reason: outcome.reason });
 
-    return json({ ok: true, id: outcome.id, url: outcome.url });
+    return json({
+      ok: true,
+      id: outcome.id,
+      url: outcome.url,
+      ...(replayed ? { replayed: true, note: "同じ idempotencyKey の登録済みの結果を返しました（重複して作っていません）。" } : {}),
+    });
   },
 };

@@ -58,6 +58,51 @@ import {
 import { researchDeskImportWeeklyReportTool } from "./tools/research-desk.ts";
 import { reportWorkTool, workReportsTool } from "./tools/work-reports.ts";
 
+/** 環境を一切変更しないツール。`readOnlyHint: true` を宣言する。迷うものは入れない（書き込み扱いが安全側）。 */
+export const READ_ONLY_TOOLS = [
+  "aide_ping",
+  "aide_connection_permissions",
+  "aide_balances",
+  "aide_fixed_costs",
+  "aide_utility_bills",
+  "kurashio_utility_bill_contracts",
+  "kurashio_get_utility_bill",
+  "kurashio_get_kepco_hourly",
+  "aide_host_status",
+  "aide_uptime_monitors",
+  "aide_service_quotas",
+  "aide_room_sensors",
+  "aide_aircon_status",
+  "aide_printer_status",
+  "aide_room_buttons",
+  "aide_current_location",
+  "aide_weather",
+  "aide_schedule",
+  "aide_tasks",
+  "aide_get_task",
+  "aide_garbage_collection",
+  "aide_get_travel",
+  "aide_dev_status",
+  "aide_repo_status",
+  "aide_repo_labels",
+  "aide_issue_deck_summary",
+  "aide_issue_deck_items",
+  "aide_vps_memory",
+  "aide_claude_sessions",
+  "aide_work_reports",
+  "aide_zaim_master", // 廃止済み。呼んでも何も書かない
+  "aide_zaim_payment", // 廃止済み。呼んでも何も書かない
+  "asset_manager_subscriptions",
+  "asset_manager_salary_approval_status",
+  "asset_manager_salary_lookup",
+  "issue_deck_list_release_candidates",
+  "issue_deck_get_release_candidate",
+  "issue_deck_get_fix_status",
+] as const;
+
+/** 取り消せない書き込み。`destructiveHint: true` を宣言する。 */
+export const DESTRUCTIVE_TOOLS = ["aide_delete_event"] as const;
+
 /**
  * MCPに出すツールの登録簿を組み立てる。**ツールを足すときはここへ足す。**
  *
@@ -159,5 +204,9 @@ export function buildToolRegistry(): ToolRegistry {
   // dotの作業報告（#609）。読み取りと書き込みは別ツール・別scope。通知・タスク候補の登録では代用しない。
   registry.register(reportWorkTool);
   registry.register(workReportsTool);
+  // 振る舞いの宣言（#823）。Hermes Agent などは readOnlyHint の無い道具を書き込みとして毎回承認にする。
+  for (const name of READ_ONLY_TOOLS) registry.annotate(name, { readOnlyHint: true });
+  for (const name of DESTRUCTIVE_TOOLS) registry.annotate(name, { readOnlyHint: false, destructiveHint: true });
+  registry.annotate("aide_update_event", { readOnlyHint: false, destructiveHint: true, idempotentHint: true });
   return registry;
 }
