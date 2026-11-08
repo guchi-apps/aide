@@ -3201,6 +3201,9 @@ Morrowのサーバーが、メールの一覧・本文・整理に使う（実�
 - **認証**: `Authorization: Bearer <AIDE_MAIL_API_TOKEN>`。値はissue-deckの共有トークン（同名）から取り、
   取れなければ環境変数（手元での確認用。本番の `.env` へは配らない）。どちらも無ければ503、違えば401
   （失敗が続くと429。`src/auth/ratelimit.ts`）
+- **公開前に、issue-deckへ共有トークン `AIDE_MAIL_API_TOKEN` を登録しておく**（#801）。未登録だと本番ではAIDEもMorrowも
+  値を取れず、全呼び出しが503になる（issue-deckは存在しない名前の取得を404で返す）。設定画面で値を空欄のまま登録すると
+  自動生成される。登録したら、利用記録でAIDEとMorrowの双方が取得していることを確かめる（値は出力しない）
 - **応答**: 成功は `{ ok: true, owner, source, supportsLabels, ... }`。失敗は `{ ok: false, error }` で、
   `error` は `unconfigured`（503）・`not_found`（404）・`unauthorized`・`failed`（取得元の失敗。502）・`invalid_request`（400）
 - **メール本文はAIDEに残さない。** ログに出すのは失敗の種類と理由だけで、件名・差出人・本文・IDは出さない
