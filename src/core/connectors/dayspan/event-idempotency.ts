@@ -93,7 +93,6 @@ export class EventIdempotencyStore {
       for (const [key, entry] of this.#entries) {
         if (this.#entries.size < MAX_ENTRIES) return;
         if (!entry.settled || (!keepUnknown && entry.unknown)) continue;
-        if (!keepUnknown && entry.unknown) continue;
         this.#entries.delete(key);
       }
     }
