@@ -123,12 +123,15 @@ export class MultiMailInbox implements MailInbox {
   readonly supportsLabels: boolean;
   readonly accounts: readonly MailAccountInfo[];
   private readonly members: Member[];
+  /** 接続できなかった追加アカウント。一覧では「読めなかったアカウント」として必ず報告する（#801）。 */
+  private readonly unreachable: MailAccountInfo[];
 
-  constructor(members: Member[]) {
+  constructor(members: Member[], unreachable: MailAccountInfo[] = []) {
     this.members = members;
+    this.unreachable = unreachable;
     this.kind = members[0]!.inbox.kind;
     this.supportsLabels = members.some((m) => m.inbox.supportsLabels);
-    this.accounts = members.map((m) => m.info);
+    this.accounts = [...members.map((m) => m.info), ...unreachable];
   }
 
   /** メイン（持ち主の確認に使う）に、追加アカウントのIMAPを束ねる。 */
@@ -138,15 +141,17 @@ export class MultiMailInbox implements MailInbox {
     imap: ImapInboxDeps = {},
   ): Promise<GmailResult<MultiMailInbox>> {
     const members: Member[] = [{ info: { key: MAIN_ACCOUNT_KEY, name: "メイン" }, inbox: main }];
+    const unreachable: MailAccountInfo[] = [];
     for (const extra of extras) {
       const inbox = await ImapInbox.connect({ ...imap, credentials: extra.credentials });
       if (!inbox.ok) {
         console.warn(`[mail] account:${extra.key}: connect ${inbox.kind} ${inbox.reason}`);
+        unreachable.push({ key: extra.key, name: extra.name });
         continue;
       }
       members.push({ info: { key: extra.key, name: extra.name }, inbox: inbox.value });
     }
-    return { ok: true, value: new MultiMailInbox(members) };
+    return { ok: true, value: new MultiMailInbox(members, unreachable) };
   }
 
   private find(key: string): Member | undefined {
@@ -188,6 +193,10 @@ export class MultiMailInbox implements MailInbox {
         : this.members;
     const tokens = decodeToken(query.pageToken);
     if (!tokens) return { ok: false, kind: "failed", reason: "ページ位置が不正です" };
+    // 接続できなかったアカウントも、読む対象に入っていれば失敗として数える。
+    const unreachableTargets = this.unreachable.filter((u) =>
+      labelOwner ? u.key === labelOwner.key : query.account ? u.key === query.account : true,
+    );
 
     const results = await Promise.all(
       targets.map(async (m) => {
@@ -224,6 +233,11 @@ export class MultiMailInbox implements MailInbox {
           account: m.info.name,
         });
       }
+    }
+    // 接続できなかったアカウントは、メインの一覧失敗の種類（kind）を隠さないよう最後に足す。
+    for (const u of unreachableTargets) {
+      failedAccounts.push(u.name);
+      firstFailure ??= { kind: "failed", reason: "接続できません" };
     }
     if (!anyOk && firstFailure) return { ok: false, ...firstFailure };
     messages.sort((a, b) => (b.receivedAt ?? 0) - (a.receivedAt ?? 0));

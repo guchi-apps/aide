@@ -29,6 +29,9 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * - `POST /api/mail/actions` — `{ "action": "...", "ids": ["..."], "labelId": "..." }`。持つ操作は `/mail/action` と
  *   同じ**元に戻せるものだけ**（既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベル・ゴミ箱の出し入れ）
  *
+ * **一覧は一部のアカウントが読めなくても200で返すが、`partial: true` と `failedAccounts`（アカウント名）を載せる。**
+ * `partial` のとき `messages` には欠落がある。Morrowは巡回の成功記録（既読位置など）を進めず、次回に再取得する。
+ *
  * **応答には持ち主のメールアドレス（`owner`）を載せる。** トークンが表すのは「Morrowのサーバー」で利用者ではない
  * ため、ログイン中の人がメールボックスの持ち主本人かどうかの照合はMorrow側が `owner` で行う。
  *
@@ -114,11 +117,15 @@ export async function handleMailApiList(req: IncomingMessage, res: ServerRespons
   }
   const messages =
     since === null ? page.value.messages : page.value.messages.filter((m) => m.receivedAt !== null && m.receivedAt >= since);
+  const failedAccounts = page.value.failedAccounts ?? [];
   json(res, 200, {
     ok: true,
     source: deps.source ?? selectMailSource(),
     owner: mailbox.owner,
     supportsLabels: mailbox.inbox.supportsLabels,
+    // 一部のアカウントが読めなかったときは partial: true。欠落があるので、Morrowは巡回の成功記録を進めず再試行する（#801）。
+    partial: failedAccounts.length > 0,
+    failedAccounts,
     view: state.view.key,
     labels: labels.ok ? labels.value : [],
     messages,

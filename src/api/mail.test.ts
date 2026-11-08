@@ -106,6 +106,37 @@ describe("Morrow向けメールAPI（#795）", () => {
     assert.equal((res.body!["messages"] as unknown[]).length, 2);
   });
 
+  it("一部のアカウントが読めなかったときは partial と failedAccounts を返す（#801）", async () => {
+    const base = fakeDeps(record);
+    const deps: MailApiDeps = {
+      ...base,
+      connect: (async (d: MailApiDeps) => {
+        const m = (await (base.connect as unknown as (d: MailApiDeps) => Promise<{ value: Record<string, unknown> }>)(d)).value;
+        const list = m["list"] as (q: ListQuery) => Promise<{ value: Record<string, unknown> }>;
+        return {
+          ok: true,
+          value: {
+            ...m,
+            list: async (q: ListQuery) => {
+              const r = await list(q);
+              return { ok: true, value: { ...r.value, failedAccounts: ["サブ"] } };
+            },
+          },
+        };
+      }) as unknown as typeof GmailInbox.connect,
+    };
+    const res = response();
+    await handleMailApiList(request("/api/mail/messages", auth), res, deps);
+    assert.equal(res.status, 200);
+    assert.equal(res.body!["partial"], true);
+    assert.deepEqual(res.body!["failedAccounts"], ["サブ"]);
+
+    const full = response();
+    await handleMailApiList(request("/api/mail/messages", auth), full, fakeDeps(record));
+    assert.equal(full.body!["partial"], false);
+    assert.deepEqual(full.body!["failedAccounts"], []);
+  });
+
   it("since を付けると、受信がそれ以降のものだけを返す", async () => {
     const res = response();
     await handleMailApiList(request("/api/mail/messages?since=3000", auth), res, fakeDeps(record));
