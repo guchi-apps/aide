@@ -288,6 +288,12 @@ export const ENDPOINTS: FeatureItem[] = [
     description:
       "Research Deskのサーバーから届く業界ニュース週報（HTMLとテキストの本文）を、画像メールと同じGmail資格情報で社用メールへ送信する。宛先・送信元は環境変数で固定し、画像メールとは別の共有シークレットで認証する。",
   },
+  {
+    name: "/api/text-mail/send",
+    meta: "POST",
+    description:
+      "work-relayのサーバーから届く共有メモ（HTMLとテキストの本文）を、画像メールと同じGmail資格情報で社用メールへ送信する。宛先・送信元は環境変数で固定し、他のメール送信口とは別の共有シークレットで認証する。",
+  },
 ];
 
 export function buildSections(registry: ToolRegistry): FeatureSection[] {

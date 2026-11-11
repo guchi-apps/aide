@@ -196,8 +196,8 @@ export const CALLERS: Caller[] = [
     id: "research-desk",
     name: "ワークリレー",
     via: "API",
-    what: "画像・週報をメールで送る",
-    uses: ["/api/image-mail/send", "/api/news-mail/send"],
+    what: "画像・週報・メモをメールで送る",
+    uses: ["/api/image-mail/send", "/api/news-mail/send", "/api/text-mail/send"],
   },
   {
     id: "morrow",
@@ -334,10 +334,11 @@ export const GROUPS: DestinationGroup[] = [
         id: "gmail",
         name: "Gmail",
         dir: "both",
-        what: "画像・週報を社用メールへ／受信メールを読む・整理する（Morrow向けAPI #795）",
+        what: "画像・週報・メモを社用メールへ／受信メールを読む・整理する（Morrow向けAPI #795）",
         uses: [
           "/api/image-mail/send",
           "/api/news-mail/send",
+          "/api/text-mail/send",
           "/api/mail/messages",
           "/api/mail/messages/<id>",
           "/api/mail/actions",
