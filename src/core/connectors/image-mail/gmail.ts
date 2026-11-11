@@ -126,6 +126,11 @@ export function loadNewsMailAddresses(): { addresses: MailAddresses } | { error:
   return loadMailAddresses("AIDE_NEWS_MAIL");
 }
 
+/** 共有メモのメール（aide#841）の送信元・宛先・BCC。画像メール・週報メールとは別の環境変数を使う。 */
+export function loadTextMailAddresses(): { addresses: MailAddresses } | { error: string } {
+  return loadMailAddresses("AIDE_TEXT_MAIL");
+}
+
 export type TokenOutcome = { ok: true; accessToken: string } | { ok: false; kind: "unauthorized" | "failed"; reason: string };
 
 /**

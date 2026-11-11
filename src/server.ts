@@ -4,6 +4,7 @@ import { handleImageMailSend } from "./api/image-mail.ts";
 import { handleMailApiAction, handleMailApiList, handleMailApiMessage } from "./api/mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
+import { handleTextMailSend } from "./api/text-mail.ts";
 import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { DEV_AUTH_DISABLED_CLIENT_ID } from "./mcp/types.ts";
 import { handleLocation } from "./api/location.ts";
@@ -317,6 +318,14 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   // 画像メールと同じくサーバー間通信で、公開URLの遮断リストには入れない。
   if (path === "/api/news-mail/send") {
     await handleNewsMailSend(req, res);
+    return;
+  }
+
+  // ---- 共有メモのメール送信API（#841） ----
+  // work-relay**のサーバー**からapplication/jsonで届くメモ本文をGmailで送る。サーバー間通信で、
+  // 公開URLの遮断リストには入れない。
+  if (path === "/api/text-mail/send") {
+    await handleTextMailSend(req, res);
     return;
   }
 
