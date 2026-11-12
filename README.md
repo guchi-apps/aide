@@ -3225,6 +3225,7 @@ work-relay（guchi-apps/work-relay#149）が、共有された文章（メモ等
 | エンドポイント | `POST /api/text-mail/send`（`application/json`） |
 | 認証 | `Authorization: Bearer $AIDE_TEXT_MAIL_TOKEN`（work-relay側の同名環境変数と同じ値。他のメール送信口のトークンとは別の値） |
 | 必要な設定 | 上のトークン、宛先（`AIDE_TEXT_MAIL_TO`）、Gmail OAuthの3つ。**1つでも欠ければ503**。BCC・送信元（`AIDE_TEXT_MAIL_BCC` / `_FROM`）は任意 |
+| 値の登録 | `AIDE_TEXT_MAIL_TOKEN` は1Password（`op://apps/aide/text-mail-token`）へ生成して登録し、`scripts/sync-github-secrets.sh` でGitHub secretへ同期する（`AIDE_TEXT_MAIL_TO` も同様）。マニフェストへ行を足すだけでは値は入らない。work-relay側には同じトークンを別途配る |
 | リクエストの項目 | `idempotencyKey`（200文字まで）・`subject`（先頭 `[メモ] ` 込みでwork-relay側が組み立て済み）・`bodyText`・`bodyHtml` |
 
 件名・本文はwork-relay側で組み立て済みのものをそのまま使い、宛先・送信元だけAIDE側の環境変数で固定する。
