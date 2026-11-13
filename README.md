@@ -49,6 +49,7 @@ AIDEは元々**取得専用**として作った。書き込みを足すかは Is
 | `POST /api/zaim/payment/web/genre`（aide#273） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のカテゴリ・内訳の変更 | **満たす**（下記） | ログイン状態（storage state。新規登録と共用） | **例外**（下記。カテゴリ・内訳の変更のみ） |
 | `POST /api/zaim/payment/web/memo`（aide#354） | 個人アプリからZaim **Web版の編集画面**を通じた、既存明細のメモの書き換え | **満たす**（下記） | ログイン状態（storage state。新規登録・カテゴリ変更と共用） | **例外**（下記。メモの書き換えのみ） |
 | `POST /api/image-mail/send`（aide#230） | Research Desk経由での画像メール送信 | **例外**（下記） | Gmail OAuth（新規。読み取り用の資格情報も無い） | 作成のみ |
+| `POST /api/text-mail/send`（aide#841） | work-relay経由での共有メモのメール送信 | **例外**（週報メールと同じ理由） | Gmail OAuth（共用）＋別トークン | 作成のみ |
 | `POST /api/news-mail/send`（aide#257） | Research Desk経由での業界ニュース週報メール送信 | **例外**（下記） | Gmail OAuth（画像メールと共用）＋別トークン | 作成のみ |
 | `POST /api/mail/actions`（#795） | Morrowのサーバーからの受信メールの整理（既読/未読・アーカイブ・スター・ラベル・ゴミ箱。旧メール画面 #770 の操作を引き継ぐ） | **例外**（下記。#770の延長） | 専用の共有トークン `AIDE_MAIL_API_TOKEN`（issue-deck）＋メール画面と同じ `gmail.modify` / IMAPの資格情報 | **例外**（下記。#770と同じ、元に戻せる操作だけ） |
 | `aide_create_event`（aide#243） | DaySpan経由での予定の新規作成 | 満たす | `AIDE_DAYSPAN_WRITE_TOKEN`（読み取り用の `AIDE_DAYSPAN_TOKEN` とは別のトークン） | 作成のみ |
@@ -587,6 +588,7 @@ src/
     zaim.ts            個人アプリ向けのZaim登録API（POST /api/zaim/payment/web ほか）
     image-mail.ts      画像メール送信API（POST /api/image-mail/send。#230）
     news-mail.ts       業界ニュース週報メール送信API（POST /api/news-mail/send。#257）
+    text-mail.ts       共有メモのメール送信API（POST /api/text-mail/send。#841）
     multipart.ts       multipart/form-data の最小パーサー
     secret.ts          /api 配下の共有シークレット認証
   core/
@@ -594,6 +596,7 @@ src/
       image-mail/       Gmail送信（画像メール・業界ニュース週報メール共通）・画像メールの冪等記録・履歴（#230）
       gmail-inbox/      メールAPI用のGmail読み取り・整理（gmail.modify の別トークン。#770）
       news-mail/         業界ニュース週報メールの冪等記録・履歴（#257）
+      text-mail/         共有メモのメールの冪等記録・履歴（#841）
     models/            共通データモデル
     views/             読み取りのビュー
   web/                 人間向けのHTMLページ（アプリ連携・機能一覧・メール・ログイン）と共通レイアウト
@@ -3209,6 +3212,26 @@ HTMLパートより先に置く**（RFC 2046の「後のパートほど優先し
 画像メールと同じ理由で、[公開URLからの遮断](#公開urlからの遮断)のApache設定には `news-mail` を
 入れない。
 
+
+## 個人アプリ向けの共有メモメール送信API
+
+work-relay（guchi-apps/work-relay#149）が、共有された文章（メモ等）を社用メールへ送信するための口
+（aide#841）。実装は `src/api/text-mail.ts`。[業界ニュース週報メール送信API](#個人アプリ向けの業界ニュース週報メール送信api)
+（aide#257）と同じ作りで、Gmail資格情報（`AIDE_GMAIL_*`）だけを共用し、トークン・宛先は別にする。
+呼び出し元はwork-relayの**サーバー**で、ブラウザではない（CORS対応は不要）。
+
+| | |
+|---|---|
+| エンドポイント | `POST /api/text-mail/send`（`application/json`） |
+| 認証 | `Authorization: Bearer $AIDE_TEXT_MAIL_TOKEN`（work-relay側の同名環境変数と同じ値。他のメール送信口のトークンとは別の値） |
+| 必要な設定 | 上のトークン、宛先（`AIDE_TEXT_MAIL_TO`）、Gmail OAuthの3つ。**1つでも欠ければ503**。BCC・送信元（`AIDE_TEXT_MAIL_BCC` / `_FROM`）は任意 |
+| 値の登録 | `AIDE_TEXT_MAIL_TOKEN` は1Password（`op://apps/aide/text-mail-token`）へ生成して登録し、`scripts/sync-github-secrets.sh` でGitHub secretへ同期する（`AIDE_TEXT_MAIL_TO` も同様）。マニフェストへ行を足すだけでは値は入らない。work-relay側には同じトークンを別途配る |
+| リクエストの項目 | `idempotencyKey`（200文字まで）・`subject`（先頭 `[メモ] ` 込みでwork-relay側が組み立て済み）・`bodyText`・`bodyHtml` |
+
+件名・本文はwork-relay側で組み立て済みのものをそのまま使い、宛先・送信元だけAIDE側の環境変数で固定する。
+二重送信の防止・応答ステータスは週報メールと同じで、状態は `src/core/connectors/text-mail/`
+（`idempotency.ts` / `log.ts`）に持つ。記録するのは成否・本文のバイト数・Gmail messageIdまでで、
+**件名・本文は記録しない**。公開URLの遮断リストには入れない（他のメール送信口と同じ理由）。
 
 ## Morrow向けのメールAPI（#795）
 

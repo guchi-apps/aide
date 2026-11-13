@@ -51,6 +51,8 @@ const NOT_REQUIRED_IN_PRODUCTION: Record<string, string> = {
   AIDE_MCP_ACCESS_LOG_PATH: "MCPアクセスの記録の置き場。既定（data/mcp-access.json）で足りる",
   AIDE_NEWS_MAIL_IDEMPOTENCY_LOG_PATH: "業界ニュース週報メール送信の冪等記録の置き場。既定（data/news-mail-idempotency.json）で足りる",
   AIDE_NEWS_MAIL_LOG_PATH: "業界ニュース週報メール送信の履歴の置き場。既定（data/news-mail-log.json）で足りる",
+  AIDE_TEXT_MAIL_IDEMPOTENCY_LOG_PATH: "共有メモのメール送信の冪等記録の置き場。既定（data/text-mail-idempotency.json）で足りる",
+  AIDE_TEXT_MAIL_LOG_PATH: "共有メモのメール送信の履歴の置き場。既定（data/text-mail-log.json）で足りる",
   AIDE_OPS_DASHBOARD_URL: "既定 http://127.0.0.1:3110 で足りる",
   AIDE_MYROOM_URL: "既定 http://127.0.0.1:8000 で足りる",
   AIDE_DISCORD_WEBHOOK_URL: "workerジョブの通知用。workerはサブPCで動く",
