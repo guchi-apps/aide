@@ -18,8 +18,6 @@ function subscription(overrides: Partial<AssetManagerSubscription> = {}): AssetM
   return {
     id: 1,
     name: "Netflix",
-    category: "SUBSCRIPTION",
-    categoryLabel: "サブスクリプション",
     status: "AUTO_RENEWING",
     paymentMethod: "楽天カード",
     amount: 1490,
@@ -64,8 +62,6 @@ describe("summarizeFixedCosts", () => {
     assert.deepEqual(view.items, [
       {
         name: "Netflix",
-        category: "SUBSCRIPTION",
-        categoryLabel: "サブスクリプション",
         monthlyAmount: 1490,
         currency: "JPY",
         contractStatus: "AUTO_RENEWING",
@@ -121,8 +117,6 @@ describe("summarizeFixedCosts", () => {
           subscription({
             id: 2,
             name: "火災保険",
-            category: "INSURANCE",
-            categoryLabel: "保険・共済",
             amount: 900,
             monthlyAmount: 900,
             monthlyAmountJpy: 900,
@@ -135,11 +129,8 @@ describe("summarizeFixedCosts", () => {
     assert.deepEqual(view.monthlyByCurrency, [{ currency: "JPY", amount: 2390 }]);
     assert.equal(view.monthlyJpy, 2390);
     assert.deepEqual(
-      view.items.map((item) => [item.name, item.category, item.categoryLabel]),
-      [
-        ["Netflix", "SUBSCRIPTION", "サブスクリプション"],
-        ["火災保険", "INSURANCE", "保険・共済"],
-      ],
+      view.items.map((item) => item.name),
+      ["Netflix", "火災保険"],
     );
     assert.match(view.note, /保険・税金・分割払い/);
   });

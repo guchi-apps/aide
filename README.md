@@ -1661,13 +1661,12 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 ### 返す粒度と、totals へ足さない理由
 
-通貨別の月額合計・**支払方法別の月額合計**・家計簿の口座別の月額合計（asset-manager#878。旧Zaim口座の項目は読まない）・契約ごとの明細（区分・契約状況・支払方法つき）・
+通貨別の月額合計・**支払方法別の月額合計**・家計簿の口座別の月額合計（asset-manager#878。旧Zaim口座の項目は読まない）・契約ごとの明細（契約状況・支払方法つき）・
 **31日以内の支払予定**まで。契約IDやラベル・料金改定の履歴は返さない（それは `asset_manager_subscriptions`）。
 
-**固定費はサブスクだけではない。** Asset Manager の契約には区分（`SUBSCRIPTION` / `INSURANCE` /
-`TAX` / `INSTALLMENT` / `OTHER_FIXED_COST`）があり、旧 subscription-lists にはなかった保険・税金・
-分割払いも「毎月出ていく額」にあたるため含める。明細の `category` で区別できる。相手の
-`summary.monthlyTotalJpy` はサブスク区分だけの集計なので使わず、全区分の `summary.fixedCostMonthlyTotalJpy` を
+**固定費はサブスクだけではない。** Asset Manager の契約には保険・税金・分割払いなども含まれ（区分 `category` は asset-manager#1371 で廃止）、旧 subscription-lists にはなかった保険・税金・
+分割払いも「毎月出ていく額」にあたるため含める。相手の
+`summary.monthlyTotalJpy` はサブスクだけの集計なので使わず、全契約の `summary.fixedCostMonthlyTotalJpy` を
 円換算の合計（`monthlyJpy`）に使う。**円換算できない契約（`summary.excludedFromTotal`）が1件でもあれば
 `monthlyJpy` は null にする**（部分的な合計を返すと、実際より少ない額が固定費として読まれるため）。
 

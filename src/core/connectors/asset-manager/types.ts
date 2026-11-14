@@ -22,14 +22,6 @@ export type SubscriptionAccountLink = "LINKED" | "NO_ACCOUNT" | "UNSET";
 export interface AssetManagerSubscription {
   id: number;
   name: string;
-  /**
-   * 区分。現状は `SUBSCRIPTION`（サブスク）・`INSURANCE`（保険・共済）・`TAX`（税金・年次支出）・
-   * `INSTALLMENT`（分割払い）・`OTHER_FIXED_COST`（その他固定費）。相手が増やしても壊れないよう
-   * 文字列のまま受ける。
-   */
-  category: string;
-  /** 区分の表示名（例 `"保険・共済"`）。 */
-  categoryLabel: string;
   status: SubscriptionContractStatus;
   /** 支払方法の名称（例 `"三井住友カード(VISA)"`）。 */
   paymentMethod: string;
