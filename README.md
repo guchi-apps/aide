@@ -1666,8 +1666,8 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 **固定費はサブスクだけではない。** Asset Manager の契約には保険・税金・分割払いなども含まれ（区分 `category` は asset-manager#1371 で廃止）、旧 subscription-lists にはなかった保険・税金・
 分割払いも「毎月出ていく額」にあたるため含める。相手の
-`summary.monthlyTotalJpy` はサブスクだけの集計なので使わず、全契約の `summary.fixedCostMonthlyTotalJpy` を
-円換算の合計（`monthlyJpy`）に使う。**円換算できない契約（`summary.excludedFromTotal`）が1件でもあれば
+`summary.monthlyTotalJpy` も解約済みを除く全契約の集計で、`summary.fixedCostMonthlyTotalJpy` は同じ値の
+互換項目（asset-manager側で deprecated）。AIDE は従来どおり `fixedCostMonthlyTotalJpy` を円換算の合計（`monthlyJpy`）に使う。**円換算できない契約（`summary.excludedFromTotal`）が1件でもあれば
 `monthlyJpy` は null にする**（部分的な合計を返すと、実際より少ない額が固定費として読まれるため）。
 
 通貨別の合計と支払方法別の合計は相手の集計に無いため、**AIDE側で明細から積み上げている**
@@ -3328,7 +3328,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 | | `aide_fixed_costs` | `asset_manager_subscriptions` |
 |---|---|---|
 | 返すもの | 畳んだ要約。通貨別の月額合計・支払方法別の合計・明細・31日以内の支払予定 | APIの応答（既定は契約ごとの履歴を省く。`includeHistory: true` で料金改定・支払方法の履歴も）。契約ごとのプラン・ラベル・契約期間・解約予定の終了日など |
-| 対象 | 固定費全体（サブスク・保険・税金・分割払いなど） | 全区分。`summary.monthlyTotalJpy` はサブスク区分だけ、全体は `summary.fixedCost*` |
+| 対象 | 固定費全体（サブスク・保険・税金・分割払いなど） | 全契約（区分は廃止済み）。`summary.monthlyTotalJpy` と互換項目 `summary.fixedCost*` はどちらも解約済みを除く全契約の集計 |
 | 使いどころ | 「毎月いくら出ていくか」「どのカードから落ちるか」 | 契約の中身を見る・料金改定の履歴を調べる・登録前に `id` や支払方法名を確かめる |
 
 固定費を `asset_manager_subscriptions` に任せて `aide_fixed_costs` を外す案は採らなかった。支払方法別の

@@ -532,7 +532,7 @@ export const assetManagerSubscriptionsTool: Tool = {
     "status が SCHEDULED_TO_END（解約予定）のものはまだ払っているので summary の合計に含まれる。「解約したもの」として扱うのは ENDED だけ。" +
     "usdJpyRate が null（為替レートを取れなかった）のとき、ドル建ては monthlyAmountJpy が null になり合計から外れる。" +
     "合計を答えるときは summary.excludedFromTotal が空かを確認し、空でなければ外れたサブスク名を添える。" +
-    "summary.monthlyTotalJpy などはサブスク区分だけの集計で、保険・税金・分割払いを含む固定費全体は summary.fixedCost* にある。" +
+    "summary.monthlyTotalJpy などは、保険・税金・分割払いを含む解約済みを除く全契約の集計（区分は廃止済み）。summary.fixedCost* は同じ値を返す互換項目なので、両者を足し合わせない。" +
     "引き落とし先の口座は家計簿の口座で返る（asset-manager#878）。契約ごとの accountLink（LINKED=口座あり / NO_ACCOUNT=口座を持たない支払方法 / UNSET=未設定）・ledgerAccountId・ledgerAccountName と、口座別の集計 summary.byLedgerAccount を使う。" +
     "旧項目の zaimLink・zaimAccountName・zaimAccountId・summary.byZaimAccount は廃止予定（zaimAccountId は常に null）なので読まない。" +
     "aide_fixed_costs は同じデータを、固定費全体の月額合計（通貨別）・支払方法別・家計簿の口座別の合計・31日以内の支払予定へ畳んだ要約で、" +
