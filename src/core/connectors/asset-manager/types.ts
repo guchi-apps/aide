@@ -49,8 +49,8 @@ export interface AssetManagerSubscriptionsSnapshot {
   asOf: string;
   summary: {
     /**
-     * **全区分**（保険・税金・分割払いを含む）の月額合計（円）。`monthlyTotalJpy` は
-     * サブスク区分だけの集計なので、固定費にはこちらを使う。円換算できない契約は含まれない。
+     * 全契約（保険・税金・分割払いを含む。解約済みを除く）の月額合計（円）。`monthlyTotalJpy` と
+     * 同じ値を返す互換項目（相手側で deprecated）。円換算できない契約は含まれない。
      */
     fixedCostMonthlyTotalJpy: number;
     /** 取得できなければ null。 */
