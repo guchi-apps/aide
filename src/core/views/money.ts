@@ -53,13 +53,6 @@ export interface FixedCostLedgerAccountTotal {
 
 export interface FixedCostItem {
   name: string;
-  /**
-   * 区分（`SUBSCRIPTION` / `INSURANCE` / `TAX` / `INSTALLMENT` / `OTHER_FIXED_COST`）。
-   * 固定費はサブスクだけでなく保険・税金・分割払いも含む。
-   */
-  category: string;
-  /** 区分の表示名（例 `"保険・共済"`）。 */
-  categoryLabel: string;
   /** 月額換算。年払い等も月あたりへ均してある。 */
   monthlyAmount: number;
   currency: SubscriptionCurrency;
@@ -349,8 +342,6 @@ export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot)
 
   const items: FixedCostItem[] = living.map((subscription) => ({
     name: subscription.name,
-    category: subscription.category,
-    categoryLabel: subscription.categoryLabel,
     monthlyAmount: subscription.monthlyAmount,
     currency: subscription.currency,
     contractStatus: subscription.status,
@@ -386,7 +377,7 @@ export function summarizeFixedCosts(snapshot: AssetManagerSubscriptionsSnapshot)
 
   const notes = [
     `${referenceDate} 時点の月額固定費。年払い等も月あたりへ均してある。`,
-    "サブスクだけでなく保険・税金・分割払いなども含む（items の category で区別できる）。",
+    "サブスクだけでなく保険・税金・分割払いなども含む。",
     "残高・保有銘柄（ストック）とは性質が違うため、totals には足していない。",
   ];
   if (monthlyByCurrency.length > 1) {
