@@ -700,7 +700,6 @@ export const assetManagerAddSubscriptionPriceTool: Tool = {
 const SNAPSHOT_FIELDS = [
   "id",
   "name",
-  "category",
   "status",
   "paymentMethod",
   "startDate",
@@ -713,7 +712,6 @@ const SNAPSHOT_FIELDS = [
   "updatedAt",
 ] as const;
 
-const SUBSCRIPTION_CATEGORIES = ["SUBSCRIPTION", "INSURANCE", "TAX", "INSTALLMENT", "OTHER_FIXED_COST"] as const;
 const MAX_MEMO_LENGTH = 1000;
 
 type SubscriptionRecord = Record<string, unknown>;
@@ -759,7 +757,6 @@ function sameLabels(a: unknown, b: string[]): boolean {
 
 interface SubscriptionPatch {
   name?: string;
-  category?: string;
   paymentMethodName?: string;
   paymentMethodEffectiveFrom?: string;
   startDate?: string;
@@ -780,10 +777,7 @@ function parseSubscriptionPatch(args: Record<string, unknown>): SubscriptionPatc
     patch.name = name;
   }
   if (args["category"] !== undefined) {
-    if (!(SUBSCRIPTION_CATEGORIES as readonly unknown[]).includes(args["category"])) {
-      return `category は ${SUBSCRIPTION_CATEGORIES.join(" / ")} のいずれかで指定してください`;
-    }
-    patch.category = args["category"] as string;
+    return "category は Asset Manager で廃止されたため変更できません（POST/PATCH では無視されます）";
   }
   if (args["paymentMethodName"] !== undefined) {
     const method = typeof args["paymentMethodName"] === "string" ? args["paymentMethodName"].trim() : "";
@@ -845,7 +839,6 @@ function parseTarget(args: Record<string, unknown>): { subscriptionId: number; e
 function effectivePatch(before: SubscriptionRecord, patch: SubscriptionPatch): SubscriptionPatch {
   const changed: SubscriptionPatch = {};
   if (patch.name !== undefined && patch.name !== before["name"]) changed.name = patch.name;
-  if (patch.category !== undefined && patch.category !== before["category"]) changed.category = patch.category;
   if (patch.paymentMethodName !== undefined && patch.paymentMethodName !== before["paymentMethod"]) {
     changed.paymentMethodName = patch.paymentMethodName;
     if (patch.paymentMethodEffectiveFrom !== undefined) changed.paymentMethodEffectiveFrom = patch.paymentMethodEffectiveFrom;
@@ -952,7 +945,7 @@ export const assetManagerUpdateSubscriptionTool: Tool = {
   name: "asset_manager_update_subscription",
   description:
     "Asset Managerの既存サブスク（契約）の項目を編集する書き込みツール。**指定した項目だけを変更し、未指定の項目と料金・支払方法の履歴は保持する。**" +
-    "編集できるのは名前・区分・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定（cancelPlanned）。削除と料金の上書きはできない。" +
+    "編集できるのは名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定（cancelPlanned）。削除と料金の上書きはできない。" +
     "使い分け: 新しい契約は asset_manager_create_subscription、値上げ・プラン変更は asset_manager_add_subscription_price（履歴を足す）、" +
     "解約の記録は asset_manager_record_subscription_cancellation、それ以外の契約情報の修正はこのツール。" +
     "呼ぶ前に asset_manager_subscriptions（name で絞れる）で対象を確かめ、候補が複数ある・名前が曖昧なときは利用者に選んでもらう。" +
@@ -966,7 +959,6 @@ export const assetManagerUpdateSubscriptionTool: Tool = {
     properties: {
       ...TARGET_PROPERTIES,
       name: { type: "string", maxLength: MAX_SUBSCRIPTION_NAME_LENGTH, description: "新しい契約名。" },
-      category: { type: "string", enum: [...SUBSCRIPTION_CATEGORIES], description: "区分。" },
       paymentMethodName: { type: "string", maxLength: MAX_PAYMENT_METHOD_NAME_LENGTH, description: "新しい支払方法名（登録済みの名前）。" },
       paymentMethodEffectiveFrom: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "新しい支払方法の適用開始日。paymentMethodName と一緒に指定する。" },
       startDate: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "契約開始日。" },

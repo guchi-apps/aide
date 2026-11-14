@@ -700,7 +700,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_subscriptions` | Asset Manager（サブスク管理の移管先）のサブスク一覧。合計（月額・年額・件数）・次の請求・契約ごとの明細（1回あたりの請求額と月あたりの金額の両方）。**読み取り専用**（`includeEnded` で解約済みも含める。詳細は[サブスクを読む](#asset-managerのサブスクを読むmcp)） |
 | `asset_manager_create_subscription` | Asset Managerへサブスクと初回料金を新規登録する。**書き込みツール**（作成のみ。既存の契約・料金を編集・削除しない） |
 | `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
-| `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・区分・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
+| `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
 | `asset_manager_record_subscription_cancellation` | 契約へ解約情報（検討中／事業者での手続き完了＝自動更新停止＋終了日＋メモ追記）を記録する。**書き込みツール**（条件3の例外。台帳の記録だけで事業者の契約は変更しない） |
 | `aide_research_desk_import_weekly_report` | Research Deskへエクステリア事業・ロッカー事業・AI関連の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体15件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
@@ -3355,7 +3355,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 |---|---|
 | 新しい契約を登録する（登録前に同名・類似名を自動確認し、候補があれば登録しない。`allowDuplicate: true` で押し切る） | `asset_manager_create_subscription` |
 | 値上げ・プラン変更を履歴に足す | `asset_manager_add_subscription_price` |
-| 名前・区分・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定を直す | `asset_manager_update_subscription` |
+| 名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定を直す | `asset_manager_update_subscription` |
 | 解約の意向／手続き完了を記録する | `asset_manager_record_subscription_cancellation` |
 | 対象のIDを確かめる（`name` で絞り込める） | `asset_manager_subscriptions` |
 
