@@ -22,14 +22,6 @@ export type SubscriptionAccountLink = "LINKED" | "NO_ACCOUNT" | "UNSET";
 export interface AssetManagerSubscription {
   id: number;
   name: string;
-  /**
-   * 区分。現状は `SUBSCRIPTION`（サブスク）・`INSURANCE`（保険・共済）・`TAX`（税金・年次支出）・
-   * `INSTALLMENT`（分割払い）・`OTHER_FIXED_COST`（その他固定費）。相手が増やしても壊れないよう
-   * 文字列のまま受ける。
-   */
-  category: string;
-  /** 区分の表示名（例 `"保険・共済"`）。 */
-  categoryLabel: string;
   status: SubscriptionContractStatus;
   /** 支払方法の名称（例 `"三井住友カード(VISA)"`）。 */
   paymentMethod: string;
@@ -57,8 +49,8 @@ export interface AssetManagerSubscriptionsSnapshot {
   asOf: string;
   summary: {
     /**
-     * **全区分**（保険・税金・分割払いを含む）の月額合計（円）。`monthlyTotalJpy` は
-     * サブスク区分だけの集計なので、固定費にはこちらを使う。円換算できない契約は含まれない。
+     * 全契約（保険・税金・分割払いを含む。解約済みを除く）の月額合計（円）。`monthlyTotalJpy` と
+     * 同じ値を返す互換項目（相手側で deprecated）。円換算できない契約は含まれない。
      */
     fixedCostMonthlyTotalJpy: number;
     /** 取得できなければ null。 */

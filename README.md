@@ -700,7 +700,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_subscriptions` | Asset Manager（サブスク管理の移管先）のサブスク一覧。合計（月額・年額・件数）・次の請求・契約ごとの明細（1回あたりの請求額と月あたりの金額の両方）。**読み取り専用**（`includeEnded` で解約済みも含める。詳細は[サブスクを読む](#asset-managerのサブスクを読むmcp)） |
 | `asset_manager_create_subscription` | Asset Managerへサブスクと初回料金を新規登録する。**書き込みツール**（作成のみ。既存の契約・料金を編集・削除しない） |
 | `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
-| `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・区分・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
+| `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
 | `asset_manager_record_subscription_cancellation` | 契約へ解約情報（検討中／事業者での手続き完了＝自動更新停止＋終了日＋メモ追記）を記録する。**書き込みツール**（条件3の例外。台帳の記録だけで事業者の契約は変更しない） |
 | `aide_research_desk_import_weekly_report` | Research Deskへエクステリア事業・ロッカー事業・AI関連の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体15件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
@@ -1661,14 +1661,13 @@ src/core/views/money.ts      Zaimのキャッシュと合わせて畳む（summa
 
 ### 返す粒度と、totals へ足さない理由
 
-通貨別の月額合計・**支払方法別の月額合計**・家計簿の口座別の月額合計（asset-manager#878。旧Zaim口座の項目は読まない）・契約ごとの明細（区分・契約状況・支払方法つき）・
+通貨別の月額合計・**支払方法別の月額合計**・家計簿の口座別の月額合計（asset-manager#878。旧Zaim口座の項目は読まない）・契約ごとの明細（契約状況・支払方法つき）・
 **31日以内の支払予定**まで。契約IDやラベル・料金改定の履歴は返さない（それは `asset_manager_subscriptions`）。
 
-**固定費はサブスクだけではない。** Asset Manager の契約には区分（`SUBSCRIPTION` / `INSURANCE` /
-`TAX` / `INSTALLMENT` / `OTHER_FIXED_COST`）があり、旧 subscription-lists にはなかった保険・税金・
-分割払いも「毎月出ていく額」にあたるため含める。明細の `category` で区別できる。相手の
-`summary.monthlyTotalJpy` はサブスク区分だけの集計なので使わず、全区分の `summary.fixedCostMonthlyTotalJpy` を
-円換算の合計（`monthlyJpy`）に使う。**円換算できない契約（`summary.excludedFromTotal`）が1件でもあれば
+**固定費はサブスクだけではない。** Asset Manager の契約には保険・税金・分割払いなども含まれ（区分 `category` は asset-manager#1371 で廃止）、旧 subscription-lists にはなかった保険・税金・
+分割払いも「毎月出ていく額」にあたるため含める。相手の
+`summary.monthlyTotalJpy` も解約済みを除く全契約の集計で、`summary.fixedCostMonthlyTotalJpy` は同じ値の
+互換項目（asset-manager側で deprecated）。AIDE は従来どおり `fixedCostMonthlyTotalJpy` を円換算の合計（`monthlyJpy`）に使う。**円換算できない契約（`summary.excludedFromTotal`）が1件でもあれば
 `monthlyJpy` は null にする**（部分的な合計を返すと、実際より少ない額が固定費として読まれるため）。
 
 通貨別の合計と支払方法別の合計は相手の集計に無いため、**AIDE側で明細から積み上げている**
@@ -3329,7 +3328,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 | | `aide_fixed_costs` | `asset_manager_subscriptions` |
 |---|---|---|
 | 返すもの | 畳んだ要約。通貨別の月額合計・支払方法別の合計・明細・31日以内の支払予定 | APIの応答（既定は契約ごとの履歴を省く。`includeHistory: true` で料金改定・支払方法の履歴も）。契約ごとのプラン・ラベル・契約期間・解約予定の終了日など |
-| 対象 | 固定費全体（サブスク・保険・税金・分割払いなど） | 全区分。`summary.monthlyTotalJpy` はサブスク区分だけ、全体は `summary.fixedCost*` |
+| 対象 | 固定費全体（サブスク・保険・税金・分割払いなど） | 全契約（区分は廃止済み）。`summary.monthlyTotalJpy` と互換項目 `summary.fixedCost*` はどちらも解約済みを除く全契約の集計 |
 | 使いどころ | 「毎月いくら出ていくか」「どのカードから落ちるか」 | 契約の中身を見る・料金改定の履歴を調べる・登録前に `id` や支払方法名を確かめる |
 
 固定費を `asset_manager_subscriptions` に任せて `aide_fixed_costs` を外す案は採らなかった。支払方法別の
@@ -3356,7 +3355,7 @@ MCPの入力・出力・ログへは出さない。本番URLは `AIDE_ASSET_MANA
 |---|---|
 | 新しい契約を登録する（登録前に同名・類似名を自動確認し、候補があれば登録しない。`allowDuplicate: true` で押し切る） | `asset_manager_create_subscription` |
 | 値上げ・プラン変更を履歴に足す | `asset_manager_add_subscription_price` |
-| 名前・区分・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定を直す | `asset_manager_update_subscription` |
+| 名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定を直す | `asset_manager_update_subscription` |
 | 解約の意向／手続き完了を記録する | `asset_manager_record_subscription_cancellation` |
 | 対象のIDを確かめる（`name` で絞り込める） | `asset_manager_subscriptions` |
 

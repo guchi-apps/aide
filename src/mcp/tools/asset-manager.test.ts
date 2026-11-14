@@ -978,7 +978,7 @@ describe("asset_manager_create_subscription の重複確認（#642）", () => {
 
 describe("asset_manager_update_subscription / record_subscription_cancellation（#642）", () => {
   const BEFORE = {
-    id: 5, name: "Claude Pro", category: "SUBSCRIPTION", status: "AUTO_RENEWING", paymentMethod: "楽天カード",
+    id: 5, name: "Claude Pro", status: "AUTO_RENEWING", paymentMethod: "楽天カード",
     startDate: "2026-01-01", endDate: null, autoRenew: true, cancelPlanned: false, memo: "個人用",
     labels: ["AI"], nextBillingDay: "2026-11-01", updatedAt: "2026-10-01T00:00:00.000Z",
   };
@@ -1018,6 +1018,20 @@ describe("asset_manager_update_subscription / record_subscription_cancellation�
       assert.equal(out.after.memo, "家族共有");
       assert.equal(out.after.name, "Claude Pro");
       assert.deepEqual(patches, [{ expectedName: "Claude Pro", expectedUpdatedAt: BEFORE.updatedAt, subscription: { memo: "家族共有" } }]);
+    } finally {
+      mocked.mock.restore();
+    }
+  });
+
+  it("廃止済みの category だけの更新は拒否し、PATCHを送らない（#851）", async () => {
+    useEnv();
+    const { mocked, patches } = fakeAssetManager();
+    try {
+      const result = await assetManagerUpdateSubscriptionTool.handler({ subscriptionId: 5, expectedName: "Claude Pro", category: "INSURANCE" }, { sessionId: null });
+      assert.match(JSON.stringify(parsed(result)), /category/);
+      assert.notEqual((parsed(result) as Record<string, unknown>)["status"], "updated");
+      assert.equal(patches.length, 0);
+      assert.equal("category" in (assetManagerUpdateSubscriptionTool.inputSchema.properties as Record<string, unknown>), false);
     } finally {
       mocked.mock.restore();
     }
