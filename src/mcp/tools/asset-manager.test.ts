@@ -3,6 +3,8 @@ import { describe, it, mock } from "node:test";
 import type { ToolResult } from "../types.ts";
 import {
   assetManagerAddSubscriptionPriceTool,
+  assetManagerCardWithdrawalsTool,
+  assetManagerConfirmCardWithdrawalTool,
   assetManagerCreateSubscriptionTool,
   assetManagerImportPaymentTool,
   assetManagerRecordSubscriptionCancellationTool,
@@ -1146,5 +1148,113 @@ describe("asset_manager_subscriptions の name 絞り込み（#642）", () => {
     } finally {
       fetchMock.mock.restore();
     }
+  });
+});
+
+describe("asset_manager_card_withdrawals / asset_manager_confirm_card_withdrawal（#855）", () => {
+  const ctx = { sessionId: null };
+
+  function stubFetch(handler: (url: string, init?: RequestInit) => Response) {
+    process.env["AIDE_ASSET_MANAGER_URL"] = "https://asset.example.test/";
+    process.env["AIDE_ASSET_MANAGER_ZAIM_SYNC_SECRET"] = SECRET;
+    return mock.method(globalThis, "fetch", async (input: string | URL, init?: RequestInit) => handler(String(input), init));
+  }
+
+  it("読み取りは GET /api/card-withdrawals を呼び、days をクエリへ渡す", async () => {
+    const calls: Array<{ url: string; method: string | undefined; auth: string }> = [];
+    const fetchMock = stubFetch((url, init) => {
+      calls.push({ url, method: init?.method, auth: (init?.headers as Record<string, string>).Authorization ?? "" });
+      return new Response(JSON.stringify({ status: "ok", withdrawals: [] }), { status: 200 });
+    });
+    try {
+      await assetManagerCardWithdrawalsTool.handler({}, ctx);
+      await assetManagerCardWithdrawalsTool.handler({ days: 45 }, ctx);
+    } finally {
+      fetchMock.mock.restore();
+    }
+    assert.deepEqual(calls.map((c) => c.url), [
+      "https://asset.example.test/api/card-withdrawals",
+      "https://asset.example.test/api/card-withdrawals?days=45",
+    ]);
+    assert.ok(calls.every((c) => c.method === "GET" && c.auth === `Bearer ${SECRET}`));
+  });
+
+  it("days が範囲外なら呼ばずに拒否する", async () => {
+    const fetchMock = stubFetch(() => assert.fail("呼ばれてはいけない"));
+    try {
+      for (const days of [0, 63, 1.5, "30"]) {
+        assert.equal((parsed(await assetManagerCardWithdrawalsTool.handler({ days }, ctx)) as { status: string }).status, "error");
+      }
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("上書きは固定の項目だけを POST で送る", async () => {
+    let sent: unknown;
+    let method: string | undefined;
+    const fetchMock = stubFetch((_url, init) => {
+      method = init?.method;
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ status: "ok", result: "replaced", previousAmountJpy: 193731 }), { status: 200 });
+    });
+    try {
+      const out = await assetManagerConfirmCardWithdrawalTool.handler(
+        { cardName: " 三井住友ゴールドVISA ", paymentDate: "2026-11-26", amount: 184591, sourceKey: " <msg-1@example> ", note: "メールの確定額" },
+        ctx,
+      );
+      assert.deepEqual(parsed(out), { status: "ok", result: "replaced", previousAmountJpy: 193731 });
+    } finally {
+      fetchMock.mock.restore();
+    }
+    assert.equal(method, "POST");
+    assert.deepEqual(sent, {
+      cardName: "三井住友ゴールドVISA",
+      paymentDate: "2026-11-26",
+      amount: 184591,
+      sourceKey: "<msg-1@example>",
+      note: "メールの確定額",
+    });
+  });
+
+  it("入力が不正・不足・知らない項目なら呼ばずに拒否する", async () => {
+    const fetchMock = stubFetch(() => assert.fail("呼ばれてはいけない"));
+    const base = { cardId: 3, paymentDate: "2026-11-26", amount: 1000, sourceKey: "k" };
+    const bad: Array<Record<string, unknown>> = [
+      { ...base, cardId: undefined },
+      { ...base, cardId: 0 },
+      { ...base, paymentDate: "2026-02-30" },
+      { ...base, amount: -1 },
+      { ...base, amount: 10.5 },
+      { ...base, amount: 100_000_001 },
+      { ...base, sourceKey: "  " },
+      { ...base, sourceKey: "x".repeat(192) },
+      { ...base, note: 1 },
+      { ...base, memo: "余計な項目" },
+    ];
+    try {
+      for (const args of bad) {
+        assert.equal((parsed(await assetManagerConfirmCardWithdrawalTool.handler(args, ctx)) as { status: string }).status, "error", JSON.stringify(args));
+      }
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("相手の409（取り違えの疑い）は isError: true で本文を残す", async () => {
+    const fetchMock = stubFetch(() => new Response(JSON.stringify({ status: "error", reason: "同じ sourceKey で内容が違います", existing: { id: 1 } }), { status: 409 }));
+    try {
+      const out = await assetManagerConfirmCardWithdrawalTool.handler({ cardId: 3, paymentDate: "2026-11-26", amount: 1000, sourceKey: "k" }, ctx);
+      assert.equal(out.isError, true);
+      assert.deepEqual(parsed(out), { status: "error", reason: "同じ sourceKey で内容が違います", existing: { id: 1 }, httpStatus: 409 });
+    } finally {
+      fetchMock.mock.restore();
+    }
+  });
+
+  it("入力スキーマは additionalProperties:false で、必須は paymentDate・amount・sourceKey", () => {
+    assert.equal(assetManagerConfirmCardWithdrawalTool.inputSchema.additionalProperties, false);
+    assert.deepEqual(assetManagerConfirmCardWithdrawalTool.inputSchema.required, ["paymentDate", "amount", "sourceKey"]);
+    assert.equal(assetManagerCardWithdrawalsTool.inputSchema.additionalProperties, false);
   });
 });
