@@ -66,13 +66,25 @@ export async function runZaimMoneySync(): Promise<string> {
     throw new Error("Zaimの画面を使う別の処理（商品内訳の手動再取得）が終わらないため、巡回を始められませんでした");
   }
   try {
-    return await syncZaimMoney();
+    return (await syncZaimMoney()).message;
   } finally {
     await lock.release().catch(() => undefined);
   }
 }
 
-async function syncZaimMoney(): Promise<string> {
+/** 巡回1回の結果。ジョブ履歴へ残す要約（`message`）と、手動の取り直し（#863）が返す件数・月。 */
+export interface ZaimMoneySyncResult {
+  message: string;
+  entryCount: number;
+  months: string[];
+  failedMonths: ZaimFailedMonth[];
+}
+
+/**
+ * 明細一覧を取得してキャッシュへ送る本体。**呼び出し側が画面のロックを持っていること**
+ * （定期巡回は `runZaimMoneySync`、手動の取り直しは `worker/money-list-refresh-jobs.ts` が取る）。
+ */
+export async function syncZaimMoney(): Promise<ZaimMoneySyncResult> {
   const now = new Date();
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
   const startDay = zaimMonthStartDay();
@@ -108,5 +120,5 @@ async function syncZaimMoney(): Promise<string> {
   if (previousFailureMessage) {
     parts.push(`（${prevMonth}分の取得に失敗したため今日を含む月のみ: ${previousFailureMessage}）`);
   }
-  return parts.join("");
+  return { message: parts.join(""), entryCount: merged.entries.length, months: covered, failedMonths };
 }

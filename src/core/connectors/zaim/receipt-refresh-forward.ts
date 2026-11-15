@@ -19,9 +19,20 @@ import {
 
 export const ZAIM_RECEIPT_REFRESH_PATH = "/api/zaim/receipt-detail/refresh";
 
+export const ZAIM_MONEY_LIST_REFRESH_PATH = "/api/zaim/money-list/refresh";
+
 /** ジョブ1件の状態を読むパスから、ジョブIDを取り出す。 */
 export function receiptRefreshJobId(path: string): string | null {
-  const prefix = `${ZAIM_RECEIPT_REFRESH_PATH}/`;
+  return refreshJobId(path, ZAIM_RECEIPT_REFRESH_PATH);
+}
+
+/** 明細一覧の取り直し（#863）のジョブIDを取り出す。 */
+export function moneyListRefreshJobId(path: string): string | null {
+  return refreshJobId(path, ZAIM_MONEY_LIST_REFRESH_PATH);
+}
+
+function refreshJobId(path: string, base: string): string | null {
+  const prefix = `${base}/`;
   if (!path.startsWith(prefix)) return null;
   const id = path.slice(prefix.length);
   // ジョブIDはUUID。パスの区切りや想定外の文字は受け付けない。
@@ -52,16 +63,21 @@ function subpcFailure(kind: string, message: string, retryable: boolean): Forwar
   return { status: 502, body: { ok: false, failure: { kind, retryable, message } } };
 }
 
+/**
+ * `path` は受け口側の受付パス。既定は商品内訳の手動再取得で、明細一覧の取り直し（#863）は
+ * 同じ「受付→状態の読み取り」の形なのでパスだけ変えてこの中継を使う。
+ */
 export async function forwardReceiptRefresh(
   request: { method: "POST"; body: unknown } | { method: "GET"; jobId: string },
   options: ZaimWebForwardOptions,
+  path: string = ZAIM_RECEIPT_REFRESH_PATH,
 ): Promise<ForwardedResponse> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const base = options.baseUrl.replace(/\/$/, "");
   const url =
     request.method === "POST"
-      ? `${base}${ZAIM_RECEIPT_REFRESH_PATH}`
-      : `${base}${ZAIM_RECEIPT_REFRESH_PATH}/${encodeURIComponent(request.jobId)}`;
+      ? `${base}${path}`
+      : `${base}${path}/${encodeURIComponent(request.jobId)}`;
 
   let response: Response;
   try {
