@@ -12,6 +12,8 @@ import type { Tool, ToolResult } from "../types.ts";
 const TASK_READ = ["tasks:read"] as const;
 const TASK_WRITE = ["tasks:write"] as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** YoteiFlowの内部API契約（task-contract.ts の DATE_TIME）と同じ形。タイムゾーンは必須（#857）。 */
+const DATE_TIME = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const MAX_TEXT = 2000;
 
 function result(payload: unknown): ToolResult {
@@ -56,8 +58,29 @@ function date(value: unknown, name: string): string | null | ToolResult | undefi
   if (value === undefined) return undefined;
   if (value === null) return null;
   if (typeof value !== "string" || !DAY.test(value)) return invalid(`${name} は YYYY-MM-DD または null で指定してください`);
+  if (!realDay(value)) return invalid(`${name} は実在する日付で指定してください`);
+  return value;
+}
+
+function realDay(value: string): boolean {
   const parsed = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) return invalid(`${name} は実在する日付で指定してください`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * タスクの期限・予定日。日付のみ（YYYY-MM-DD）か、タイムゾーン付きの日時（ISO 8601）を受け付ける（#857）。
+ * YoteiFlowは時刻付きの値をそのままNotionの日付へ書くため、ここで日付へ切り詰めない。
+ * タイムゾーン無しの日時は、どの地域の時刻か決められないので断る（黙ってUTC扱いにしない）。
+ */
+export function taskDate(value: unknown, name: string): string | null | ToolResult | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const message = `${name} は YYYY-MM-DD、時刻付きなら 2026-11-20T15:00:00+09:00 のようにタイムゾーン付きで、または null で指定してください`;
+  if (typeof value !== "string") return invalid(message);
+  if (DAY.test(value)) return realDay(value) ? value : invalid(`${name} は実在する日付で指定してください`);
+  const match = DATE_TIME.exec(value);
+  if (!match) return invalid(message);
+  if (!realDay(match[1]!) || Number.isNaN(Date.parse(value))) return invalid(`${name} は実在する日時で指定してください`);
   return value;
 }
 
@@ -70,7 +93,7 @@ function fields(args: Record<string, unknown>, creating: boolean): Record<string
     next.title = title;
   }
   for (const name of ["due", "planned"] as const) {
-    const value = date(args[name], name);
+    const value = taskDate(args[name], name);
     if (value && typeof value === "object") return value;
     if (value !== undefined) next[name] = value;
   }
@@ -96,8 +119,14 @@ function fields(args: Record<string, unknown>, creating: boolean): Record<string
 
 const fieldProperties = {
   title: { type: "string", description: "タスク名。" },
-  due: { type: ["string", "null"], description: "期限（YYYY-MM-DD）。nullで解除。" },
-  planned: { type: ["string", "null"], description: "予定日（YYYY-MM-DD）。nullで解除。" },
+  due: {
+    type: ["string", "null"],
+    description: "期限。日付のみは YYYY-MM-DD、時刻も指定されたら 2026-11-20T15:00:00+09:00 のようにタイムゾーン付きで渡す（時刻を落とさない）。nullで解除。",
+  },
+  planned: {
+    type: ["string", "null"],
+    description: "予定日。日付のみは YYYY-MM-DD、時刻も指定されたら 2026-11-20T15:00:00+09:00 のようにタイムゾーン付きで渡す（時刻を落とさない）。nullで解除。",
+  },
   priority: { type: ["string", "null"], description: "優先度。nullで解除。" },
   memo: { type: ["string", "null"], description: "メモ。nullで解除。" },
   tags: { type: "array", items: { type: "string" }, description: "タグの全置換。" },

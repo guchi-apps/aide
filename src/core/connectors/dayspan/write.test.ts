@@ -85,6 +85,16 @@ describe("normalizeCreateEventInput", () => {
     }
   });
 
+  it("description を渡せば含める。空・省略は送らない。文字列以外・長すぎるものは弾く", () => {
+    const base = { title: "歯医者", date: "2026-09-10" };
+    assert.deepEqual(normalizeCreateEventInput({ ...base, description: " 保険証を持参 " }), {
+      input: { ...base, description: "保険証を持参" },
+    });
+    assert.deepEqual(normalizeCreateEventInput({ ...base, description: "  " }), { input: base });
+    assert.ok("error" in normalizeCreateEventInput({ ...base, description: 1 }));
+    assert.ok("error" in normalizeCreateEventInput({ ...base, description: "あ".repeat(8001) }));
+  });
+
   it("location・calendarId を渡せば含める。空文字は指定なしとして落とす", () => {
     const result = normalizeCreateEventInput({
       title: "歯医者",
@@ -277,6 +287,17 @@ describe("normalizeUpdateEventInput", () => {
 
   it("変える項目が1つも無ければ弾く", () => {
     assert.ok("error" in normalizeUpdateEventInput(target));
+  });
+
+  it("description を渡せる。空文字で消せる。文字列以外・長すぎるものは弾く", () => {
+    assert.deepEqual(normalizeUpdateEventInput({ ...target, description: " 持ち物: 保険証 " }), {
+      input: { ...target, description: "持ち物: 保険証" },
+    });
+    assert.deepEqual(normalizeUpdateEventInput({ ...target, description: "" }), {
+      input: { ...target, description: "" },
+    });
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, description: 1 }));
+    assert.ok("error" in normalizeUpdateEventInput({ ...target, description: "あ".repeat(8001) }));
   });
 
   it("location は空文字で消せる", () => {

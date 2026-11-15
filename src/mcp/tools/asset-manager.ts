@@ -1033,3 +1033,123 @@ export const assetManagerRecordSubscriptionCancellationTool: Tool = {
     });
   },
 };
+
+/** 引き落とし予定を読む日数の範囲。Asset Manager の `GET /api/card-withdrawals` の `days`（既定30・最大62。asset-manager#1446）と同じ。 */
+const MAX_CARD_WITHDRAWAL_DAYS = 62;
+/** `sourceKey`・`note` の上限。Asset Manager の列（VarChar(191)）と同じ値。 */
+const MAX_CARD_WITHDRAWAL_TEXT_LENGTH = 191;
+/** 確定額の上限。Asset Manager の `MAX_AMOUNT` と同じ値。 */
+const MAX_CARD_WITHDRAWAL_AMOUNT = 100_000_000;
+
+/**
+ * カードの引き落とし見込みを読む（Morrow#910。Asset Manager 側は asset-manager#1446）。
+ * メールの確定額との食い違いを見つけるための読み取りで、何も書かない。
+ */
+export const assetManagerCardWithdrawalsTool: Tool = {
+  name: "asset_manager_card_withdrawals",
+  description:
+    "Asset Managerが持つ、今後のカード引き落とし予定（見込み）を返す。読み取り専用。" +
+    "予定ごとに、表示している額（amountJpy）・推計の額（estimatedAmountJpy）・出どころ（source: estimate=推計 / confirmed=メールの確定額で上書き済み）・" +
+    "確定額の内容（confirmation）を含む。cards は設定がそろったカードの名前と id の対応、unmatchedConfirmations はどの予定にも当たらなかった確定額。" +
+    "カード会社のメールの確定額と見込みが食い違っていないかを確かめるときに呼ぶ。" +
+    "食い違いがあって確定額で上書きするときは、別ツール asset_manager_confirm_card_withdrawal を使う（このツールは書き込まない）。" +
+    "days は今後何日分か（1〜62。省略時はAsset Managerの既定の30日）。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      days: {
+        type: "integer",
+        minimum: 1,
+        maximum: MAX_CARD_WITHDRAWAL_DAYS,
+        description: "今後何日分の引き落とし予定を返すか。省略時は30日。",
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const days = args["days"];
+    if (days !== undefined && (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > MAX_CARD_WITHDRAWAL_DAYS)) {
+      return invalid(`days は1〜${MAX_CARD_WITHDRAWAL_DAYS}の整数で指定してください`);
+    }
+    return callAssetManager(days === undefined ? "/api/card-withdrawals" : `/api/card-withdrawals?days=${days}`, { method: "GET" });
+  },
+};
+
+const CONFIRM_CARD_WITHDRAWAL_FIELDS = ["cardId", "cardName", "paymentDate", "amount", "sourceKey", "note"] as const;
+
+/**
+ * メールの確定額でカードの引き落とし見込みを上書きする（Morrow#910。Asset Manager 側は asset-manager#1446）。
+ *
+ * **冪等キーは `sourceKey`**（メールの Message-ID）。同じキー・同じ中身の再送は何も変えない。
+ * 入力は固定の項目だけを通し、知らない項目は黙って捨てず拒否する（Morrowの許可リストと承認カードから呼ぶ前提）。
+ */
+export const assetManagerConfirmCardWithdrawalTool: Tool = {
+  name: "asset_manager_confirm_card_withdrawal",
+  description:
+    "カード会社のメールに書かれた確定の引き落とし額で、Asset Managerのカード引き落とし見込みを上書きする書き込みツール。" +
+    "先に asset_manager_card_withdrawals で見込みと食い違っていることを確かめ、利用者の承認を得てから呼ぶ。" +
+    "カードは cardId（cards で確かめた id）か cardName（口座名か短い名前と完全一致）のどちらかで指定する。" +
+    "sourceKey にはメールの Message-ID など、そのメールを一意に表す値を入れる。これが冪等キーで、" +
+    "同じ sourceKey・同じ内容の再送は何も変えない（result: unchanged）。同じ sourceKey で内容が違うと取り違えの疑いとして上書きせず status: error を返す。" +
+    "同じカード・同じ引き落とし日に別の sourceKey で届いたときは、新しいほうを正として上書きする（result: replaced。前の額は previousAmountJpy）。" +
+    "元の見込みへ戻す操作はこのツールには無い。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      cardId: { type: "integer", minimum: 1, description: "カード口座の id。cardName とどちらか一方が要る（両方あれば id を使う）。" },
+      cardName: { type: "string", minLength: 1, maxLength: MAX_CARD_WITHDRAWAL_TEXT_LENGTH, description: "カード口座の名前（口座名か短い名前と完全一致）。cardId とどちらか一方が要る。" },
+      paymentDate: { type: "string", pattern: DAY_KEY_PATTERN.source, description: "引き落とし日（YYYY-MM-DD）。" },
+      amount: { type: "integer", minimum: 0, maximum: MAX_CARD_WITHDRAWAL_AMOUNT, description: "メールに書かれた確定額（円）。" },
+      sourceKey: { type: "string", minLength: 1, maxLength: MAX_CARD_WITHDRAWAL_TEXT_LENGTH, description: "冪等キー。メールの Message-ID など。" },
+      note: { type: "string", maxLength: MAX_CARD_WITHDRAWAL_TEXT_LENGTH, description: "メモ（任意）。" },
+    },
+    required: ["paymentDate", "amount", "sourceKey"],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    for (const key of Object.keys(args)) {
+      if (!(CONFIRM_CARD_WITHDRAWAL_FIELDS as readonly string[]).includes(key)) return invalid(`${key} は指定できません`);
+    }
+
+    const payload: Record<string, unknown> = {};
+
+    const cardId = args["cardId"];
+    if (cardId !== undefined) {
+      if (typeof cardId !== "number" || !Number.isInteger(cardId) || cardId < 1) return invalid("cardId は正の整数で指定してください");
+      payload["cardId"] = cardId;
+    }
+    const cardName = args["cardName"];
+    if (cardName !== undefined) {
+      if (typeof cardName !== "string" || !cardName.trim() || cardName.length > MAX_CARD_WITHDRAWAL_TEXT_LENGTH) {
+        return invalid(`cardName は1〜${MAX_CARD_WITHDRAWAL_TEXT_LENGTH}文字の文字列で指定してください`);
+      }
+      payload["cardName"] = cardName.trim();
+    }
+    if (cardId === undefined && cardName === undefined) return invalid("cardId か cardName のどちらかが必要です");
+
+    if (!validDayKey(args["paymentDate"])) return invalid("paymentDate は実在する YYYY-MM-DD で指定してください");
+    payload["paymentDate"] = args["paymentDate"];
+
+    const amount = args["amount"];
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0 || amount > MAX_CARD_WITHDRAWAL_AMOUNT) {
+      return invalid(`amount は0〜${MAX_CARD_WITHDRAWAL_AMOUNT}の整数（円）で指定してください`);
+    }
+    payload["amount"] = amount;
+
+    const sourceKey = args["sourceKey"];
+    if (typeof sourceKey !== "string" || !sourceKey.trim() || sourceKey.trim().length > MAX_CARD_WITHDRAWAL_TEXT_LENGTH) {
+      return invalid(`sourceKey は1〜${MAX_CARD_WITHDRAWAL_TEXT_LENGTH}文字の文字列で指定してください`);
+    }
+    payload["sourceKey"] = sourceKey.trim();
+
+    const note = args["note"];
+    if (note !== undefined) {
+      if (typeof note !== "string" || note.length > MAX_CARD_WITHDRAWAL_TEXT_LENGTH) {
+        return invalid(`note は${MAX_CARD_WITHDRAWAL_TEXT_LENGTH}文字以内の文字列で指定してください`);
+      }
+      payload["note"] = note;
+    }
+
+    return callAssetManager("/api/card-withdrawals", { method: "POST", body: payload });
+  },
+};

@@ -281,7 +281,7 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 **「対象を名指しさせる」へ置き換えた**（条件1・2は作成と同じ理由で満たす。資格情報も作成と共用）。
 
 - **対象は `aide_schedule` が返す予定の `id`・`calendarId` で指す。** 推測させない
-- **`aide_update_event`** は送った項目だけを変える（タイトル・日付・時刻・終日・場所・仮/確定）。`dryRun` あり
+- **`aide_update_event`** は送った項目だけを変える（タイトル・日付・時刻・終日・場所・メモ・仮/確定）。`dryRun` あり
 - **`aide_delete_event`** は予定の**現在のタイトル**を必須にし、DaySpanが一致を確かめて違えば `409`
   （`kind: conflict`・`currentTitle`）で何も消さない。消せるのは1回分だけで、繰り返しの親は断られる。`dryRun` あり
 - どちらも**復唱して利用者の確認を取ってから呼ぶ**前提（説明文に書いてある）。aide-bot側は `MCP_PRESETS` の
@@ -674,7 +674,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_aircon_control` | エアコンの電源・運転モード・設定温度・風量を変更する。**部屋の機器を操作するツール**（`acId` と名前を myroom のいまの状態と突き合わせてから送る。オフラインには送らない。結果は変更前の状態と送信後の読み戻しまで返す。`dryRun` で送らずに確認できる。詳細は[エアコンの操作](#エアコンの操作aide316)） |
 | `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
 | `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）。予定には中止・不参加の記録（`outcome`）と本文（300文字まで）が付く（#388）。更新・削除で指す `id`・`calendarId` も付く（#493） |
-| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる。`endDate` で日をまたぐ時刻予定も1件で作れる） |
+| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる。`endDate` で日をまたぐ時刻予定も1件で作れる。`description` でメモも書ける。**DaySpan（yoteiflow#1530）の対応が先に本番へ出ていること**。未対応だとメモは黙って落ちる） |
 | `aide_update_event` | 既存の予定を1件変更する（`aide_schedule` の `id`・`calendarId` で指す）。**書き込みツール**（送った項目だけ変わる。`dryRun` で変更せず確認できる） |
 | `aide_delete_event` | 既存の予定を1件削除する。**書き込みツール**（元に戻せない。現在のタイトルの一致が要り、違えば消さない。`dryRun` で削除せず確認できる） |
 | `aide_create_travel` | YoteiFlowの移動（TravelPlan）を1件登録する。**書き込みツール**（通常予定は作らない。scope `travel:write`。`idempotencyKey` 必須で結果不明は同じキーで再送。`dryRun` で登録せず確認できる） |
@@ -702,6 +702,8 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
 | `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
 | `asset_manager_record_subscription_cancellation` | 契約へ解約情報（検討中／事業者での手続き完了＝自動更新停止＋終了日＋メモ追記）を記録する。**書き込みツール**（条件3の例外。台帳の記録だけで事業者の契約は変更しない） |
+| `asset_manager_card_withdrawals` | Asset Managerのカード引き落とし見込み（今後`days`日・既定30日）。予定ごとの見込み額・推計額・出どころ（推計／メールの確定額）・確定額の内容を返す。**読み取り専用**（Morrowがメールの確定額との食い違いを検出するために呼ぶ。#855） |
+| `asset_manager_confirm_card_withdrawal` | メールの確定額でカード引き落とし見込みを上書きする。**書き込みツール**（冪等キーは`sourceKey`＝メールのMessage-ID。同じ`sourceKey`・同じ内容の再送は何も変えず、内容が違えば409で拒否し、同じカード・同じ引き落とし日に別の`sourceKey`なら新しいほうで上書きして前の額を返す。入力は固定の項目だけ。元の見込みへ戻す操作はこのツールに無い。Asset Manager側は`POST /api/card-withdrawals`。#855） |
 | `aide_research_desk_import_weekly_report` | Research Deskへエクステリア事業・ロッカー事業・AI関連の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体15件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
 **各ツールの利用者・問い・応答サイズ・変更しない根拠は [docs/mcp-tool-inventory.md](docs/mcp-tool-inventory.md)**（#489）。
