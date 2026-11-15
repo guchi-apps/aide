@@ -3017,6 +3017,25 @@ Zaimの画面を操作する権限なので登録口と同じ側に置いた）�
 デプロイ直後、`months` を持たない旧キャッシュを返す場合は応答からこの項目自体を省く。呼び出し側は
 `months` が無ければ従来どおり `fetchedAt` の月だけを読んだものとして扱う。
 
+#### 明細一覧の取り直し（`POST /api/zaim/money-list/refresh`・#863）
+
+定期巡回を待たずに、Zaimの明細一覧を**その場で取り直して** `GET /api/money/transactions` のキャッシュを
+更新する。巡回（`zaim-money-sync`）と同じ処理・同じ範囲（今日を含むZaimの月＋前月）を、受け口のジョブとして動かす。
+**読むだけで、Zaimの取引の登録・更新・削除はしない。** 形・認証・中継（VPS→サブPC）・`subpc_*` の502は上の
+商品内訳の手動再取得と同じ。
+
+1. `POST /api/zaim/money-list/refresh`（本文は不要）→ **202** と `job`（`status: "running"`）。取得中の再依頼は
+   受付済みの `job`（`deduplicated: true`）を返す。受付は成功ではない
+2. `GET /api/zaim/money-list/refresh/<jobId>` を数秒おきに読み、`job.status` が `succeeded` / `failed` になるまで待つ
+   （目安は1〜3分）
+
+- 成功は `job.status === "succeeded"`（`fetchedAt`・`result.entryCount`・`result.months`・`result.failedMonths`）。
+  このあと `GET /api/money/transactions` の `fetchedAt` が更新されている
+- 失敗は `job.failure.kind`: `busy`（受け口の別のZaim操作中・定期巡回中・商品内訳の再取得中。受付時なら429）・
+  `session_expired`（再試行不可）・`fetch_failed`・`internal`。`GET` が404 `job_not_found` なら依頼し直す
+- **競合**: 巡回・商品内訳の再取得と `data/zaim/screen.lock` を取り合い、待たずに `busy` で断る
+  （巡回側は取り直し中なら最大5分待つ）
+
 ### キャッシュを素で返さない理由
 
 `GET /api/cache/:key`（書き込みと対称な形）ではなくビューを出している。外へ見せる契約が1本で済み、
