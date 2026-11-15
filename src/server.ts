@@ -11,6 +11,7 @@ import { handleLocation } from "./api/location.ts";
 import { handleWorkReports } from "./api/work-reports.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
+  handleZaimMoneyListRefresh,
   handleZaimReceiptRefresh,
   handleZaimRetiredApi,
   handleZaimWebGenreEdit,
@@ -18,7 +19,7 @@ import {
   handleZaimWebPayment,
   isRetiredZaimApiPath,
 } from "./api/zaim.ts";
-import { receiptRefreshJobId } from "./core/connectors/zaim/receipt-refresh-forward.ts";
+import { moneyListRefreshJobId, receiptRefreshJobId } from "./core/connectors/zaim/receipt-refresh-forward.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -285,6 +286,21 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       return;
     }
     await handleZaimReceiptRefresh(req, res, jobId);
+    return;
+  }
+
+  // Zaimの明細一覧をその場で取り直す口（#863）。形は上と同じ（受付→状態の読み取り、VPSは中継）。
+  if (path === "/api/zaim/money-list/refresh") {
+    await handleZaimMoneyListRefresh(req, res, null);
+    return;
+  }
+  if (path.startsWith("/api/zaim/money-list/refresh/")) {
+    const jobId = moneyListRefreshJobId(path);
+    if (jobId === null) {
+      res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    await handleZaimMoneyListRefresh(req, res, jobId);
     return;
   }
 

@@ -23,7 +23,11 @@ import {
   normalizeWebMemoEditInput,
 } from "../core/connectors/zaim/web-memo-edit.ts";
 import { normalizeReceiptRefreshInput } from "../core/connectors/zaim/receipt-refresh.ts";
-import { forwardReceiptRefresh } from "../core/connectors/zaim/receipt-refresh-forward.ts";
+import {
+  ZAIM_MONEY_LIST_REFRESH_PATH,
+  forwardReceiptRefresh,
+} from "../core/connectors/zaim/receipt-refresh-forward.ts";
+import { moneyListRefreshJobs } from "../worker/money-list-refresh-jobs.ts";
 import { receiptRefreshJobs } from "../worker/receipt-refresh-jobs.ts";
 import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
@@ -492,6 +496,75 @@ export async function handleZaimReceiptRefresh(
   }
 
   const job = receiptRefreshJobs.get(jobId);
+  if (!job) {
+    json(res, 404, {
+      ok: false,
+      failure: {
+        kind: "job_not_found",
+        retryable: true,
+        message: "ジョブが見つかりません（期限切れか、サブPCの受け口が再起動しました）。依頼し直してください。",
+      },
+    });
+    return;
+  }
+  json(res, 200, { ok: true, job });
+}
+
+/**
+ * `POST /api/zaim/money-list/refresh` / `GET /api/zaim/money-list/refresh/<jobId>`（#863）
+ *
+ * **Zaimの明細一覧をその場で取り直して、`GET /api/money/transactions` のキャッシュを更新する。**
+ * 定期巡回（11:30 / 23:30）を待たずに、巡回後にZaimで増えた明細を反映できる。巡回と同じ範囲
+ * （今日を含むZaimの月＋前月）を読む。**読むだけで、Zaimの取引の登録・更新・削除はしない。**
+ *
+ * 形は商品内訳の手動再取得（`handleZaimReceiptRefresh`）と同じ非同期:
+ *
+ * 1. `POST`（本文は不要）→ **202** と `job`（`status: "running"`）。取得中の再依頼は受付済みの `job`
+ *    （`deduplicated: true`）を返す。**受付は成功ではない。**
+ * 2. `GET .../<jobId>` を繰り返し読み、`job.status` が `succeeded` / `failed` になるまで待つ（目安は1〜3分）
+ *
+ * 成功は `job.status === "succeeded"` かつ `job.fetchedAt`。このあと `GET /api/money/transactions` の
+ * `fetchedAt` が更新されている。失敗は `job.failure.kind`（`busy`・`session_expired`・`fetch_failed`・
+ * `internal`）と `retryable`。受付時に別のZaim操作・定期巡回と競合していれば **429 `busy`**。
+ * 中継先（サブPC）の問題は商品内訳の再取得と同じ `subpc_*`（502）。認証・中継も同じ。
+ */
+export async function handleZaimMoneyListRefresh(
+  req: IncomingMessage,
+  res: ServerResponse,
+  jobId: string | null,
+): Promise<void> {
+  const method = jobId === null ? "POST" : "GET";
+  if (req.method !== method) {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: method })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+  if (!(await authorize(req, res, `${method} /api/zaim/money-list/refresh`))) return;
+
+  const upstream = zaimWebUpstreamUrl();
+  const secret = await resolveZaimWriteSecret();
+  if (upstream && req.headers[ZAIM_WEB_FORWARDED_HEADER] !== "1" && secret) {
+    const forwarded = await forwardReceiptRefresh(
+      jobId === null ? { method: "POST", body: {} } : { method: "GET", jobId },
+      { baseUrl: upstream, secret },
+      ZAIM_MONEY_LIST_REFRESH_PATH,
+    );
+    json(res, forwarded.status, forwarded.body);
+    return;
+  }
+
+  if (jobId === null) {
+    const outcome = moneyListRefreshJobs.submit();
+    if (!outcome.ok) {
+      json(res, 429, { ok: false, failure: outcome.failure });
+      return;
+    }
+    json(res, 202, { ok: true, job: outcome.job, deduplicated: outcome.deduplicated });
+    return;
+  }
+
+  const job = moneyListRefreshJobs.get(jobId);
   if (!job) {
     json(res, 404, {
       ok: false,
