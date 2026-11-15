@@ -72,6 +72,10 @@ export const createEventTool: Tool = {
         description: "終了時刻（HH:MM）。同日のときは startTime より後にすること（endDate が後の日なら不問）。",
       },
       location: { type: "string", description: "場所。分からなければ省く。" },
+      description: {
+        type: "string",
+        description: "予定のメモ（Googleカレンダーの説明欄）。持ち物・補足・元の文面など。無ければ省く。",
+      },
       calendarId: {
         type: "string",
         description:

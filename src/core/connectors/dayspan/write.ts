@@ -22,7 +22,9 @@ import { DEFAULT_BASE_URL, TIMEOUT_MS } from "./index.ts";
  * の `POST /api/internal/events` と `PATCH` / `DELETE /api/internal/events/[id]`。
  */
 
-const TIME_KEY = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** メモの上限。Googleカレンダーの説明欄に収まる範囲で、長すぎる貼り付けを弾く。 */
+const DESCRIPTION_MAX = 8000;
+const TIME_KEY =/^([01]\d|2[0-3]):[0-5]\d$/;
 
 export interface DaySpanWriteConfig {
   baseUrl: string;
@@ -60,6 +62,8 @@ export interface CreateEventInput {
   startTime?: string;
   endTime?: string;
   location?: string;
+  /** 予定のメモ（Googleカレンダーの説明欄）。省略時は送らない。 */
+  description?: string;
   /** 省略時はDaySpan側の既定の保存先。 */
   calendarId?: string;
 }
@@ -125,6 +129,13 @@ export function normalizeCreateEventInput(
 
   const location = typeof raw["location"] === "string" ? raw["location"].trim() : "";
   const calendarId = typeof raw["calendarId"] === "string" ? raw["calendarId"].trim() : "";
+  if (raw["description"] !== undefined && typeof raw["description"] !== "string") {
+    return { error: "description は文字列で指定してください" };
+  }
+  const description = typeof raw["description"] === "string" ? raw["description"].trim() : "";
+  if (description.length > DESCRIPTION_MAX) {
+    return { error: `description は${DESCRIPTION_MAX}文字以内にしてください` };
+  }
 
   return {
     input: {
@@ -134,6 +145,7 @@ export function normalizeCreateEventInput(
       ...(startTime === undefined ? {} : { startTime }),
       ...(endTime === undefined ? {} : { endTime }),
       ...(location ? { location } : {}),
+      ...(description ? { description } : {}),
       ...(calendarId ? { calendarId } : {}),
     },
   };
@@ -299,6 +311,8 @@ export interface UpdateEventInput {
   allDay?: boolean;
   /** 空文字で場所を消す。 */
   location?: string;
+  /** 空文字でメモを消す。 */
+  description?: string;
   tentative?: boolean;
 }
 
@@ -380,13 +394,19 @@ export function normalizeUpdateEventInput(
     if (typeof raw["location"] !== "string") return { error: "location は文字列で指定してください" };
     fields.location = raw["location"].trim();
   }
+  if (raw["description"] !== undefined) {
+    if (typeof raw["description"] !== "string") return { error: "description は文字列で指定してください" };
+    const description = raw["description"].trim();
+    if (description.length > DESCRIPTION_MAX) return { error: `description は${DESCRIPTION_MAX}文字以内にしてください` };
+    fields.description = description;
+  }
   if (raw["tentative"] !== undefined) {
     if (typeof raw["tentative"] !== "boolean") return { error: "tentative は true / false で指定してください" };
     fields.tentative = raw["tentative"];
   }
 
   if (Object.keys(fields).length === 0) {
-    return { error: "変える項目（title・date・endDate・startTime と endTime・allDay・location・tentative）を1つ以上指定してください" };
+    return { error: "変える項目（title・date・endDate・startTime と endTime・allDay・location・description・tentative）を1つ以上指定してください" };
   }
   return { input: { ...target, ...fields } };
 }

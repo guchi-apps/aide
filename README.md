@@ -281,7 +281,7 @@ guchi-apps/asset-manager#300 で実測）。ログイン状態（storage state�
 **「対象を名指しさせる」へ置き換えた**（条件1・2は作成と同じ理由で満たす。資格情報も作成と共用）。
 
 - **対象は `aide_schedule` が返す予定の `id`・`calendarId` で指す。** 推測させない
-- **`aide_update_event`** は送った項目だけを変える（タイトル・日付・時刻・終日・場所・仮/確定）。`dryRun` あり
+- **`aide_update_event`** は送った項目だけを変える（タイトル・日付・時刻・終日・場所・メモ・仮/確定）。`dryRun` あり
 - **`aide_delete_event`** は予定の**現在のタイトル**を必須にし、DaySpanが一致を確かめて違えば `409`
   （`kind: conflict`・`currentTitle`）で何も消さない。消せるのは1回分だけで、繰り返しの親は断られる。`dryRun` あり
 - どちらも**復唱して利用者の確認を取ってから呼ぶ**前提（説明文に書いてある）。aide-bot側は `MCP_PRESETS` の
@@ -674,7 +674,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_aircon_control` | エアコンの電源・運転モード・設定温度・風量を変更する。**部屋の機器を操作するツール**（`acId` と名前を myroom のいまの状態と突き合わせてから送る。オフラインには送らない。結果は変更前の状態と送信後の読み戻しまで返す。`dryRun` で送らずに確認できる。詳細は[エアコンの操作](#エアコンの操作aide316)） |
 | `aide_weather` | 今日・明日の天気（天気・最高／最低気温・降水確率）。**キャッシュを読むだけ**（詳細は[天気](#天気)） |
 | `aide_schedule` | 指定した日から数日ぶんの予定・移動・タスク・日付リマインドと**空いている時間帯**。DaySpan から取得する。「今日の予定」「今週の予定」「何時なら空いているか」に答える（明日・昨日などの相対的な日は `offsetDays` で指定する。#325）。予定には中止・不参加の記録（`outcome`）と本文（300文字まで）が付く（#388）。更新・削除で指す `id`・`calendarId` も付く（#493） |
-| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる。`endDate` で日をまたぐ時刻予定も1件で作れる） |
+| `aide_create_event` | 予定を1件、Googleカレンダー（DaySpan経由）へ新規作成する。**書き込みツール**（作成のみ。変更・削除は `aide_update_event` / `aide_delete_event`。`dryRun` で登録せず確認できる。`endDate` で日をまたぐ時刻予定も1件で作れる。`description` でメモも書ける。**DaySpan（yoteiflow#1530）の対応が先に本番へ出ていること**。未対応だとメモは黙って落ちる） |
 | `aide_update_event` | 既存の予定を1件変更する（`aide_schedule` の `id`・`calendarId` で指す）。**書き込みツール**（送った項目だけ変わる。`dryRun` で変更せず確認できる） |
 | `aide_delete_event` | 既存の予定を1件削除する。**書き込みツール**（元に戻せない。現在のタイトルの一致が要り、違えば消さない。`dryRun` で削除せず確認できる） |
 | `aide_create_travel` | YoteiFlowの移動（TravelPlan）を1件登録する。**書き込みツール**（通常予定は作らない。scope `travel:write`。`idempotencyKey` 必須で結果不明は同じキーで再送。`dryRun` で登録せず確認できる） |
