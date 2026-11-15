@@ -60,6 +60,10 @@ export const updateEventTool: Tool = {
         description: "true で終日の予定へ変える（startTime・endTime と同時には指定しない）。",
       },
       location: { type: "string", description: "新しい場所。空文字で場所を消す。変えないなら省く。" },
+      description: {
+        type: "string",
+        description: "新しいメモ（説明欄）。置き換えになる。空文字でメモを消す。変えないなら省く。",
+      },
       tentative: { type: "boolean", description: "true で仮の予定、false で確定した予定にする。" },
       dryRun: {
         type: "boolean",
