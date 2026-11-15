@@ -48,6 +48,8 @@ import {
   assetManagerCreateSubscriptionTool,
   assetManagerImportPaymentTool,
   assetManagerSubscriptionsTool,
+  assetManagerCardWithdrawalsTool,
+  assetManagerConfirmCardWithdrawalTool,
 } from "./tools/asset-manager.ts";
 import {
   assetManagerSalaryApprovalStatusTool,
@@ -93,6 +95,7 @@ export const READ_ONLY_TOOLS = [
   "aide_zaim_master", // 廃止済み。呼んでも何も書かない
   "aide_zaim_payment", // 廃止済み。呼んでも何も書かない
   "asset_manager_subscriptions",
+  "asset_manager_card_withdrawals",
   "asset_manager_salary_approval_status",
   "asset_manager_salary_lookup",
   "issue_deck_list_release_candidates",
@@ -192,6 +195,9 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(assetManagerAddSubscriptionPriceTool);
   registry.register(assetManagerUpdateSubscriptionTool);
   registry.register(assetManagerRecordSubscriptionCancellationTool);
+  // カード引き落とし見込み（Morrow#910）。読み取りと、メールの確定額での上書きは別ツール。
+  registry.register(assetManagerCardWithdrawalsTool);
+  registry.register(assetManagerConfirmCardWithdrawalTool);
   // 給与明細メールの代理登録（#725）。給与専用で、支出ツールとは別。プレビュー・読み戻しと保存はscopeも別。
   registry.register(assetManagerSalaryPreviewTool);
   registry.register(assetManagerSalaryApprovalStatusTool);
@@ -208,5 +214,7 @@ export function buildToolRegistry(): ToolRegistry {
   for (const name of READ_ONLY_TOOLS) registry.annotate(name, { readOnlyHint: true });
   for (const name of DESTRUCTIVE_TOOLS) registry.annotate(name, { readOnlyHint: false, destructiveHint: true });
   registry.annotate("aide_update_event", { readOnlyHint: false, destructiveHint: true, idempotentHint: true });
+  // 同じ sourceKey の再送は何も変えない（冪等）。別の sourceKey では見込みを上書きする。
+  registry.annotate("asset_manager_confirm_card_withdrawal", { readOnlyHint: false, destructiveHint: true, idempotentHint: true });
   return registry;
 }
