@@ -86,6 +86,43 @@ describe("GmailInbox", () => {
     assert.equal(listUrl.searchParams.get("q"), "from:x");
   });
 
+  it("添付は partId で探し直して取り出し、25MB超は取りに行かず too_large（#867）", async () => {
+    const payload = (volatile: string) => ({
+      id: "m1",
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          { partId: "0", mimeType: "text/plain", body: { data: "aGk" } },
+          { partId: "1", mimeType: "application/pdf", filename: "a.pdf", body: { attachmentId: volatile, size: 3 } },
+          { partId: "2", mimeType: "application/zip", filename: "big.zip", body: { attachmentId: "big", size: 26_214_401 } },
+        ],
+      },
+    });
+    let n = 0;
+    const { fetchImpl, calls } = fakeFetch([
+      ["/messages/m1?", () => Response.json(payload(`v${++n}`))],
+      ["/attachments/v1", () => Response.json({ size: 3, data: "AQL_" })],
+      ["/attachments/v2", () => Response.json({ size: 3, data: "AQL_" })],
+    ]);
+    const inbox = await GmailInbox.connect({ credentials, fetchImpl });
+    assert.ok(inbox.ok);
+    // body.attachmentId は取得のたびに変わるが、partId の "1" で同じ部品を取れる。
+    for (let i = 0; i < 2; i++) {
+      const got = await inbox.value.getAttachment("m1", "1");
+      assert.ok(got.ok);
+      assert.equal(got.value.filename, "a.pdf");
+      assert.deepEqual([...got.value.data], [1, 2, 255]);
+    }
+    const detail = await inbox.value.get("m1");
+    assert.ok(detail.ok);
+    assert.equal(detail.value.attachments[0]!.attachmentId, "1");
+    const big = await inbox.value.getAttachment("m1", "2");
+    assert.ok(!big.ok && big.kind === "too_large");
+    assert.ok(!calls.some((c) => c.url.includes("/attachments/big")));
+    const none = await inbox.value.getAttachment("m1", "0");
+    assert.ok(!none.ok && none.kind === "not_found");
+  });
+
   it("ラベル系の操作は batchModify を1回、ゴミ箱は1件ずつ trash を呼ぶ。完全削除は呼ばない", async () => {
     const { fetchImpl, calls } = fakeFetch([
       ["/messages/batchModify", () => new Response(null, { status: 204 })],

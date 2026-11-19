@@ -91,6 +91,7 @@ describe("toSummary / toDetail", () => {
           ],
         },
         {
+          partId: "1",
           mimeType: "application/pdf",
           filename: "receipt.pdf",
           headers: [{ name: "Content-Disposition", value: 'attachment; filename="receipt.pdf"' }],
@@ -112,7 +113,31 @@ describe("toSummary / toDetail", () => {
     const detail = toDetail(message);
     assert.equal(detail.text, "る");
     assert.equal(detail.html, "<p>本文</p>");
-    assert.deepEqual(detail.attachments, [{ filename: "receipt.pdf", mimeType: "application/pdf", size: 2048 }]);
+    assert.deepEqual(detail.attachments, [
+      { filename: "receipt.pdf", mimeType: "application/pdf", size: 2048, attachmentId: "1", contentId: null, inline: false },
+    ]);
     assert.equal(detail.to, "me@example.com");
+  });
+
+  it("Content-ID を持つ名前の無い image/* は inline の添付として載せる（#867）", () => {
+    const detail = toDetail({
+      id: "x",
+      payload: {
+        mimeType: "multipart/related",
+        parts: [
+          { partId: "0", mimeType: "text/html", body: { data: b64url('<img src="cid:logo@x">') } },
+          {
+            partId: "1",
+            mimeType: "image/png",
+            headers: [{ name: "Content-ID", value: "<logo@x>" }, { name: "Content-Disposition", value: "inline" }],
+            body: { attachmentId: "volatile", size: 10 },
+          },
+          { partId: "2", mimeType: "image/gif", headers: [{ name: "X", value: "y" }], body: { size: 1 } },
+        ],
+      },
+    });
+    assert.deepEqual(detail.attachments, [
+      { filename: "(名前なし)", mimeType: "image/png", size: 10, attachmentId: "1", contentId: "logo@x", inline: true },
+    ]);
   });
 });

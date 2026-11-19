@@ -60,6 +60,28 @@ export interface MailAttachment {
   filename: string;
   mimeType: string;
   size: number;
+  /** 同じメールを開き直しても変わらない部品の識別子（`partId`。#867）。取れない部品では無い。 */
+  attachmentId?: string;
+  /** `Content-ID` から `<` `>` を外した値。本文の `cid:` と照合する。無ければ null。 */
+  contentId: string | null;
+  /** 本文に埋め込まれた部品か。 */
+  inline: boolean;
+}
+
+/** 添付1件の中身（#867）。 */
+export interface MailAttachmentContent {
+  filename: string;
+  mimeType: string;
+  size: number;
+  data: Buffer;
+}
+
+/** 取り出せる添付の上限（バイト）。これを超える部品は中身を返さない。 */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** 添付の識別子として受ける形（英数字・`.`・`-`・`_` の64字以内）。 */
+export function isAttachmentId(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(value);
 }
 
 /** 本文画面の1通。 */
@@ -143,9 +165,47 @@ export function decodeBody(data: string, charset: string | null): string {
   return new TextDecoder("utf-8").decode(bytes);
 }
 
-function isAttachment(part: GmailPart): boolean {
+function contentIdOf(part: GmailPart): string | null {
+  const raw = header(part.headers, "Content-ID").trim();
+  const id = raw.replace(/^<+/, "").replace(/>+$/, "").trim();
+  return id || null;
+}
+
+/** 添付として一覧に載せる部品か。`Content-ID` を持つ `image/*` は、名前が無くても載せる（埋め込み画像。#867）。 */
+export function isListedAttachment(part: GmailPart): boolean {
   if (part.filename) return true;
-  return /^\s*attachment/i.test(header(part.headers, "Content-Disposition"));
+  if (/^\s*attachment/i.test(header(part.headers, "Content-Disposition"))) return true;
+  return /^image\//i.test(part.mimeType ?? "") && contentIdOf(part) !== null;
+}
+
+function toAttachment(part: GmailPart): MailAttachment {
+  const contentId = contentIdOf(part);
+  const inline = contentId !== null && !/^\s*attachment/i.test(header(part.headers, "Content-Disposition"));
+  return {
+    filename: part.filename || "(名前なし)",
+    mimeType: part.mimeType ?? "application/octet-stream",
+    size: part.body?.size ?? 0,
+    ...(part.partId && isAttachmentId(part.partId) ? { attachmentId: part.partId } : {}),
+    contentId,
+    inline,
+  };
+}
+
+/** `partId` の部品を木から探す。一覧に載る添付でなければ null。 */
+export function findAttachmentPart(root: GmailPart | undefined, partId: string): GmailPart | null {
+  if (!root) return null;
+  if (root.parts?.length) {
+    for (const child of root.parts) {
+      const found = findAttachmentPart(child, partId);
+      if (found) return found;
+    }
+    return null;
+  }
+  return root.partId === partId && isListedAttachment(root) ? root : null;
+}
+
+export function describeAttachment(part: GmailPart): MailAttachment {
+  return toAttachment(part);
 }
 
 interface Collected {
@@ -164,12 +224,8 @@ function collect(part: GmailPart, out: Collected): void {
     for (const child of part.parts) collect(child, out);
     return;
   }
-  if (isAttachment(part)) {
-    out.attachments.push({
-      filename: part.filename || "(名前なし)",
-      mimeType: part.mimeType ?? "application/octet-stream",
-      size: part.body?.size ?? 0,
-    });
+  if (isListedAttachment(part)) {
+    out.attachments.push(toAttachment(part));
     return;
   }
   const data = part.body?.data;

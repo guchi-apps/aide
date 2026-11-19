@@ -21,6 +21,9 @@ function fake(kind: "gmail" | "imap", messages: MailSummary[], opts: { fail?: bo
       return { ok: true, value: { messages, nextPageToken: opts.next ?? null, resultSizeEstimate: messages.length } };
     },
     async get(id) { return { ok: true, value: { ...summary(id, 1), to: "", cc: "", html: null, text: "t", attachments: [] } as MailDetail }; },
+    async getAttachment(id, attachmentId) {
+      return { ok: true, value: { filename: `${id}:${attachmentId}`, mimeType: "text/plain", size: 1, data: Buffer.from("a") } };
+    },
     async apply(ids, action, label): Promise<GmailResult<void>> { calls.apply.push({ ids, action, label }); return { ok: true, value: undefined }; },
   };
   return { inbox, calls };

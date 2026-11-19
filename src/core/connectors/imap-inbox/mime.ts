@@ -125,8 +125,8 @@ function splitMultipart(body: Buffer, boundary: string): Buffer[] {
   return parts;
 }
 
-/** 生のメールを `GmailPart` の木にする。`body.data` は転送エンコーディングを解いたバイト列の base64url。 */
-export function parseMime(raw: Buffer, depth = 0): GmailPart {
+/** 生のメールを `GmailPart` の木にする。`partId` は部品番号（`1`・`2.1` など）。`body.data` は転送エンコーディングを解いたバイト列の base64url。 */
+export function parseMime(raw: Buffer, depth = 0, partId = ""): GmailPart {
   const { head, body } = splitHeadBody(raw);
   const headers = parseHeaders(head).map((h) => ({ ...h, value: h.name.toLowerCase().startsWith("content-") ? h.value : decodeMimeWords(h.value) }));
   const contentType = headerValue(headers, "Content-Type") || "text/plain";
@@ -137,11 +137,15 @@ export function parseMime(raw: Buffer, depth = 0): GmailPart {
     return {
       mimeType,
       headers,
-      parts: splitMultipart(body, boundary).map((chunk) => parseMime(chunk, depth + 1)),
+      parts: splitMultipart(body, boundary).map((chunk, index) =>
+        parseMime(chunk, depth + 1, partId ? `${partId}.${index + 1}` : String(index + 1)),
+      ),
     };
   }
   const decoded = decodeTransfer(body, headerValue(headers, "Content-Transfer-Encoding"));
   return {
+    // IMAPのBODYSTRUCTUREの部品番号と同じ付け方（単一部品のメールは `1`）。開き直しても変わらない。
+    partId: partId || "1",
     mimeType,
     headers,
     filename: filenameOf(headers),
