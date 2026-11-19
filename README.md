@@ -3262,7 +3262,9 @@ Morrowのサーバーが、メールの一覧・本文・整理に使う（実�
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /api/mail/messages?view=&label=&q=&page=&since=` | 1ページ分の一覧。`view` は `inbox`・`unread`・`starred`・`all`・`trash`。`since`（UNIX時刻・ミリ秒）を付けると、**そのページのうち**受信がそれ以降のものだけを返す（ページをまたいでは探さない） |
-| `GET /api/mail/messages/<id>` | 本文1件。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める |
+| `GET /api/mail/messages/<id>` | 本文1件。HTMLは加工せずに返すので、表示側でスクリプトを動かさない枠に閉じ込める。`attachments[]` は `filename`・`mimeType`・`size` に加え、`attachmentId`（部品の識別子。`partId`／IMAPは部品番号で、開き直しても変わらない。英数字・`.`・`-`・`_` の64字以内）・`contentId`（`Content-ID` の `<` `>` を外した値。無ければ `null`。本文の `cid:` と照合する）・`inline`（本文に埋め込まれた部品か）を持つ。`Content-ID` を持つ `image/*` は名前が無くても `inline: true` で載る（名前は `"(名前なし)"`） |
+| `GET /api/mail/messages/<id>/attachments/<attachmentId>` | 添付1件の中身。成功は `{ ok, owner, source, filename, mimeType, size, data }`（`data` は標準base64・改行なし）。**25MB（26,214,400バイト）を超える部品は413 `too_large`** で中身を返さない。メールか部品が無ければ404 `not_found`。中身・ファイル名はログにも `data/` にも残さない（#867） |
+
 | `POST /api/mail/actions` | `{ "action": "archive", "ids": ["..."], "labelId": "Label_1" }`。`action` は10種類（`MAIL_ACTIONS`）。`ids` は1〜100件。複数アカウントを束ねている環境では、**1アカウントのメールだけ**を指定する（またがると1件も変更せず400 `invalid_request`。#810） |
 
 - **認証**: `Authorization: Bearer <AIDE_MAIL_API_TOKEN>`。値はissue-deckの共有トークン（同名）から取り、
@@ -3272,7 +3274,7 @@ Morrowのサーバーが、メールの一覧・本文・整理に使う（実�
   値を取れず、全呼び出しが503になる（issue-deckは存在しない名前の取得を404で返す）。設定画面で値を空欄のまま登録すると
   自動生成される。登録したら、利用記録でAIDEとMorrowの双方が取得していることを確かめる（値は出力しない）
 - **応答**: 成功は `{ ok: true, owner, source, supportsLabels, ... }`。失敗は `{ ok: false, error }` で、
-  `error` は `unconfigured`（503）・`not_found`（404）・`unauthorized`・`failed`（取得元の失敗。502）・`invalid_request`（400）
+  `error` は `unconfigured`（503）・`not_found`（404）・`too_large`（413。添付のみ）・`unauthorized`・`failed`（取得元の失敗。502）・`invalid_request`（400）
 - **メール本文はAIDEに残さない。** ログに出すのは失敗の種類と理由だけで、件名・差出人・本文・IDは出さない
 
 ## ChatGPTからAsset Managerへ請求情報を取り込む（MCP）

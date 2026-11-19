@@ -13,6 +13,7 @@ import {
   type MailInbox,
 } from "../core/connectors/gmail-inbox/client.ts";
 import { ImapInbox, loadImapCredentials, type ImapInboxDeps } from "../core/connectors/imap-inbox/client.ts";
+import { isAttachmentId } from "../core/connectors/gmail-inbox/message.ts";
 import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
 import { CROSS_ACCOUNT_REASON, loadExtraMailAccounts, MultiMailInbox, type ExtraMailAccount } from "../core/connectors/mail-accounts.ts";
 import { bearerToken, secretMatches } from "./secret.ts";
@@ -28,6 +29,7 @@ import { bearerToken, secretMatches } from "./secret.ts";
  * - `GET  /api/mail/messages?view=&label=&q=&page=&since=` — 一覧（1ページ分）。`since`（UNIX時刻・ミリ秒）を
  *   付けると、そのページのうち受信がそれ以降のものだけを返す（新着の確認用。ページをまたいでは探さない）
  * - `GET  /api/mail/messages/<id>` — 本文1件
+ * - `GET  /api/mail/messages/<id>/attachments/<attachmentId>` — 添付1件の中身（base64。25MB超は413 `too_large`。#867）
  * - `POST /api/mail/actions` — `{ "action": "...", "ids": ["..."], "labelId": "..." }`。持つ操作は
  *   **元に戻せるものだけ**（既読/未読・アーカイブ・受信トレイへ戻す・スター・ラベル・ゴミ箱の出し入れ）
  *
@@ -228,7 +230,7 @@ async function authorize(req: IncomingMessage, res: ServerResponse, deps: MailAp
 
 /** 取得元の失敗を応答へ写す。`not_found` 以外は呼び出し元の誤りではないので5xx。 */
 function failure(res: ServerResponse, kind: MailFailure): void {
-  const status = kind === "not_found" ? 404 : kind === "unconfigured" ? 503 : 502;
+  const status = kind === "not_found" ? 404 : kind === "unconfigured" ? 503 : kind === "too_large" ? 413 : 502;
   json(res, status, { ok: false, error: kind });
 }
 
@@ -243,6 +245,21 @@ export function messageIdFromPath(path: string): string | null {
     return null;
   }
   return isMessageId(id) ? id : null;
+}
+
+/** `/api/mail/messages/<id>/attachments/<attachmentId>` の2つのIDを取り出す。形が違えば null（#867）。 */
+export function attachmentRefFromPath(path: string): { id: string; attachmentId: string } | null {
+  const match = /^\/api\/mail\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(path);
+  if (!match) return null;
+  let id: string;
+  let attachmentId: string;
+  try {
+    id = decodeURIComponent(match[1]!);
+    attachmentId = decodeURIComponent(match[2]!);
+  } catch {
+    return null;
+  }
+  return isMessageId(id) && isAttachmentId(attachmentId) ? { id, attachmentId } : null;
 }
 
 export async function handleMailApiList(req: IncomingMessage, res: ServerResponse, deps: MailApiDeps = {}): Promise<void> {
@@ -302,6 +319,35 @@ export async function handleMailApiMessage(
     owner: mailbox.owner,
     supportsLabels: mailbox.inbox.supportsLabels,
     message: message.value,
+  });
+}
+
+/** 添付1件の取り出し（#867）。中身・ファイル名はログに出さない。 */
+export async function handleMailApiAttachment(
+  req: IncomingMessage,
+  res: ServerResponse,
+  path: string,
+  deps: MailApiDeps = {},
+): Promise<void> {
+  if (!(await authorize(req, res, deps))) return;
+  const ref = attachmentRefFromPath(path);
+  if (!ref) return json(res, 404, { ok: false, error: "not_found" });
+  const mailbox = await connectMailbox(deps);
+  if (!mailbox.ok) return failure(res, mailbox.kind);
+  const attachment = await mailbox.inbox.getAttachment(ref.id, ref.attachmentId);
+  if (!attachment.ok) {
+    logMailFailure("api:attachment", attachment.kind, attachment.reason);
+    return failure(res, attachment.kind);
+  }
+  const { filename, mimeType, size, data } = attachment.value;
+  json(res, 200, {
+    ok: true,
+    owner: mailbox.owner,
+    source: deps.source ?? selectMailSource(),
+    filename,
+    mimeType,
+    size,
+    data: data.toString("base64"),
   });
 }
 

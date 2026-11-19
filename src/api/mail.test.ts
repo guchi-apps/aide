@@ -6,6 +6,7 @@ import { resetRateLimits } from "../auth/ratelimit.ts";
 import type { GmailInbox, ListQuery } from "../core/connectors/gmail-inbox/client.ts";
 import {
   handleMailApiAction,
+  handleMailApiAttachment,
   handleMailApiList,
   handleMailApiMessage,
   isLabelId,
@@ -70,6 +71,12 @@ function fakeDeps(record: { queries: ListQuery[]; applied: unknown[] }, override
         id === "missing"
           ? { ok: false, kind: "not_found", reason: "" }
           : { ok: true, value: { ...summary(id, 5_000), to: "", cc: "", html: "<p>hi</p>", text: "hi", attachments: [] } },
+      getAttachment: async (_id: string, attachmentId: string) =>
+        attachmentId === "9"
+          ? { ok: false, kind: "too_large", reason: "x" }
+          : attachmentId === "1"
+            ? { ok: true, value: { filename: "a.txt", mimeType: "text/plain", size: 3, data: Buffer.from("abc") } }
+            : { ok: false, kind: "not_found", reason: "x" },
       apply: async (ids: string[], action: string, label: string | null) => {
         record.applied.push({ ids, action, label });
         return { ok: true, value: undefined };
@@ -282,5 +289,36 @@ describe("取得元の選択（#782）", () => {
     } finally {
       reset();
     }
+  });
+});
+
+describe("添付1件の取り出し（#867）", () => {
+  beforeEach(() => resetRateLimits());
+  const deps = () => fakeDeps({ queries: [], applied: [] });
+
+  it("200で中身をbase64（標準）で返し、持ち主・取得元を載せる", async () => {
+    const res = response();
+    await handleMailApiAttachment(request("/api/mail/messages/m1/attachments/1", auth), res, "/api/mail/messages/m1/attachments/1", deps());
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { ok: true, owner: "me@example.com", source: "gmail", filename: "a.txt", mimeType: "text/plain", size: 3, data: "YWJj" });
+  });
+
+  it("25MB超は413 too_large、部品が無ければ404、形が不正でも404", async () => {
+    for (const [path, status, error] of [
+      ["/api/mail/messages/m1/attachments/9", 413, "too_large"],
+      ["/api/mail/messages/m1/attachments/2", 404, "not_found"],
+      ["/api/mail/messages/m1/attachments/a%20b", 404, "not_found"],
+    ] as const) {
+      const res = response();
+      await handleMailApiAttachment(request(path, auth), res, path, deps());
+      assert.equal(res.status, status);
+      assert.equal(res.body!["error"], error);
+    }
+  });
+
+  it("認証が無ければ401", async () => {
+    const res = response();
+    await handleMailApiAttachment(request("/x", {}), res, "/api/mail/messages/m1/attachments/1", deps());
+    assert.equal(res.status, 401);
   });
 });

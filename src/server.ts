@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { handleAppVersion } from "./api/app-version.ts";
 import { handleImageMailSend } from "./api/image-mail.ts";
-import { handleMailApiAction, handleMailApiList, handleMailApiMessage } from "./api/mail.ts";
+import { handleMailApiAction, handleMailApiAttachment, handleMailApiList, handleMailApiMessage } from "./api/mail.ts";
 import { handleIngest } from "./api/ingest.ts";
 import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleTextMailSend } from "./api/text-mail.ts";
@@ -321,6 +321,10 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
   if (path.startsWith("/api/mail/messages/") && (req.method === "GET" || req.method === "HEAD")) {
+    if (path.includes("/attachments/")) {
+      await handleMailApiAttachment(req, res, path);
+      return;
+    }
     await handleMailApiMessage(req, res, path);
     return;
   }

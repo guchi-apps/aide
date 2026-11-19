@@ -6,7 +6,7 @@ import type {
   MailInbox,
   MailPage,
 } from "./gmail-inbox/client.ts";
-import type { MailDetail, MailSummary } from "./gmail-inbox/message.ts";
+import type { MailAttachmentContent, MailDetail, MailSummary } from "./gmail-inbox/message.ts";
 import { ImapInbox, type ImapCredentials, type ImapInboxDeps } from "./imap-inbox/client.ts";
 
 /**
@@ -276,6 +276,13 @@ export class MultiMailInbox implements MailInbox {
         account: member.info.name,
       },
     };
+  }
+
+  async getAttachment(id: string, attachmentId: string): Promise<GmailResult<MailAttachmentContent>> {
+    const split = splitId(id);
+    const member = split ? this.find(split.key) : undefined;
+    if (!split || !member) return { ok: false, kind: "not_found", reason: "メールが見つかりません" };
+    return member.inbox.getAttachment(split.rest, attachmentId);
   }
 
   /**

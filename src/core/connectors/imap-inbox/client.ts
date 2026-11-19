@@ -8,7 +8,16 @@ import type {
   MailInbox,
   MailPage,
 } from "../gmail-inbox/client.ts";
-import { toDetail, toSummary, type GmailApiMessage, type MailDetail } from "../gmail-inbox/message.ts";
+import {
+  describeAttachment,
+  findAttachmentPart,
+  MAX_ATTACHMENT_BYTES,
+  toDetail,
+  toSummary,
+  type GmailApiMessage,
+  type MailAttachmentContent,
+  type MailDetail,
+} from "../gmail-inbox/message.ts";
 import { parseMime } from "./mime.ts";
 
 /**
@@ -30,6 +39,8 @@ import { parseMime } from "./mime.ts";
 const CONNECT_TIMEOUT_MS = 15_000;
 export const IMAP_PAGE_SIZE = 25;
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
+/** 添付を取り出すときに読むメール全体の上限。25MBの部品をbase64にした大きさ（約33.6MB）を含められる値。 */
+const MAX_ATTACHMENT_SOURCE_BYTES = 40 * 1024 * 1024;
 
 export interface ImapCredentials {
   host: string;
@@ -79,7 +90,9 @@ export interface ImapSession {
     range: string,
     query: Record<string, unknown>,
     options: { uid: true },
-  ): Promise<false | { uid: number; flags?: Set<string> | undefined; source?: Buffer | undefined; internalDate?: Date | string | undefined }>;
+  ): Promise<
+    false | { uid: number; flags?: Set<string> | undefined; size?: number | undefined; source?: Buffer | undefined; internalDate?: Date | string | undefined }
+  >;
   messageFlagsAdd(range: string, flags: string[], options: { uid: true }): Promise<boolean>;
   messageFlagsRemove(range: string, flags: string[], options: { uid: true }): Promise<boolean>;
   messageMove(range: string, destination: string, options: { uid: true }): Promise<unknown>;
@@ -325,6 +338,38 @@ export class ImapInbox implements MailInbox {
         const api = this.toApiMessage(ref.folder, uidValidity, ref.uid, m.flags, m.internalDate);
         api.payload = parseMime(m.source);
         return { ok: true, value: toDetail(api) };
+      } finally {
+        lock.release();
+      }
+    });
+  }
+
+  async getAttachment(id: string, attachmentId: string): Promise<GmailResult<MailAttachmentContent>> {
+    const ref = decodeMessageId(id);
+    if (!ref) return failure("not_found", "メールが見つかりません");
+    return this.withSession(async (session) => {
+      const lock = await session.getMailboxLock(ref.folder);
+      try {
+        const uidValidity = session.mailbox ? session.mailbox.uidValidity : 0;
+        if (String(uidValidity) !== ref.uidValidity) return failure<MailAttachmentContent>("not_found", "メールが見つかりません");
+        const m = await session.fetchOne(
+          String(ref.uid),
+          { uid: true, size: true, source: { maxLength: MAX_ATTACHMENT_SOURCE_BYTES } },
+          { uid: true },
+        );
+        if (!m || !m.source) return failure<MailAttachmentContent>("not_found", "メールが見つかりません");
+        // 途中で切れたソースから部品を読むと壊れた中身を返すので、読み切れないメールは大きすぎるとして断る。
+        if ((m.size ?? m.source.length) > MAX_ATTACHMENT_SOURCE_BYTES) {
+          return failure<MailAttachmentContent>("too_large", "添付が大きすぎます");
+        }
+        const part = findAttachmentPart(parseMime(m.source), attachmentId);
+        if (!part) return failure<MailAttachmentContent>("not_found", "添付が見つかりません");
+        const data = Buffer.from((part.body?.data ?? "").replaceAll("-", "+").replaceAll("_", "/"), "base64");
+        if (data.length > MAX_ATTACHMENT_BYTES) return failure<MailAttachmentContent>("too_large", "添付が大きすぎます");
+        return {
+          ok: true,
+          value: { filename: part.filename || "(名前なし)", mimeType: describeAttachment(part).mimeType, size: data.length, data },
+        };
       } finally {
         lock.release();
       }
