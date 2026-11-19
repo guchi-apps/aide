@@ -301,6 +301,56 @@ describe("parseMime", () => {
     assert.equal(toDetail({ id: "x", payload: parseMime(raw) }).text, "あ");
   });
 
+  it("IMAPの添付・埋め込み画像は部品番号で開き直しても同じIDで取り出せ、25MB超は too_large（#867）", async () => {
+    const raw = [
+      "Subject: x",
+      'Content-Type: multipart/related; boundary="o"',
+      "",
+      "--o",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      '<img src="cid:logo@x">',
+      "--o",
+      "Content-Type: image/png",
+      "Content-ID: <logo@x>",
+      "Content-Transfer-Encoding: base64",
+      "",
+      Buffer.from("PNG").toString("base64"),
+      "--o",
+      'Content-Type: application/pdf; name="a.pdf"',
+      'Content-Disposition: attachment; filename="a.pdf"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      Buffer.from("PDFDATA").toString("base64"),
+      "--o--",
+      "",
+    ].join("\r\n");
+    const { session } = fakeSession({ source: raw });
+    const inbox = await inboxWith(session);
+    const id = encodeMessageId("INBOX", 7, 10);
+    const first = await inbox.get(id);
+    const second = await inbox.get(id);
+    assert.ok(first.ok && second.ok);
+    assert.deepEqual(first.value.attachments, second.value.attachments);
+    assert.deepEqual(
+      first.value.attachments.map((a) => [a.attachmentId, a.contentId, a.inline, a.filename]),
+      [["2", "logo@x", true, "(名前なし)"], ["3", null, false, "a.pdf"]],
+    );
+    const img = await inbox.getAttachment(id, "2");
+    assert.ok(img.ok);
+    assert.equal(img.value.data.toString(), "PNG");
+    assert.equal(img.value.mimeType, "image/png");
+    const pdf = await inbox.getAttachment(id, "3");
+    assert.ok(pdf.ok);
+    assert.equal(pdf.value.data.toString(), "PDFDATA");
+    const missing = await inbox.getAttachment(id, "1");
+    assert.ok(!missing.ok && missing.kind === "not_found");
+
+    const bigRaw = raw.replace(Buffer.from("PDFDATA").toString("base64"), Buffer.alloc(26_214_401).toString("base64"));
+    const big = await (await inboxWith(fakeSession({ source: bigRaw }).session)).getAttachment(id, "3");
+    assert.ok(!big.ok && big.kind === "too_large");
+  });
+
   it("RFC 2047 の連続する語を連結して解く", () => {
     assert.equal(decodeMimeWords("=?UTF-8?Q?a_b?= =?UTF-8?Q?c?="), "a bc");
   });

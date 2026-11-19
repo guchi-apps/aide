@@ -1,5 +1,15 @@
 import { fetchAccessToken, type GmailCredentials } from "../image-mail/gmail.ts";
-import { toDetail, toSummary, type GmailApiMessage, type MailDetail, type MailSummary } from "./message.ts";
+import {
+  describeAttachment,
+  findAttachmentPart,
+  MAX_ATTACHMENT_BYTES,
+  toDetail,
+  toSummary,
+  type GmailApiMessage,
+  type MailAttachmentContent,
+  type MailDetail,
+  type MailSummary,
+} from "./message.ts";
 
 /**
  * Morrow向けメールAPI（`/api/mail/*`。#770・#795）のための Gmail 読み取り・整理。
@@ -36,7 +46,7 @@ export function loadGmailInboxCredentials(): GmailCredentials | null {
   return { clientId, clientSecret, refreshToken };
 }
 
-export type GmailFailureKind = "unconfigured" | "unauthorized" | "not_found" | "failed";
+export type GmailFailureKind = "unconfigured" | "unauthorized" | "not_found" | "too_large" | "failed";
 
 export type GmailResult<T> = { ok: true; value: T } | { ok: false; kind: GmailFailureKind; reason: string };
 
@@ -133,6 +143,8 @@ export interface MailInbox {
   labels(): Promise<GmailResult<GmailLabel[]>>;
   list(query: ListQuery): Promise<GmailResult<MailPage>>;
   get(id: string): Promise<GmailResult<MailDetail>>;
+  /** 添付1件の中身（#867）。`attachmentId` は `get` が返した部品の識別子。25MBを超えるときは `too_large`。 */
+  getAttachment(id: string, attachmentId: string): Promise<GmailResult<MailAttachmentContent>>;
   apply(ids: string[], action: MailAction, labelId: string | null): Promise<GmailResult<void>>;
 }
 
@@ -305,6 +317,30 @@ export class GmailInbox implements MailInbox {
     const result = await this.request<GmailApiMessage>(`/messages/${encodeURIComponent(id)}?format=full`);
     if (!result.ok) return result;
     return { ok: true, value: toDetail(result.value) };
+  }
+
+  async getAttachment(id: string, attachmentId: string): Promise<GmailResult<MailAttachmentContent>> {
+    // Gmailの `body.attachmentId` は取得のたびに変わりうるので、安定した `partId` で部品を探し直す。
+    const message = await this.request<GmailApiMessage>(`/messages/${encodeURIComponent(id)}?format=full`);
+    if (!message.ok) return message;
+    const part = findAttachmentPart(message.value.payload, attachmentId);
+    if (!part) return { ok: false, kind: "not_found", reason: "添付が見つかりません" };
+    const described = describeAttachment(part);
+    if (described.size > MAX_ATTACHMENT_BYTES) return { ok: false, kind: "too_large", reason: "添付が大きすぎます" };
+    let encoded = part.body?.data;
+    if (encoded === undefined && part.body?.attachmentId) {
+      const fetched = await this.request<{ data?: string }>(
+        `/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(part.body.attachmentId)}`,
+      );
+      if (!fetched.ok) return fetched;
+      encoded = fetched.value?.data;
+    }
+    const data = Buffer.from((encoded ?? "").replaceAll("-", "+").replaceAll("_", "/"), "base64");
+    if (data.length > MAX_ATTACHMENT_BYTES) return { ok: false, kind: "too_large", reason: "添付が大きすぎます" };
+    return {
+      ok: true,
+      value: { filename: part.filename || "(名前なし)", mimeType: described.mimeType, size: data.length, data },
+    };
   }
 
   /** 操作を適用する。ゴミ箱の出し入れは1件ずつ、それ以外は `batchModify` 1回で済ませる。 */
