@@ -603,3 +603,38 @@ describe("buildZaimMoneyList（商品内訳 #596）", () => {
         assert.equal("items" in entry, false)
     })
 })
+
+describe("buildZaimSnapshot: ポイント・マイル（#872）", () => {
+    const raw = {
+        url: "https://zaim.net/",
+        balances: [{ name: "現金", amount: "￥1,000" }],
+        points: [
+            { name: "JALマイレージバンク", amount: "12,345 pt" },
+            { name: "楽天ポイント", amount: "210 pt" },
+            { name: "Ponta ポイント", amount: "-" },
+            { name: "Vポイント", amount: "5 pt" },
+        ],
+        securities: [],
+        onlineAccounts: [
+            { name: "JAL マイレージバンク", lastUpdatedAt: "最終更新：2026年11月20日 09:00:00" },
+            { name: "Vポイントサイト", lastUpdatedAt: "最終更新：2026年11月19日 08:00:00" },
+        ],
+    }
+
+    it("残高のあるものだけを、単位・最終更新付きで載せる", () => {
+        assert.deepEqual(buildZaimSnapshot(raw).points, [
+            { name: "JALマイレージバンク", amount: 12345, unit: "mile", lastUpdatedAt: "2026-11-20T09:00:00+09:00" },
+            { name: "楽天ポイント", amount: 210, unit: "point", lastUpdatedAt: null },
+            { name: "Vポイント", amount: 5, unit: "point", lastUpdatedAt: "2026-11-19T08:00:00+09:00" },
+        ])
+    })
+
+    it("円の balances にポイントは混ざらない", () => {
+        assert.deepEqual(buildZaimSnapshot(raw).balances.map((b) => b.name), ["現金"])
+    })
+
+    it("points の無い旧スクリプトの出力でも空配列になる", () => {
+        const { points: _omit, ...legacy } = raw
+        assert.deepEqual(buildZaimSnapshot(legacy).points, [])
+    })
+})
