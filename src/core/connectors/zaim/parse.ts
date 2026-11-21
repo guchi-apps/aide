@@ -6,6 +6,7 @@ import type {
   ZaimMoneyList,
   ZaimMoneyMode,
   ZaimOnlineAccount,
+  ZaimPoint,
   ZaimRawEntry,
   ZaimRawMoneyEntry,
   ZaimRawMoneyListResult,
@@ -165,6 +166,34 @@ function parseEntries(entries: ZaimRawEntry[]): { name: string; amount: number }
   return parsed;
 }
 
+/** `12,345 pt` や `12345` を整数にする。`-`（残高なし）など読めなければ null。 */
+export function parsePointAmount(text: string): number | null {
+  const normalized = text.replace(/pt/gi, "").replace(/,/g, "").replace(/\s/g, "");
+  if (!/^\d+$/.test(normalized)) return null;
+  const value = Number(normalized);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function parsePoints(raw: ZaimRawScrapeResult, onlineAccounts: readonly ZaimOnlineAccount[]): ZaimPoint[] {
+  const points: ZaimPoint[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw.points ?? []) {
+    const name = collapseWhitespace(entry.name);
+    const amount = parsePointAmount(entry.amount);
+    if (!name || amount === null) continue;
+    const key = toMatchKey(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    points.push({
+      name,
+      amount,
+      unit: /マイル|マイレージ/.test(name) ? "mile" : "point",
+      lastUpdatedAt: matchLastUpdatedAt(onlineAccounts, name),
+    });
+  }
+  return points;
+}
+
 /** 巡回結果の生テキストを、金額を数値化した取得結果へ変換する。 */
 export function buildZaimSnapshot(raw: ZaimRawScrapeResult): ZaimSnapshot {
   const onlineAccounts = parseOnlineAccounts(raw);
@@ -213,7 +242,7 @@ export function buildZaimSnapshot(raw: ZaimRawScrapeResult): ZaimSnapshot {
     balances.push({ ...balance, lastUpdatedAt: matchLastUpdatedAt(onlineAccounts, balance.name) });
   }
 
-  return { balances, holdings, onlineAccounts };
+  return { balances, points: parsePoints(raw, onlineAccounts), holdings, onlineAccounts };
 }
 
 /** 「9月2日」のような表示から月・日を取り出す。 */
