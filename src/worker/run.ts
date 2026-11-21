@@ -1,3 +1,5 @@
+import { hostname } from "node:os";
+import { WORKER_JOBS_ENV, isAssigned, parseAssignment } from "./assignment.ts";
 import { JOB_CATALOG, type JobName } from "./jobs/catalog.ts";
 import { runClaudeSessionsSync } from "./jobs/claude-sessions-sync.ts";
 import { runGmailWatch } from "./jobs/gmail-watch.ts";
@@ -63,6 +65,21 @@ const name = process.argv[2];
 if (!name || !(name in RUNNERS)) {
   console.error(`使い方: node src/worker/run.ts <${JOB_CATALOG.map((job) => job.name).join(" | ")}>`);
   process.exit(2);
+}
+
+// 担当外のホストでは何もせず成功で終わる（#874）。実行記録（recordJobRun）も残さない:
+// 記録は全ホスト共通のキー1件へ上書きされるため、担当外のホストが「成功」を書くと、
+// 担当ホストが止まっていても動作状況（/api/status）が新鮮に見えてしまう。
+let assignment;
+try {
+  assignment = parseAssignment(process.env[WORKER_JOBS_ENV]);
+} catch (cause) {
+  console.error(`[${name}] ${cause instanceof Error ? cause.message : cause}`);
+  process.exit(2);
+}
+if (!isAssigned(assignment, name as JobName)) {
+  console.log(`[${name}] 担当外のため見送り（${hostname()}。${WORKER_JOBS_ENV} に含まれていません）`);
+  process.exit(0);
 }
 
 const startedAtMs = Date.now();
