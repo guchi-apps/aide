@@ -83,7 +83,7 @@ describe("AIDE_ZAIM_WRITE_SECRET の取得（aide#665）", () => {
     }
   });
 
-  it("サブPCの受け口が読む zaimWriteSecret() は環境変数だけを見る", async () => {
+  it("worker のホスト（DeskMini／Mac mini）の受け口が読む zaimWriteSecret() は環境変数だけを見る", async () => {
     process.env["AIDE_ISSUE_DECK_URL"] = "https://deck.example.test";
     process.env["SHARED_TOKEN_API_SECRET"] = "shared-token-api-secret";
     let called = false;
@@ -196,7 +196,7 @@ describe("POST /api/zaim/payment/web", () => {
   });
 
   it("ZaimのOAuth設定が無くても口は開く（使うのはログイン状態だけ）", async () => {
-    // ここで503にすると、Zaimへ書ける環境（サブPC）なのに口が開かないことになる。
+    // ここで503にすると、Zaimへ書ける環境（worker のホスト（DeskMini／Mac mini））なのに口が開かないことになる。
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
     const result = await postWeb({ ...VALID_WEB_BODY, name: undefined });
     assert.equal(result.status, 400, "OAuth未設定の503ではなく、入力検査まで進むこと");
@@ -400,7 +400,7 @@ describe("商品内訳の手動再取得 /api/zaim/receipt-detail/refresh（#600
     assert.equal(fetchMock.mock.callCount(), 0);
   });
 
-  it("中継先があればサブPCへ中継し、受付（202）をそのまま返す", async () => {
+  it("中継先があればworker のホスト（DeskMini／Mac mini）へ中継し、受付（202）をそのまま返す", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
     process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748";
     const accepted = { ok: true, job: { jobId: JOB_ID, status: "running" }, deduplicated: false };
@@ -414,7 +414,7 @@ describe("商品内訳の手動再取得 /api/zaim/receipt-detail/refresh（#600
     assert.equal(String(fetchMock.mock.calls[0]?.arguments[0]), "http://subpc:4748/api/zaim/receipt-detail/refresh");
   });
 
-  it("サブPCに繋がらなければ502 subpc_unreachable（取得の失敗とは別の種類）", async () => {
+  it("worker のホスト（DeskMini／Mac mini）に繋がらなければ502 subpc_unreachable（取得の失敗とは別の種類）", async () => {
     process.env["AIDE_ZAIM_WRITE_SECRET"] = SECRET;
     process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748";
     mock.method(globalThis, "fetch", async () => {

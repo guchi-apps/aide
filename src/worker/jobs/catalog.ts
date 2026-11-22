@@ -25,7 +25,7 @@ export const JOB_CATALOG = [
   {
     name: "self-update",
     description:
-      "サブPCの aide チェックアウトを origin/develop にfast-forwardし、依存変更時だけ再導入する。" +
+      "worker のホスト（DeskMini／Mac mini）の aide チェックアウトを origin/develop にfast-forwardし、依存変更時だけ再導入する。" +
       "develop 以外に置き去りでも、取り込み済みなら develop へ戻して続ける。" +
       "更新後はsystemd unitを反映し、Zaim Web版の受け口を再起動する。",
     interval: "1時間ごと",
@@ -82,8 +82,8 @@ export const JOB_CATALOG = [
   {
     name: "claude-sessions-sync",
     description:
-      "サブPCで動いている Claude Code のセッションを集めてキャッシュを更新する。" +
-      "台帳（~/.claude/sessions）はサブPCのファイルにしか無く、VPSのMCPサーバーからは" +
+      "worker のホスト（DeskMini／Mac mini）で動いている Claude Code のセッションを集めてキャッシュを更新する。" +
+      "台帳（~/.claude/sessions）はworker のホスト（DeskMini／Mac mini）のファイルにしか無く、VPSのMCPサーバーからは" +
       "呼ばれたときに読めないため、ここで定期的に送っておく。" +
       "リモートコントロールのURLを返すツール（aide_claude_sessions）が読む。",
     interval: "2分ごと",
@@ -98,7 +98,7 @@ export const JOB_CATALOG = [
       "3Dプリンター（Bambu Lab A1 mini）の状態を myroom の内部APIから読み、印刷の停止・" +
       "エラーが出た遷移だけをDiscordへ通知する（完了は通知しない）。プリンターの電源が切れているなど値が古いときは" +
       "何もしない（古い値から遷移を作らない）。取得は myroom の公開URL経由のため、" +
-      "サブPCの .env に AIDE_MYROOM_URL と AIDE_MYROOM_TOKEN が要る。",
+      "worker のホスト（DeskMini／Mac mini）の .env に AIDE_MYROOM_URL と AIDE_MYROOM_TOKEN が要る。",
     interval: "2分ごと",
     // 2分間隔なので、5回ぶん飛んだら気づけるように10分。停止・エラーの通知が遅れるほど価値が下がる。
     staleAfterMinutes: 10,
@@ -110,7 +110,7 @@ export const JOB_CATALOG = [
       "（Morrowの「必要なメールのお知らせ」を受信から数秒で判定するため。#829）。watchの期限は7日なので" +
       "毎日かけ直す。トピック名（AIDE_GMAIL_WATCH_TOPIC）が未設定なら何もしない。" +
       "Gmailの資格情報（AIDE_GMAIL_CLIENT_ID・AIDE_GMAIL_CLIENT_SECRET・AIDE_GMAIL_INBOX_REFRESH_TOKEN）が" +
-      "サブPCの .env に要る。",
+      "worker のホスト（DeskMini／Mac mini）の .env に要る。",
     interval: "1日1回（04:00 JST）",
     // 24時間ごとで期限は7日。2回ぶん飛んでも切れないが、気づけるように36時間。
     staleAfterMinutes: 36 * 60,

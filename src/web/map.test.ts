@@ -94,9 +94,9 @@ describe("アプリ連携の図", () => {
     assert.match(figure, /<div class="hub-sub">取得・整形・中継<\/div>/);
   });
 
-  it("ハブに「VPS」と「Worker＝サブPC」の役割を示し、Workerは一覧のWorkerカードへリンクする（#431）", () => {
+  it("ハブに「VPS」と「Worker＝DeskMini／Mac mini」の役割を示し、Workerは一覧のWorkerカードへリンクする（#431）", () => {
     assert.match(figure, /<div class="hub-vps">VPS/, "VPSの表示が無い");
-    assert.match(figure, /<b>Worker ＝ サブPC<\/b>/, "Workerの表示が無い");
+    assert.match(figure, /<b>Worker ＝ DeskMini／Mac mini<\/b>/, "Workerの表示が無い");
     assert.ok(figure.includes(`重い処理を定期実行（${JOB_CATALOG.length}件）`), "workerジョブの件数が無い");
     assert.ok(figure.includes('href="#worker-jobs"'), "Workerから一覧へのリンクが無い");
   });
@@ -203,10 +203,10 @@ describe("アプリ連携の画面", () => {
     assert.ok(!renderMapPage().includes("認証が無効です"));
   });
 
-  it("一覧にWorker（サブPC）のカードを出し、workerジョブすべてを名前・実行間隔・説明で表示する（#431）", () => {
+  it("一覧にWorker（worker のホスト（DeskMini／Mac mini））のカードを出し、workerジョブすべてを名前・実行間隔・説明で表示する（#431）", () => {
     const html = renderMapPage();
     assert.ok(html.includes('id="worker-jobs"'));
-    assert.ok(html.includes("Worker（サブPC・重い処理）"));
+    assert.ok(html.includes("Worker（DeskMini／Mac mini・重い処理）"));
     assert.ok(html.includes(`<span class="n">${JOB_CATALOG.length}</span>`));
     for (const job of JOB_CATALOG) {
       assert.ok(html.includes(job.name), `${job.name} が一覧に無い`);
@@ -214,8 +214,8 @@ describe("アプリ連携の画面", () => {
     }
   });
 
-  it("リード文に、重い処理をサブPCのWorkerが担う旨を書く（#431）", () => {
-    assert.ok(renderMapPage().includes("重い処理（Zaimの巡回など）はサブPCで動くWorkerが定期的に行い"));
+  it("リード文に、重い処理をworker のホスト（DeskMini／Mac mini）のWorkerが担う旨を書く（#431）", () => {
+    assert.ok(renderMapPage().includes("重い処理（Zaimの巡回など）はworker のホスト（DeskMini／Mac mini）で動くWorkerが定期的に行い"));
   });
 });
 

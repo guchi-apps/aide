@@ -3,9 +3,9 @@ import type { ClaudeCodeSession, ClaudeCodeSessionsSnapshot } from "../connector
 import { CLAUDE_SESSIONS_CACHE_KEY } from "../../worker/jobs/claude-sessions-sync.ts";
 
 /**
- * サブPCで動いている Claude Code セッションのビュー。
+ * worker のホスト（DeskMini／Mac mini）で動いている Claude Code セッションのビュー。
  *
- * 台帳を持っているのはサブPCで、MCPサーバーはVPSで動く。呼ばれたときに読みに行けないため、
+ * 台帳を持っているのはworker のホスト（DeskMini／Mac mini）で、MCPサーバーはVPSで動く。呼ばれたときに読みに行けないため、
  * **worker が2分ごとに送ってきたスナップショットを読む**（`claude-sessions-sync`）。
  * 他のビューと違い、答えそのものが「いつ時点か」に強く依存するので、収集時刻と経過分数を
  * 必ず添えて返す。
@@ -64,7 +64,7 @@ function notCollected(now: Date): ClaudeSessionsStatus {
     stale: true,
     sessions: [],
     note:
-      "セッションの一覧がまだ1件も届いていない。サブPC側の claude-sessions-sync が" +
+      "セッションの一覧がまだ1件も届いていない。worker のホスト（DeskMini／Mac mini）側の claude-sessions-sync が" +
       "動いていない可能性がある（セッションが動いていないという意味ではない）。",
   };
 }
@@ -77,7 +77,7 @@ export function summarizeClaudeSessions(
   if (!cached) return notCollected(now);
 
   const snapshot = cached.data;
-  // 収集時刻は worker（サブPC）が打つ。キャッシュの `fetchedAt` はVPSが受け取った時刻で、
+  // 収集時刻は worker（DeskMini／Mac mini）が打つ。キャッシュの `fetchedAt` はVPSが受け取った時刻で、
   // 送信が詰まっていると実際より新しく見えるため、あるなら収集時刻の方を使う。
   const collectedAt = snapshot.collectedAt ?? null;
   const snapshotAgeMinutes = minutesSince(collectedAt, now) ?? cached.ageMinutes;
@@ -90,7 +90,7 @@ export function summarizeClaudeSessions(
   }));
 
   const notes = [
-    `${snapshotAgeMinutes}分前に${snapshot.hostname ?? "サブPC"}で集めた一覧。` +
+    `${snapshotAgeMinutes}分前に${snapshot.hostname ?? "worker のホスト"}で集めた一覧。` +
       "収集は2分ごとなので、直前に始めた・終えたセッションは反映されていないことがある。",
   ];
   if (stale) {
@@ -100,7 +100,7 @@ export function summarizeClaudeSessions(
     );
   }
   if (!stale && sessions.length === 0) {
-    notes.push("サブPCで動いている Claude Code のセッションは無い。");
+    notes.push("worker のホスト（DeskMini／Mac mini）で動いている Claude Code のセッションは無い。");
   }
   if (sessions.some((session) => session.remoteControlUrl === null)) {
     notes.push(

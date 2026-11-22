@@ -6,13 +6,13 @@ import {
 } from "./web-payment-forward.ts";
 
 /**
- * 商品内訳の手動再取得（#600）を、サブPCの受け口へ中継する。
+ * 商品内訳の手動再取得（#600）を、worker のホスト（DeskMini／Mac mini）の受け口へ中継する。
  *
- * 登録・編集の中継（`web-payment-forward.ts`）と違い、**数十秒待たない。** サブPC側は依頼を受け付けて
+ * 登録・編集の中継（`web-payment-forward.ts`）と違い、**数十秒待たない。** worker のホスト（DeskMini／Mac mini）側は依頼を受け付けて
  * すぐ `jobId` を返し、状態は `GET` で読むため、1回の往復は短い。待ち時間の上限も短く取り、
  * VPSの応答がWebのタイムアウトに掛からないようにする。
  *
- * **サブPCの失敗はジョブの失敗と別の `kind` で返す**（`subpc_*`）。サブPCが止まっている・
+ * **worker のホスト（DeskMini／Mac mini）の失敗はジョブの失敗と別の `kind` で返す**（`subpc_*`）。worker のホスト（DeskMini／Mac mini）が止まっている・
  * 通信が届かない・受け口が未更新、のいずれも「取得を試みていない」ことが確かなので、
  * 呼び出し元は取得失敗（Zaim側の問題）と切り分けられる。
  */
@@ -42,7 +42,7 @@ function refreshJobId(path: string, base: string): string | null {
 /** 受付・状態の読み取りはどちらも即座に返る。 */
 const FORWARD_TIMEOUT_MS = 20_000;
 
-/** サブPCの応答に載っていてよい失敗の種類。それ以外は中継の失敗として扱い直す。 */
+/** worker のホスト（DeskMini／Mac mini）の応答に載っていてよい失敗の種類。それ以外は中継の失敗として扱い直す。 */
 const KNOWN_FAILURE_KINDS = new Set([
   "busy",
   "session_expired",
@@ -96,14 +96,14 @@ export async function forwardReceiptRefresh(
     if (code !== null && NOT_DELIVERED_CODES.has(code)) {
       return subpcFailure(
         "subpc_unreachable",
-        `Zaimの取得を行うサブPCへ接続できませんでした（${code}）。取得は開始されていません。サブPCの受け口が起動しているかを確認してください。`,
+        `Zaimの取得を行うworker のホスト（DeskMini／Mac mini）へ接続できませんでした（${code}）。取得は開始されていません。worker のホスト（DeskMini／Mac mini）の受け口が起動しているかを確認してください。`,
         true,
       );
     }
     const name = cause instanceof Error ? cause.name : "Error";
     return subpcFailure(
       "subpc_timeout",
-      `Zaimの取得を行うサブPCとの通信が途切れました（${code ?? name}）。受付済みかどうかは分かりません。`,
+      `Zaimの取得を行うworker のホスト（DeskMini／Mac mini）との通信が途切れました（${code ?? name}）。受付済みかどうかは分かりません。`,
       true,
     );
   }
@@ -126,13 +126,13 @@ export async function forwardReceiptRefresh(
   if ([401, 403, 404, 405, 503].includes(response.status)) {
     return subpcFailure(
       "subpc_rejected",
-      `サブPCの受け口が依頼を受け付けませんでした（HTTP ${response.status}）。シークレットの不一致か、サブPCの受け口が未更新の可能性があります。`,
+      `worker のホスト（DeskMini／Mac mini）の受け口が依頼を受け付けませんでした（HTTP ${response.status}）。シークレットの不一致か、worker のホスト（DeskMini／Mac mini）の受け口が未更新の可能性があります。`,
       false,
     );
   }
   return subpcFailure(
     "subpc_bad_response",
-    `サブPCの応答を読めませんでした（HTTP ${response.status}）。`,
+    `worker のホスト（DeskMini／Mac mini）の応答を読めませんでした（HTTP ${response.status}）。`,
     true,
   );
 }

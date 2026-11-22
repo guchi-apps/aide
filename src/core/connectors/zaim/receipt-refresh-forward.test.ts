@@ -73,7 +73,7 @@ describe("forwardReceiptRefresh", () => {
     );
   });
 
-  it("サブPCが止まっている・届かない場合は subpc_unreachable（取得は始まっていない）", async () => {
+  it("worker のホスト（DeskMini／Mac mini）が止まっている・届かない場合は subpc_unreachable（取得は始まっていない）", async () => {
     for (const code of ["ECONNREFUSED", "EHOSTUNREACH", "ENOTFOUND"]) {
       const result = await forwardReceiptRefresh({ method: "POST", body: {} }, { ...OPTIONS, fetchImpl: refused(code) });
       assert.equal(result.status, 502);
@@ -95,7 +95,7 @@ describe("forwardReceiptRefresh", () => {
     assert.match(failure.message, /受付済みかどうかは分かりません/);
   });
 
-  it("サブPCがシークレット不一致・未更新（404）で断る場合は subpc_rejected（再試行不可）", async () => {
+  it("worker のホスト（DeskMini／Mac mini）がシークレット不一致・未更新（404）で断る場合は subpc_rejected（再試行不可）", async () => {
     for (const status of [401, 403, 404, 405, 503]) {
       const result = await forwardReceiptRefresh(
         { method: "POST", body: {} },

@@ -110,7 +110,7 @@ export interface HealthConnector {
   /**
    * その設定を使うプロセス。
    *
-   * **`worker` のものはこのサーバーからは判定できない。** 本番では worker がサブPC、
+   * **`worker` のものはこのサーバーからは判定できない。** 本番では worker がworker のホスト（DeskMini／Mac mini）、
    * サーバーがVPSで動き、`.env` が別（`deploy.yml` がVPSへ書くのは `AIDE_*` の一部だけで、
    * `ZAIM_*` と `AIDE_DISCORD_WEBHOOK_URL` は含まれない）。サーバー側の環境変数を見て
    * 「未設定」と表示すると、正しく動いていても常に未設定と出る。
@@ -209,7 +209,7 @@ function jobAttention(job: HealthJob): HealthAttention[] {
       {
         severity: "danger",
         message: `${job.name} が失敗しています（${job.lastRun.message}）`,
-        action: "サブPCで systemctl status aide-" + job.name + ".service を見る",
+        action: "worker のホストで状態を見る（DeskMini: systemctl status aide-" + job.name + ".service ／ Mac mini: launchctl list の aide-" + job.name + " の行）",
       },
     ];
   }
@@ -218,7 +218,7 @@ function jobAttention(job: HealthJob): HealthAttention[] {
       {
         severity: "warn",
         message: `${job.name} が ${formatDuration(job.lastRun.ageMinutes)} 実行されていません（想定は${job.interval}）`,
-        action: "サブPCで systemd timer が有効か確認する",
+        action: "worker のホストで定期実行が有効か確認する（DeskMini: systemd timer ／ Mac mini: launchd）",
       },
     ];
   }
@@ -292,7 +292,7 @@ export async function readConnectors(options: { supabase?: SupabaseAuthConfig | 
       side: "server",
       configured: (await readOpsDashboardConfig()) !== null,
       probeable: true,
-      note: "VPS・サブPCの稼働状況の取得元（aide_host_status / aide_uptime_monitors / aide_service_quotas）。",
+      note: "VPS・DeskMini・Mac miniの稼働状況の取得元（aide_host_status / aide_uptime_monitors / aide_service_quotas）。",
     },
     {
       key: "github",
@@ -351,11 +351,11 @@ export async function readConnectors(options: { supabase?: SupabaseAuthConfig | 
       side: "worker",
       configured: null,
       probeable: false,
-      note: "巡回は worker（サブPC）が担当する。動いているかは定期ジョブの記録で分かる。",
+      note: "巡回は worker（DeskMini／Mac mini）が担当する。動いているかは定期ジョブの記録で分かる。",
     },
     {
       key: "zaim-web-upstream",
-      label: "Zaim Web版登録の受け口（サブPC）",
+      label: "Zaim Web版登録の受け口（worker のホスト（DeskMini／Mac mini））",
       side: "server",
       configured: zaimWebUpstreamUrl() !== null,
       probeable: true,
@@ -369,7 +369,7 @@ export async function readConnectors(options: { supabase?: SupabaseAuthConfig | 
       side: "worker",
       configured: null,
       probeable: false,
-      note: "ジョブの失敗とプリンター異常の通知先。worker（サブPC）から送る。送信専用。配送の失敗は data/worker/notify-delivery.json に残る。",
+      note: "ジョブの失敗とプリンター異常の通知先。worker（DeskMini／Mac mini）から送る。送信専用。配送の失敗は data/worker/notify-delivery.json に残る。",
     },
   ];
 }

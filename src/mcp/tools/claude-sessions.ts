@@ -2,9 +2,9 @@ import { buildClaudeSessionsStatus } from "../../core/views/claude-sessions.ts";
 import type { Tool } from "../types.ts";
 
 /**
- * サブPCで動いている Claude Code セッションの一覧。
+ * worker のホスト（DeskMini／Mac mini）で動いている Claude Code セッションの一覧。
  *
- * **AIDEにしかできない領域**にあたる。台帳はサブPCのファイルシステムにしかなく、
+ * **AIDEにしかできない領域**にあたる。台帳はworker のホスト（DeskMini／Mac mini）のファイルシステムにしかなく、
  * Claudeアプリからそこを読む経路は他に無い。公式MCPとも重複しない。
  *
  * `aide_host_status` とは問いが違う。あちらは「サーバーに異常はないか」で、tmuxセッションの
@@ -15,7 +15,7 @@ import type { Tool } from "../types.ts";
 export const claudeSessionsTool: Tool = {
   name: "aide_claude_sessions",
   description:
-    "サブPCで動作中の Claude Code セッションの一覧を返す。" +
+    "worker のホスト（DeskMini／Mac mini）で動作中の Claude Code セッションの一覧を返す。" +
     "セッションごとにリモートコントロールのURL（remoteControlUrl。開くとそのセッションを" +
     "操作できる）、プロジェクト名、作業ディレクトリ、tmuxセッション名、" +
     "状態（status: busy=応答中 / waiting=人の入力を待っている / idle=待機中）、" +
@@ -23,7 +23,7 @@ export const claudeSessionsTool: Tool = {
     "起動からの経過分数（runningForMinutes）、その状態が続いている分数（statusForMinutes）を含む。" +
     "**放置されているセッションを尋ねられたら status が waiting のものを見ること**" +
     "（statusForMinutes が長いほど待たせている）。" +
-    "「サブPCでいま何が動いているか」「Claude Codeのセッションを開きたい」" +
+    "「worker のホスト（DeskMini／Mac mini）でいま何が動いているか」「Claude Codeのセッションを開きたい」" +
     "「リモートコントロールのURLを教えて」「放置しているセッションはないか」" +
     "を尋ねられたときに呼ぶ。" +
     "**答えるときは remoteControlUrl をそのままリンクとして示すこと**（利用者はそれをタップして" +

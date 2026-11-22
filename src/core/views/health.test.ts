@@ -73,7 +73,7 @@ describe("ジョブの判定", () => {
     assert.equal(job.lastRun?.message, "Error: セッションが失効");
   });
 
-  it("実行ホストと所要時間を持ち回る（サブPCとVPSを見分けるため）", () => {
+  it("実行ホストと所要時間を持ち回る（worker のホスト（DeskMini／Mac mini）とVPSを見分けるため）", () => {
     const job = summarizeJob(JOB, run({ host: "vps", seconds: 12.5 }));
     assert.equal(job.lastRun?.host, "vps");
     assert.equal(job.lastRun?.seconds, 12.5);

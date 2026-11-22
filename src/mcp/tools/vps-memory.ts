@@ -50,7 +50,7 @@ export const vpsMemoryTool: Tool = {
     "「issue-deckのメモリは今どれくらい？」「増え続けていない？」「再起動で下がった？」に使う。" +
     "最新サンプル（RSS・VmHWM・スレッド数・ホストの空き・Swap）・最後に取得できた時刻・プロセス区間ごとの観測最大を、issue-deckの応答のまま返す（AIDEでは再集計しない）。" +
     "**取得不可を0MBと読まないこと。** `latest.status` が `unavailable` なら `reason` を、`lastSuccessAt` と `latestAgeSeconds`（最新サンプルからの経過秒）を必ず確かめる。" +
-    "計測はサブPCから手動起動で、常時実行ではない。`latestAgeSeconds` が大きいときは古い値で、現在値ではない。" +
+    "計測はworker のホスト（DeskMini／Mac mini）から手動起動で、常時実行ではない。`latestAgeSeconds` が大きいときは古い値で、現在値ではない。" +
     "`segments` はPID・起動時刻ごとの別プロセス（デプロイ・再起動で別区間になる）で、混ぜて1つの推移として読まないこと。" +
     "採取サンプルの推移が要るときだけ `history: true` を付ける（応答が大きくなる）。",
   inputSchema: {
