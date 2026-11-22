@@ -117,6 +117,8 @@ describe("MCPツールの登録簿", () => {
     assert.deepEqual(registry.get("asset_manager_salary_lookup")?.requiredScopes, ["salary-agent:read"]);
     assert.deepEqual(registry.get("asset_manager_salary_approval_status")?.requiredScopes, ["salary-agent:read"]);
     assert.deepEqual(registry.get("asset_manager_salary_commit")?.requiredScopes, ["salary-agent:write"]);
+    assert.deepEqual(registry.get("aide_set_worker_assignment")?.requiredScopes, ["worker-assignment:write"]);
+    assert.equal(registry.get("aide_worker_assignment")?.requiredScopes, undefined);
     // 既存の支出・サブスクのツールには給与の権限を持ち込まない。
     assert.equal(registry.get("asset_manager_import_payment")?.requiredScopes, undefined);
   });
