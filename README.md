@@ -663,7 +663,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_salary_approval_status` | **給与専用**。プレビューを本人が Asset Manager の画面で承認したかを読む（状態とIDだけ。金額は返らない）。`approved` になるまで保存しない。scope `salary-agent:read` |
 | `asset_manager_salary_commit` | **給与専用の書き込みツール**。本人が Asset Manager の画面で承認した給与明細1件を給与台帳へ登録する。送る前に承認状態を読み、`approved` でなければ送らない。保存後も `verified: false` で、読み戻してから報告する。scope `salary-agent:write` |
 | `asset_manager_salary_lookup` | **給与専用**。Salary IDで登録済みの明細を読み戻す（保存後の照合）。元メールでは引けず、タイムアウト後は同じメール・同じPDFで `asset_manager_salary_preview` を引き直し、`existing.alreadyImportedSalaryId` で登録の有無を判定する。scope `salary-agent:read` |
-| `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
+| `aide_host_status` | VPS・DeskMini・Mac miniのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
 | `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻・枠の長さ・取得時刻 |
 | `aide_room_sensors` | いまの部屋の測定値。センサーごとの室温・湿度・気圧・CO2・照度、屋外との気温差 |
@@ -688,7 +688,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_issue_deck_summary` | IssueDeckの全体サマリー（未着手・実行中・予約待ち・確認待ち・手作業待ち・問題・PR・本番反映・指定期間の完了）を、全体合計・リポジトリ別内訳・要対応の上位10件で返す。**読み取り専用**。集計はIssueDeck側（`/api/integrations/aide/development-summary`）で、AIDEは再集計せず中継する。GitHub由来の `aide_dev_status` とは別（#569） |
 | `aide_vps_memory` | 本番VPS上の issue-deck のメモリ計測結果（最新・最後に取得できた時刻・経過秒・PID/起動時刻ごとの区間、`history` で採取サンプル）を返す。**読み取り専用**。計測・集計はIssueDeck側（`/api/integrations/vps-memory`）で、AIDEは中継のみ。取得不可は `reason` のまま返し0MBにしない（#608） |
 | `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`（`notStarted`・`reserved` 等のキー）・`repo`・`cursor`・`limit` でページングする。summary と同じエンドポイントに中継する。読み取り専用（#569） |
-| `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
+| `aide_claude_sessions` | worker のホスト（DeskMini／Mac mini）で動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳は worker のホストにしか無い） |
 | `aide_zaim_master` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返す |
 | `aide_zaim_payment` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返し、Zaimへは登録しない |
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |

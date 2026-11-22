@@ -49,7 +49,7 @@ describe("ジョブの実行記録", () => {
     assert.equal(keepAlive?.data.message, "Error: セッションが失効");
   });
 
-  it("実行ホストを添える（サブPCとVPSのどちらで動いたかを見分けるため）", async () => {
+  it("実行ホストを添える（worker のホスト（DeskMini／Mac mini）とVPSのどちらで動いたかを見分けるため）", async () => {
     await recordJobRun({
       job: "zaim-refresh",
       ok: true,

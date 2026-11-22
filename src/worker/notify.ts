@@ -222,7 +222,7 @@ export function formatJst(at: Date): string {
 
 /** 手動ログインのやり直し方。文面を1か所に持つ。 */
 const MANUAL_LOGIN_ACTION =
-  "サブPCの `~/apps/aide` で `node src/core/connectors/zaim/scripts/login.mjs` を実行し、手動でログインし直す";
+  "worker のホスト（DeskMini／Mac mini）の `~/apps/aide` で `node src/core/connectors/zaim/scripts/login.mjs` を実行し、手動でログインし直す";
 
 /** 失効の行き先ごとの、タイトル・本文・対応欄。`auto-pending` は通知しないので持たない。 */
 const SESSION_EXPIRY_TEXT: Record<

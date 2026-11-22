@@ -85,7 +85,7 @@ describe("summarizeClaudeSessions", () => {
     assert.match(view.note, /既に終了している可能性/);
   });
 
-  it("キャッシュの受信時刻ではなく、サブPCが集めた時刻で鮮度を測る", () => {
+  it("キャッシュの受信時刻ではなく、worker のホスト（DeskMini／Mac mini）が集めた時刻で鮮度を測る", () => {
     // 送信が詰まると受信時刻（ageMinutes）だけが新しくなる。それを鮮度にすると古さを見逃す。
     const stale = cached({}, STALE_AFTER_MINUTES + 5);
     const view = summarizeClaudeSessions({ ...stale, ageMinutes: 0 }, NOW);

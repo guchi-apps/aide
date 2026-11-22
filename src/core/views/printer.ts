@@ -4,7 +4,7 @@ import type { MyRoomFailure, MyRoomPrinter, MyRoomPrinterSnapshot } from "../con
 /**
  * 3Dプリンター（Bambu Lab A1 mini）の状態のビュー（#378）。
  *
- * 収集はサブPCの常駐プロセスがローカルMQTTから行い、myroom が正規化して内部API
+ * 収集はworker のホスト（DeskMini／Mac mini）の常駐プロセスがローカルMQTTから行い、myroom が正規化して内部API
  * （`GET /api/internal/bambu/printer`。myroom#428）で返す。**AIDEは集め直さず、その値を「いまプリンターは
  * どうなっているか」に答えられる形へ畳む。**
  *
@@ -30,7 +30,7 @@ export type PrinterState = "idle" | "preparing" | "printing" | "paused" | "finis
  * 値がどこまで新しいか。**`fresh` 以外の値は現在の状態として扱わない。**
  *
  * - `fresh`: myroom が `online` と報告し、収集からの最終受信がしきい値以内
- * - `stale`: 収集からの受信が止まっている（`collector_stale`。サブPCの常駐が落ちている・ネットワーク断）
+ * - `stale`: 収集からの受信が止まっている（`collector_stale`。worker のホスト（DeskMini／Mac mini）の常駐が落ちている・ネットワーク断）
  * - `disconnected`: 収集は生きているがプリンターに繋がっていない（`printer_offline`。電源断など）
  * - `unknown`: 最終受信時刻や接続状態が読めず、新しいかを判断できない
  * - `never`: 収集が一度も届いていない（`no_data`。myroom 側の未設定・未起動）
@@ -284,7 +284,7 @@ function freshnessMessage(freshness: PrinterFreshness, ageMinutes: number | null
     case "stale":
       return (
         `プリンターの状態の収集が止まっている${ageText(ageMinutes)}。` +
-        "サブPCの収集プロセスかネットワークが止まっている可能性がある。**現在の状態は分からない**" +
+        "worker のホスト（DeskMini／Mac mini）の収集プロセスかネットワークが止まっている可能性がある。**現在の状態は分からない**" +
         "（lastKnown は最後に確認できた時点の値で、現在の値ではない）。"
       );
     case "disconnected":
