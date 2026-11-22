@@ -42,6 +42,8 @@ export const LOCATION_READ_SCOPE = "location:read";
 /** 給与明細メールの代理登録（#725）。プレビュー・読み戻しと保存は別の承認単位にする。 */
 export const SALARY_AGENT_READ_SCOPE = "salary-agent:read";
 export const SALARY_AGENT_WRITE_SCOPE = "salary-agent:write";
+/** worker ジョブの担当ホストの切り替え（#897）。固定は定期jobを止めうるので、読み取り系とは別の承認単位にする。 */
+export const WORKER_ASSIGNMENT_WRITE_SCOPE = "worker-assignment:write";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
@@ -58,6 +60,7 @@ const SUPPORTED_SCOPES = new Set([
   LOCATION_READ_SCOPE,
   SALARY_AGENT_READ_SCOPE,
   SALARY_AGENT_WRITE_SCOPE,
+  WORKER_ASSIGNMENT_WRITE_SCOPE,
 ]);
 
 /**

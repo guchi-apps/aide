@@ -690,7 +690,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`（`notStarted`・`reserved` 等のキー）・`repo`・`cursor`・`limit` でページングする。summary と同じエンドポイントに中継する。読み取り専用（#569） |
 | `aide_claude_sessions` | worker のホスト（DeskMini／Mac mini）で動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳は worker のホストにしか無い） |
 | `aide_worker_assignment` | worker ジョブの担当ホスト（subpc＝DeskMini／macmini＝Mac mini）・モード（自動か固定か）・各ホストの最終問い合わせと生存判定・最後の切り替え（時刻と理由）を返す。**読み取り専用**（#891） |
-| `aide_set_worker_assignment` | worker ジョブの担当のモードを `auto`・`subpc`・`macmini` に切り替える。**書き込みツール**。固定は解除するまで続く（#891） |
+| `aide_set_worker_assignment` | worker ジョブの担当のモードを `auto`・`subpc`・`macmini` に切り替える。**書き込みツール**。固定は解除するまで続く（#891）。scope `worker-assignment:write`（#897。既存の接続は再接続して明示的に許可するまで切り替えできない。読み取りは引き続き可） |
 | `aide_zaim_master` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返す |
 | `aide_zaim_payment` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返し、Zaimへは登録しない |
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |

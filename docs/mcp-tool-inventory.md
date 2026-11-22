@@ -75,7 +75,7 @@
 | `aide_vps_memory` | 本番issue-deckのVPSメモリ計測結果（最新・区間・履歴） | C B | 読 | IssueDeck API（#608） | IssueDeck | 未実測 | 未実測 | 新設（#608）。計測・集計はIssueDeck側で、AIDEは中継のみ。取得不可・経過秒・区間は加工しない |
 | `aide_claude_sessions` | サブPCのセッション | C B | 読 | ops-dashboard | サブPCのキャッシュ | 2.0KB | 約1.3KB（2件） | 維持 |
 | `aide_worker_assignment` | workerジョブの担当ホスト | C B | 読 | AIDE（data/worker-assignment.json） | AIDE | 未実測 | 小 | 新設（#891） |
-| `aide_set_worker_assignment` | workerジョブの担当を切り替える | C B | **書** | AIDE（data/worker-assignment.json） | AIDE | 未実測 | 小 | 新設（#891）。読み取りと別ツール |
+| `aide_set_worker_assignment` | workerジョブの担当を切り替える | C B | **書** | AIDE（data/worker-assignment.json） | AIDE | 未実測 | 小 | 新設（#891）。読み取りと別ツール。scope `worker-assignment:write`（#897） |
 | `aide_zaim_master` | 登録に渡すID候補 | C B | 読 | なし | Zaim（24hキャッシュ） | 0.9KB | 約9KB | 維持。ジャンル約115件はカテゴリと組で選ぶ必要があり、削ると登録が壊れる |
 | `aide_zaim_payment` | 支出を登録 | C B | **書** | Zaim | Zaim | 3.4KB | 小 | 維持。取り消せないので分離・aide-bot名指しを保つ |
 | `asset_manager_import_payment` | 請求メール取り込み | G | **書** | Asset Manager API | Asset Manager | 約6.6KB | 小 | 維持（G専用。定期タスクの入口）。#832で `review`・`items` を追加 |
