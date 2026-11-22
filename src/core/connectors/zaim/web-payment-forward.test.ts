@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { changeMode, resetAssignmentForTest, updateAssignment } from "../../worker-assignment.ts";
 import {
   ZAIM_WEB_FORWARDED_HEADER,
   ZAIM_WEB_FORWARD_TIMEOUT_MS,
@@ -75,6 +79,24 @@ describe("zaimWebUpstreamUrl", () => {
   it("末尾のスラッシュを落とす", () => {
     process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "http://subpc:4748/";
     assert.equal(zaimWebUpstreamUrl(), "http://subpc:4748");
+  });
+
+  it("host=URL の形なら、worker ジョブの担当ホストの受け口を選ぶ（#891）", async () => {
+    process.env["AIDE_WORKER_ASSIGNMENT_PATH"] = join(await mkdtemp(join(tmpdir(), "aide-forward-")), "state.json");
+    resetAssignmentForTest();
+    process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "subpc=http://subpc:4748/, macmini=http://macmini:4748";
+    try {
+      // 読み込み前・初期状態は主（subpc）。
+      assert.equal(zaimWebUpstreamUrl(), "http://subpc:4748");
+      await updateAssignment((state) => ({ state: changeMode(state, "macmini", new Date()), result: null }));
+      assert.equal(zaimWebUpstreamUrl(), "http://macmini:4748");
+      // 担当ホストのURLが無ければ、書かれている方へ送る。
+      process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"] = "subpc=http://subpc:4748";
+      assert.equal(zaimWebUpstreamUrl(), "http://subpc:4748");
+    } finally {
+      resetAssignmentForTest();
+      delete process.env["AIDE_WORKER_ASSIGNMENT_PATH"];
+    }
   });
 });
 

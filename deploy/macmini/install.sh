@@ -3,11 +3,11 @@
 # aide の worker ジョブの LaunchAgent を生成して登録する（#874）。
 # deploy/systemd/ の timer・service に当たる。plist はこのスクリプトが表（JOBS）から生成する。
 #
-#   deploy/macmini/install.sh [ジョブ名...]   # 省略時は全ジョブ。何度流しても同じ結果になる
+#   deploy/macmini/install.sh [ジョブ名...]   # 省略時は全ジョブと受け口。何度流しても同じ結果になる
 #   deploy/macmini/install.sh --uninstall      # 登録を全部外す
 #
-# 登録しても、担当外のジョブは run.ts が何もせず終わる（`AIDE_WORKER_JOBS`）。
-# ただし Mac mini の ~/apps/aide/.env に AIDE_WORKER_JOBS を入れてから登録すること。
+# Mac mini は予備として全ジョブを常に登録しておく（#891）。担当かどうかはジョブの実行前に
+# run.ts が AIDE（VPS）へ問い合わせて決め、担当外なら何もせず終わる。普段は何もしない。
 #
 # 差分（systemd との違い）:
 #   - Persistent=true に当たるものが無い。停止中の分は取り戻さない（再起動後は次の周期を待つ）。
@@ -40,7 +40,7 @@ JOBS=(
 # printer-watch は myroom の公開URLへHTTP GETするだけでプリンターへLAN接続しないため既定に含める（#886）。
 # claude-sessions-sync は #879 で macOS 対応済みのため既定に含める。
 DEFAULT_EXCLUDE=()
-# 常駐の受け口（Zaimのログイン状態を持つ）。担当判定が無く、登録した機が受け口になるので既定には入れない。
+# 常駐の受け口（Zaimのログイン状態を持つ）。両ホストで常駐させ、VPS が担当ホストの受け口へ振り分ける（#891）。
 DAEMON_JOB="zaim-web"
 
 calendar_xml() {
@@ -163,8 +163,8 @@ for entry in "${JOBS[@]}"; do
   echo "- $job: 登録しました"
 done
 
-# 常駐の受け口は明示したときだけ登録する。
-if [[ " ${requested[*]:-} " == *" $DAEMON_JOB "* ]]; then
+# 常駐の受け口は、引数を省いたときと明示したときに登録する。
+if [[ ${#requested[@]} -eq 0 || " ${requested[*]} " == *" $DAEMON_JOB "* ]]; then
   write_daemon_plist
   unload "$DAEMON_JOB"
   launchctl bootstrap "$domain" "$agents/$prefix.$DAEMON_JOB.plist"

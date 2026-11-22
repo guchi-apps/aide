@@ -24,6 +24,7 @@ describe("isAppFacingApi", () => {
 
   it("workerがAIDEへ送り込む受け口（パラメータ付き）は対象にしない", () => {
     assert.equal(isAppFacingApi("/api/cache/:key"), false);
+    assert.equal(isAppFacingApi("/api/worker/claim"), false);
   });
 });
 

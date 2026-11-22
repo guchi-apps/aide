@@ -218,6 +218,18 @@ export const ENDPOINTS: FeatureItem[] = [
       "押されたときだけ外部の接続先へ疎通確認を行い、結果をJSONで返す。/api/status と同じ共有シークレットで認証する。",
   },
   {
+    name: "/api/worker/claim",
+    meta: "POST",
+    description:
+      "workerのホスト（DeskMini／Mac mini）がジョブの実行前に「自分が動かしてよいか」を問い合わせる口。問い合わせをハートビートとして記録し、担当ホストを判定して返す（主が15分途切れたら予備へ、主が30分続いたら主へ戻す）。workerの送信と同じ共有シークレットで認証する。",
+  },
+  {
+    name: "/api/worker/assignment",
+    meta: "GET / POST",
+    description:
+      "workerジョブの担当ホストの状態（担当・モード・各ホストの最終問い合わせ・最後の切り替え）を返し、POSTでモード（auto／subpc／macmini）を切り替える。読み取りは動作状況と同じ共有シークレット、切り替えは担当切り替え専用の共有シークレットで認証する。",
+  },
+  {
     name: "/api/location",
     meta: "POST",
     description:

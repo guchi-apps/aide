@@ -145,6 +145,8 @@ export const CALLERS: Caller[] = [
       "aide_issue_deck_items",
       "aide_vps_memory",
       "aide_claude_sessions",
+      "aide_worker_assignment",
+      "aide_set_worker_assignment",
       "aide_zaim_master",
       "aide_zaim_payment",
     ],
@@ -213,7 +215,7 @@ export const CALLERS: Caller[] = [
     name: "StatusHub",
     via: "API",
     what: "AIDEの動作状況・dotの作業報告を表示",
-    uses: ["/api/status", "/api/status/checks", "/api/work-reports"],
+    uses: ["/api/status", "/api/status/checks", "/api/work-reports", "/api/worker/assignment"],
   },
 ];
 

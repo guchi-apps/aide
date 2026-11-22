@@ -1,3 +1,4 @@
+import { currentOwner } from "../../worker-assignment.ts";
 import type {
   CreateWebPaymentOutcome,
   ZaimWebPaymentInput,
@@ -29,10 +30,37 @@ import { WEB_MEMO_EDIT_TIMEOUT_MS } from "./web-memo-edit.ts";
  * 再送が永久に `duplicated` で返る。中継はHTTPの往復と失敗の分類だけを持つ。
  */
 
-/** 中継先のURL。未設定なら中継しない（＝自分のところで画面を操作する）。 */
+/**
+ * 中継先のURL。未設定なら中継しない（＝自分のところで画面を操作する）。
+ *
+ * 値は2つの書き方を受け付ける（#891）。
+ *
+ * - URL1つ: 常にそこへ中継する（従来どおり）
+ * - `subpc=<URL>,macmini=<URL>`: **worker ジョブの担当ホスト**（`currentOwner()`）の受け口へ中継する。
+ *   Zaim のログイン状態は担当ホストの側にしか保たれない（`zaim-keep-alive` が担当ホストでだけ動く）
+ *   ため、受け口も担当と一緒に切り替える。担当ホストのURLが書かれていなければ、書かれている方へ送る
+ */
 export function zaimWebUpstreamUrl(): string | null {
   const raw = process.env["AIDE_ZAIM_WEB_UPSTREAM_URL"]?.trim();
-  return raw ? raw.replace(/\/$/, "") : null;
+  if (!raw) return null;
+  const byHost = parseUpstreamUrls(raw);
+  if (!byHost) return raw.replace(/\/$/, "");
+  const chosen = byHost.get(currentOwner()) ?? [...byHost.values()][0];
+  return chosen ? chosen.replace(/\/$/, "") : null;
+}
+
+/** `host=URL` をカンマで並べた形なら対応表を返す。URL1つ（`=` を含まない先頭）なら null。 */
+export function parseUpstreamUrls(raw: string): Map<string, string> | null {
+  if (!/^[a-z0-9-]+=/i.test(raw)) return null;
+  const map = new Map<string, string>();
+  for (const part of raw.split(",")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    const host = part.slice(0, eq).trim().toLowerCase();
+    const url = part.slice(eq + 1).trim();
+    if (host && url) map.set(host, url);
+  }
+  return map;
 }
 
 /**
