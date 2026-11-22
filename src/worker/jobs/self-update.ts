@@ -28,6 +28,8 @@ export interface SelfUpdateOptions {
   cwd?: string;
   /** テスト用。通常は ~/apps/subpc/setup.sh。 */
   setupScript?: string;
+  /** テスト用。通常は process.platform。 */
+  platform?: NodeJS.Platform;
   execute?: Execute;
 }
 
@@ -58,6 +60,7 @@ async function output(execute: Execute, file: string, args: string[]): Promise<s
 export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<SelfUpdateResult> {
   const cwd = options.cwd ?? process.cwd();
   const setupScript = options.setupScript ?? `${homedir()}/apps/subpc/setup.sh`;
+  const platform = options.platform ?? process.platform;
   const execute = options.execute ?? defaultExecute(cwd);
 
   const dirty = await output(execute, "git", ["status", "--porcelain", "--untracked-files=no"]);
@@ -98,8 +101,11 @@ export async function runSelfUpdate(options: SelfUpdateOptions = {}): Promise<Se
   if (dependenciesInstalled) await execute("npm", ["ci"]);
 
   // unit の配置と daemon-reload は配布元である subpc が一元管理する。
-  await execute(setupScript, ["--only", "systemd"]);
-  await execute("systemctl", ["--user", "restart", "aide-zaim-web.service"]);
+  // systemd を持たない OS（Mac mini は launchd）ではサブPC専用のため、チェックアウトの追従だけで終える（#883）。
+  if (platform === "linux") {
+    await execute(setupScript, ["--only", "systemd"]);
+    await execute("systemctl", ["--user", "restart", "aide-zaim-web.service"]);
+  }
 
   return { updated: true, before, after, dependenciesInstalled, returnedFrom };
 }

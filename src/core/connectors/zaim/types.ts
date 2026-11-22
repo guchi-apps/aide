@@ -22,6 +22,8 @@ export interface ZaimRawOnlineAccount {
 export interface ZaimRawScrapeResult {
   url: string;
   balances: ZaimRawEntry[];
+  /** ホーム画面「現在のポイント」区画。`amount` は `12,345 pt` や `-` の表示のまま。旧スクリプトの出力には無い。 */
+  points?: ZaimRawEntry[];
   securities: ZaimRawSecuritiesPage[];
   /** 連携口座の最終更新。取得できなかった場合は空配列（巡回自体は失敗させない）。 */
   onlineAccounts?: ZaimRawOnlineAccount[];
@@ -50,6 +52,18 @@ export interface ZaimBalance {
   lastUpdatedAt: string | null;
 }
 
+export type ZaimPointUnit = "point" | "mile";
+
+/** ポイント・マイルの残高。**円ではなく数量**なので `balances` とは別に持つ。 */
+export interface ZaimPoint {
+  name: string;
+  amount: number;
+  /** 名前に「マイル」「マイレージ」を含めば `mile`、それ以外は `point`。 */
+  unit: ZaimPointUnit;
+  /** 連携サービスの最終更新（ISO8601）。名前を結び付けられなければ null。 */
+  lastUpdatedAt: string | null;
+}
+
 export interface ZaimHolding {
   /** 証券口座名。同じ銘柄を口座ごとに分けて対応付けるために保持する。 */
   account: string;
@@ -68,6 +82,8 @@ export interface ZaimHolding {
 
 export interface ZaimSnapshot {
   balances: ZaimBalance[];
+  /** ポイント・マイル。この項目を持たない時期のキャッシュでは無いので、読む側は `?? []` で扱う。 */
+  points?: ZaimPoint[];
   holdings: ZaimHolding[];
   /**
    * 連携口座の最終更新。**巡回時点でZaimに載っていた事実だけを持つ。**

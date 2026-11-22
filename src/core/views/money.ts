@@ -126,6 +126,11 @@ export interface MoneySummary {
   balances: ZaimSnapshot["balances"];
   holdings: ZaimSnapshot["holdings"];
   /**
+   * Zaimのポイント・マイルの残高。**数量であって円ではない**ため `balances`・`totals` には含めない。
+   * 残高が無い（`-`）ものは載せない。
+   */
+  points: NonNullable<ZaimSnapshot["points"]>;
+  /**
    * 連携口座とZaim側の「最終更新」。**`fetchedAt`（AIDEが巡回した時刻）とは別物。**
    * Zaimは更新ボタンを押すまで各金融機関から再取得しないため、巡回が新しくても
    * 中身が何日も前のことがある。
@@ -460,6 +465,7 @@ export async function buildBalances(now: Date = new Date()): Promise<BalancesVie
       totals: null,
       balances: [],
       holdings: [],
+      points: [],
       onlineAccounts: [],
       staleAccounts: [],
       note: "残高・保有銘柄はまだ一度も取得していない。worker の zaim-sync ジョブを実行する必要がある。",
@@ -489,6 +495,8 @@ export async function buildBalances(now: Date = new Date()): Promise<BalancesVie
     totals: { balances: sum(cached.data.balances), holdings: sum(cached.data.holdings) },
     balances: cached.data.balances,
     holdings: cached.data.holdings,
+    // この項目を持たない時期のキャッシュでは無い。
+    points: cached.data.points ?? [],
     onlineAccounts,
     staleAccounts: freshness.staleAccounts,
     note: notes.join(" "),

@@ -1,6 +1,7 @@
 import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { readOnlineAccounts, resolveOnlineAccountsUrl } from "./online-accounts.mjs"
 import { resolveStatePath } from "./paths.mjs"
+import { readPoints } from "./points.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
 import { assertLoggedIn } from "./session-check.mjs"
 
@@ -20,6 +21,8 @@ function extractGenericPairs(elements) {
     // 入れ子の親要素と子要素から同じ行を重複して拾うため、完全に同じ組は1件に畳む。
     const seen = new Set()
     for (const element of elements) {
+        // 「現在のポイント」区画の `¥N 相当` は円の残高ではない。残高に混ぜない（#872）。
+        if (element.closest?.(".list-points")) continue
         const text = element.textContent?.replace(/\s+/g, " ").trim() ?? ""
         if (!text || text.length > 180 || !yenPattern.test(text)) continue
         const match = text.match(yenPattern)
@@ -35,7 +38,9 @@ function extractGenericPairs(elements) {
 }
 
 function extractRowPairs(rows, selectors) {
-    return rows.map((row) => ({
+    return rows
+        .filter((row) => !row.closest?.(".list-points"))
+        .map((row) => ({
         name: row.querySelector(selectors.name)?.textContent ?? "",
         amount: row.querySelector(selectors.amount)?.textContent ?? "",
     }))
@@ -180,6 +185,13 @@ try {
     await assertLoggedIn(page)
 
     const balances = await extractPairs(page, balanceSelectors)
+    // ポイント・マイルは円の残高とは別に読む。区画が無い・読めなくても残高は返す。
+    let points = []
+    try {
+        points = await readPoints(page)
+    } catch (error) {
+        console.error("ポイント・マイルの残高を取得できませんでした", error)
+    }
 
     // 証券は残高一覧に合計しか出ないため、詳細ページを巡回して個別銘柄を取得する。
     const securitiesLinks = await page
@@ -221,7 +233,7 @@ try {
     // 同期間隔が失効までの時間より短い限り、手動ログインなしでセッションを維持できる。
     await context.storageState({ path: statePath })
 
-    process.stdout.write(JSON.stringify({ url: balanceUrl, balances, securities, onlineAccounts }))
+    process.stdout.write(JSON.stringify({ url: balanceUrl, balances, points, securities, onlineAccounts }))
 } finally {
     await browser.close()
 }

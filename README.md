@@ -2614,6 +2614,45 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 
 **このスケジューリングは常時起動のホストに置く必要がある。** 開発機（メインPC）は常時起動しない前提のため、セッションを維持できない。本番では subpc が担う。
 
+### 担当ホストの固定と Mac mini（#874）
+
+サブPCが使えないときに worker ジョブを Mac mini（`macmini`）で動かせるよう、**ジョブごとに担当ホストを
+固定する**。各ホストの `.env` の `AIDE_WORKER_JOBS` に担当ジョブをカンマ区切りで書くと、`src/worker/run.ts`
+が最初に判定し、**担当外のジョブは何もせず終了コード0で終わる**（`assignment.ts`）。未設定は全ジョブ担当
+（従来どおり）、`none` は何も担当しない。ジョブ名の打ち間違いは終了コード2で落とす（黙って担当が消えるのを防ぐ）。
+
+- **担当外の見送りは実行記録（`job-<name>`）に残さず、標準出力に1行出すだけにしている。** 記録は全ホスト
+  共通のキー1件への上書きなので、担当外のホストが成功を書くと、担当ホストが止まっていても動作状況
+  （`/api/status`）が新鮮に見えてしまう。見送りは launchd のログ／journald で読む。
+- Mac mini の LaunchAgent は `deploy/macmini/install.sh` が表から生成して登録する（`run-job.sh` が
+  `timeout` で `TimeoutStartSec` の代わりをする）。systemd との差は `Persistent=true` が無い（停止中の分は
+  取り戻さない）・`RandomizedDelaySec` が無い・`Asia/Tokyo` は Mac mini のタイムゾーン設定で代替、の3点。
+  `printer-watch`（LAN到達性が未確認）は既定では登録しない（`claude-sessions-sync` は #879 で macOS 対応済みのため既定に含める）。
+  `self-update` は Linux 以外では `git pull` と `npm ci` だけ行い、サブPC専用の `setup.sh --only systemd` と
+  `systemctl` は呼ばない（#883）。
+- Mac mini の `~/apps/aide` には `.env`・`data/`・Playwright（`npm i -g playwright && playwright install
+  chromium`）が別途要る。導入は実施する時点でユーザーに確認する。
+
+```bash
+cd ~/apps/aide && deploy/macmini/install.sh              # 登録（既定の8ジョブ）
+launchctl print gui/$(id -u)/com.guchi-apps.aide.zaim-keep-alive
+tail -n 50 ~/Library/Logs/aide/zaim-keep-alive.log
+deploy/macmini/install.sh --uninstall                    # 全部外す
+```
+
+**担当ホストを付け替える順序（例: Zaim 系をサブPC → Mac mini）。** 空白の時間を作らず、重複もさせないため、
+必ず次の順に行う。
+
+1. サブPCの `.env` の `AIDE_WORKER_JOBS` から Zaim 系を外す（例: `self-update,weather-sync,gmail-watch`）。
+   サブPCの `aide-zaim-web.service` も止める。
+2. Mac mini の `.env` に `AIDE_WORKER_JOBS=zaim-refresh,zaim-sync,zaim-money-sync,zaim-keep-alive` と
+   `AIDE_ZAIM_WEB_HOST`（Tailscale のアドレス）・`AIDE_ZAIM_WRITE_SECRET` を入れ、
+   `ZAIM_EMAIL`・`ZAIM_PASSWORD` を使うなら入れて、`zaim-keep-alive` を手で1回流してログインが通ることを確かめる。
+3. Mac mini で受け口（`npm run zaim-web-server`）を起動し、VPS の `AIDE_ZAIM_WEB_UPSTREAM_URL` を
+   Mac mini の Tailscale アドレス（ポート4748）へ変えて VPS を再起動する。
+
+戻すときは逆向きに、Mac mini 側の担当と受け口を外してから、サブPC側へ足す。
+
 ### systemdユニット
 
 ユニットは `deploy/systemd/` にあり、**実行場所はサブPCの `~/.config/systemd/user/`** である。配置と
