@@ -1,11 +1,15 @@
+import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import type {
   ClaudeCodeSession,
   ClaudeCodeSessionsSnapshot,
   ClaudeSessionFile,
 } from "./types.ts";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Claude Code コネクタ。
@@ -58,27 +62,78 @@ export function parseProcStartTicks(stat: string): string | null {
 }
 
 /**
+ * プロセスの起動時刻を OS ごとの方法で取る。無ければ（＝そのPIDのプロセスが無ければ）null。
+ *
+ * - Linux: `/proc/<pid>/stat` の starttime（clock ticks）
+ * - macOS: `ps -o lstart=`。**台帳の `procStart` はUTCで書かれている**ので、`TZ=UTC` で揃える
+ *   （Mac mini の実物で、ローカル時刻とは9時間ずれることを確認済み）
+ */
+export type ProcessStartReader = (pid: number) => Promise<string | null>;
+
+export const readProcessStart: ProcessStartReader = async (pid) => {
+  if (process.platform === "linux") {
+    try {
+      return parseProcStartTicks(await readFile(`/proc/${pid}/stat`, "utf8")) ?? "";
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const { stdout } = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      env: { ...process.env, TZ: "UTC", LC_ALL: "C" },
+    });
+    const value = stdout.trim().replace(/\s+/g, " ");
+    return value === "" ? null : value;
+  } catch {
+    // ps は該当プロセスが無いと終了コード1で落ちる。
+    return null;
+  }
+};
+
+/** `ps` の lstart 形式（`Sat Nov 21 05:15:51 2026`）をUTCのエポックミリ秒にする。 */
+function lstartToEpoch(value: string): number | null {
+  if (/^\d+$/.test(value)) return null;
+  const epoch = Date.parse(`${value.replace(/\s+/g, " ")} UTC`);
+  return Number.isNaN(epoch) ? null : epoch;
+}
+
+/**
+ * 台帳の `procStart` と実プロセスの起動時刻が同じプロセスを指すか。
+ *
+ * 形式が噛み合わない場合（Linuxのticksを台帳が持つのにmacOSで読む等）は照合できないので、
+ * PIDが生きていること自体を根拠にする（true）。
+ */
+export function procStartMatches(recorded: string, actual: string): boolean {
+  if (recorded === actual) return true;
+  const a = lstartToEpoch(recorded);
+  const b = lstartToEpoch(actual);
+  if (a !== null && b !== null) return a === b;
+  // 片方が ticks・片方が lstart のように別形式なら照合不能。
+  const comparable = (a === null) === (b === null);
+  return !comparable;
+}
+
+/**
  * そのセッションのプロセスがまだ生きているか。
  *
  * **PIDの一致だけでは足りない。** 台帳は終了時に消えるとは限らず、残骸のPIDが別のプロセスへ
  * 割り当て直されていることがある。台帳が `procStart` を持っているのはこのためで、
  * プロセスの起動時刻まで一致して初めて「同じプロセス」と言える。
+ * `readStart` はテストで差し替えるための口（`/proc` の無い環境でも検証できるようにする）。
  */
-export async function isSessionAlive(pid: number, procStart: string | undefined): Promise<boolean> {
+export async function isSessionAlive(
+  pid: number,
+  procStart: string | undefined,
+  readStart: ProcessStartReader = readProcessStart,
+): Promise<boolean> {
   if (!Number.isInteger(pid) || pid <= 0) return false;
 
-  let stat: string;
-  try {
-    stat = await readFile(`/proc/${pid}/stat`, "utf8");
-  } catch {
-    // 読めない＝そのPIDのプロセスが無い。/proc を持たないOSでは全件が落ちるが、
-    // 収集を行うのは常時起動のサブPC（Linux）だけなので、その前提で割り切る。
-    return false;
-  }
+  const actual = await readStart(pid);
+  if (actual === null) return false;
 
   // 起動時刻を書いていない世代の台帳では、PIDが存在することだけを根拠にする。
   if (!procStart) return true;
-  return parseProcStartTicks(stat) === procStart;
+  return procStartMatches(procStart, actual);
 }
 
 /** `<セッション名>:@<window>.<pane>` からtmuxのセッション名だけを取り出す。 */
@@ -153,7 +208,9 @@ export function toSession(file: ClaudeSessionFile, home: string): ClaudeCodeSess
  * ディレクトリごと無い場合（Claude Code を使っていないホスト）は 0件として返す。
  * **「取得に失敗した」ではなく「動いていない」**であり、失敗にすると worker が毎回落ちる。
  */
-export async function collectClaudeCodeSessions(): Promise<ClaudeCodeSessionsSnapshot> {
+export async function collectClaudeCodeSessions(
+  readStart: ProcessStartReader = readProcessStart,
+): Promise<ClaudeCodeSessionsSnapshot> {
   const dir = sessionsDir();
   const home = homedir();
 
@@ -182,7 +239,7 @@ export async function collectClaudeCodeSessions(): Promise<ClaudeCodeSessionsSna
           return;
         }
         if (typeof file.pid !== "number") return;
-        if (!(await isSessionAlive(file.pid, file.procStart))) return;
+        if (!(await isSessionAlive(file.pid, file.procStart, readStart))) return;
         // SDK経由の裏方プロセス（`kind` が `interactive` でないもの）は、人が開いて操作する
         // 対象ではない。台帳には並ぶが、リモートコントロールもtmuxでのattachもできず、
         // 一覧に混ぜると「何件動いているか」がずれる。件数だけ数えて本体からは外す。

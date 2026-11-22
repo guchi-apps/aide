@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import {
   collectClaudeCodeSessions,
+  isSessionAlive,
   parseProcStartTicks,
+  procStartMatches,
+  readProcessStart,
   projectFromCwd,
   remoteControlUrl,
   shortenHome,
@@ -143,12 +146,13 @@ describe("collectClaudeCodeSessions", () => {
     process.env["AIDE_CLAUDE_SESSIONS_DIR"] = dir;
 
     // 生きているセッションの代わりに、このテストプロセス自身を使う。
-    const stat = await readFile(`/proc/${process.pid}/stat`, "utf8");
+    // 起動時刻はOSごとの実読み取り（`/proc` かps）で取るので、どのOSでも走る。
+    const start = await readProcessStart(process.pid);
     await writeFile(
       join(dir, `${process.pid}.json`),
       JSON.stringify({
         pid: process.pid,
-        procStart: parseProcStartTicks(stat),
+        procStart: start,
         cwd: "/home/guchi/apps/aide",
         name: "alive",
         bridgeSessionId: "session_alive",
@@ -158,7 +162,12 @@ describe("collectClaudeCodeSessions", () => {
     // 終了済みの残骸。PIDは存在しても起動時刻が違えば別プロセス。
     await writeFile(
       join(dir, `${process.pid}0.json`),
-      JSON.stringify({ pid: process.pid, procStart: "0", name: "dead" }),
+      JSON.stringify({
+        pid: process.pid,
+        // 実プロセスと同じ形式で、別の起動時刻にする（形式が違うと照合不能で生存扱いになる）。
+        procStart: process.platform === "linux" ? "0" : "Thu Jan 1 00:00:00 1970",
+        name: "dead",
+      }),
     );
 
     // SDK経由の裏方プロセス。生きているが一覧には出さず、件数だけ数える。
@@ -166,7 +175,7 @@ describe("collectClaudeCodeSessions", () => {
       join(dir, `${process.pid}.sdk.json`),
       JSON.stringify({
         pid: process.pid,
-        procStart: parseProcStartTicks(stat),
+        procStart: start,
         kind: "background",
         entrypoint: "sdk-cli",
         name: "sdk",
@@ -210,6 +219,45 @@ describe("collectClaudeCodeSessions", () => {
       assert.equal(snapshot.nonInteractive, 0);
     } finally {
       process.env["AIDE_CLAUDE_SESSIONS_DIR"] = dir;
+    }
+  });
+});
+
+describe("procStartMatches / isSessionAlive（/proc に依存しない）", () => {
+  it("lstart 形式は空白の幅が違っても同じ時刻なら一致する", () => {
+    assert.equal(procStartMatches("Sat Nov  1 05:15:51 2026", "Sat Nov 1 05:15:51 2026"), true);
+    assert.equal(procStartMatches("Sat Nov 21 05:15:51 2026", "Sat Nov 21 05:15:52 2026"), false);
+  });
+
+  it("形式が違う（ticks と lstart）場合は照合せず PID の生存を根拠にする", () => {
+    assert.equal(procStartMatches("33478363", "Sat Nov 21 05:15:51 2026"), true);
+    assert.equal(procStartMatches("33478363", "33478364"), false);
+  });
+
+  it("差し替えた読み取りで生死を判定できる", async () => {
+    const reader = async (pid: number) => (pid === 10 ? "Sat Nov 21 05:15:51 2026" : null);
+    assert.equal(await isSessionAlive(10, "Sat Nov 21 05:15:51 2026", reader), true);
+    assert.equal(await isSessionAlive(10, "Sat Nov 21 05:15:00 2026", reader), false);
+    assert.equal(await isSessionAlive(10, undefined, reader), true);
+    assert.equal(await isSessionAlive(11, undefined, reader), false);
+  });
+
+  it("collectClaudeCodeSessions へ読み取りを差し替えられる", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "aide-claude-sessions-inj-"));
+    const previous = process.env["AIDE_CLAUDE_SESSIONS_DIR"];
+    process.env["AIDE_CLAUDE_SESSIONS_DIR"] = dir;
+    try {
+      await writeFile(join(dir, "1.json"), JSON.stringify({ pid: 1, procStart: "x", name: "a" }));
+      await writeFile(join(dir, "2.json"), JSON.stringify({ pid: 2, procStart: "x", name: "b" }));
+      const snapshot = await collectClaudeCodeSessions(async (pid) => (pid === 1 ? "x" : null));
+      assert.deepEqual(
+        snapshot.sessions.map((s) => s.name),
+        ["a"],
+      );
+    } finally {
+      if (previous === undefined) delete process.env["AIDE_CLAUDE_SESSIONS_DIR"];
+      else process.env["AIDE_CLAUDE_SESSIONS_DIR"] = previous;
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
