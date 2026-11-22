@@ -80,13 +80,23 @@ describe("OAuthのボディ読み込み", () => {
         controller.enqueue(chunk);
       },
     });
-    const res = await fetch(`${base}/echo`, {
-      method: "POST",
-      headers: { "Content-Type": FORM },
-      body: stream,
-      duplex: "half",
-    } as RequestInit);
-    assert.equal(res.status, 413);
+    // サーバーは413を返したあと接続ごと閉じる。クライアントがまだ送信中だと、413を受け取る前に
+    // 書き込みが EPIPE / ECONNRESET で失敗することがある（速い環境ほど起きやすい）。
+    // どちらも「超えた時点で断った」ことの現れなので、413か送信中の切断のどちらかを許す。
+    let status: number | null = null;
+    try {
+      const res = await fetch(`${base}/echo`, {
+        method: "POST",
+        headers: { "Content-Type": FORM },
+        body: stream,
+        duplex: "half",
+      } as RequestInit);
+      status = res.status;
+    } catch (error) {
+      const code = ((error as { cause?: { code?: string } }).cause ?? {}).code;
+      assert.ok(code === "EPIPE" || code === "ECONNRESET", `想定外の失敗: ${String(error)}`);
+    }
+    if (status !== null) assert.equal(status, 413);
     assert.ok(sent < 200, "上限を超えても最後まで読み続けてはいけない");
   });
 
