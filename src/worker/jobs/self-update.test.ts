@@ -13,6 +13,7 @@ function optionsFor(outputs: string[]): { options: SelfUpdateOptions; calls: Cal
     calls,
     options: {
       setupScript: "/home/test/apps/subpc/setup.sh",
+      platform: "linux",
       execute: async (file, args) => {
         calls.push({ file, args });
         return { stdout: outputs.shift() ?? "", stderr: "" };
@@ -156,4 +157,14 @@ test("package-lock.json が変わらない更新では npm ci を呼ばない", 
     { file: "/home/test/apps/subpc/setup.sh", args: ["--only", "systemd"] },
     { file: "systemctl", args: ["--user", "restart", "aide-zaim-web.service"] },
   ]);
+});
+
+test("Linux 以外ではサブPC専用の setup.sh と systemctl を呼ばず、pull と npm ci だけ行う", async () => {
+  const { options, calls } = optionsFor([
+    "", "develop\n", "", "before\n", "after\n", "", "after\n", "package-lock.json\n", "",
+  ]);
+  const result = await runSelfUpdate({ ...options, platform: "darwin" });
+  assert.deepEqual(result, { updated: true, before: "before", after: "after", dependenciesInstalled: true, returnedFrom: null });
+  assert.ok(!calls.some(({ file }) => file === "systemctl" || file.endsWith("setup.sh")));
+  assert.deepEqual(calls.at(-1), { file: "npm", args: ["ci"] });
 });
