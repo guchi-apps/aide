@@ -36,9 +36,12 @@ JOBS=(
   "claude-sessions-sync|60|StartInterval:120"
   "printer-watch|60|StartInterval:120"
 )
-# 担当に入れるのは、macOS 対応を確かめたジョブだけにする（既定の登録対象から外すものはここに書く）。
+# 既定の登録対象から外すジョブはここに書く（明示すれば登録できる）。
+# printer-watch は myroom の公開URLへHTTP GETするだけでプリンターへLAN接続しないため既定に含める（#886）。
 # claude-sessions-sync は #879 で macOS 対応済みのため既定に含める。
-DEFAULT_EXCLUDE=(printer-watch)
+DEFAULT_EXCLUDE=()
+# 常駐の受け口（Zaimのログイン状態を持つ）。担当判定が無く、登録した機が受け口になるので既定には入れない。
+DAEMON_JOB="zaim-web"
 
 calendar_xml() {
   local spec="$1" item hour minute
@@ -96,6 +99,38 @@ EOF
   plutil -lint "$file" > /dev/null
 }
 
+# 常駐（KeepAlive）の LaunchAgent。Tailscale が上がる前の bind 失敗は ThrottleInterval 後の再起動で拾う。
+write_daemon_plist() {
+  local file="$agents/$prefix.$DAEMON_JOB.plist"
+  cat > "$file" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- install.sh が生成。直接編集せず deploy/macmini/install.sh を直して流し直す。 -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$prefix.$DAEMON_JOB</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/bash</string>
+    <string>$here/run-zaim-web.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>$HOME</string>
+    <key>LANG</key><string>ja_JP.UTF-8</string>
+  </dict>
+  <key>WorkingDirectory</key><string>$HOME</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$logs/$DAEMON_JOB.log</string>
+  <key>StandardErrorPath</key><string>$logs/$DAEMON_JOB.log</string>
+</dict>
+</plist>
+EOF
+  plutil -lint "$file" > /dev/null
+}
+
 unload() {
   launchctl bootout "$domain/$prefix.$1" 2> /dev/null || true
 }
@@ -106,6 +141,8 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     unload "$job"
     rm -f "$agents/$prefix.$job.plist"
   done
+  unload "$DAEMON_JOB"
+  rm -f "$agents/$prefix.$DAEMON_JOB.plist"
   echo "登録を外しました"
   exit 0
 fi
@@ -116,7 +153,7 @@ for entry in "${JOBS[@]}"; do
   IFS='|' read -r job limit schedule <<< "$entry"
   if [[ ${#requested[@]} -gt 0 ]]; then
     [[ " ${requested[*]} " == *" $job "* ]] || continue
-  elif [[ " ${DEFAULT_EXCLUDE[*]} " == *" $job "* ]]; then
+  elif [[ " ${DEFAULT_EXCLUDE[*]:-} " == *" $job "* ]]; then
     echo "- $job: 既定では登録しません（明示すれば登録できます）"
     continue
   fi
@@ -125,3 +162,11 @@ for entry in "${JOBS[@]}"; do
   launchctl bootstrap "$domain" "$agents/$prefix.$job.plist"
   echo "- $job: 登録しました"
 done
+
+# 常駐の受け口は明示したときだけ登録する。
+if [[ " ${requested[*]:-} " == *" $DAEMON_JOB "* ]]; then
+  write_daemon_plist
+  unload "$DAEMON_JOB"
+  launchctl bootstrap "$domain" "$agents/$prefix.$DAEMON_JOB.plist"
+  echo "- $DAEMON_JOB: 登録しました（常駐）"
+fi
