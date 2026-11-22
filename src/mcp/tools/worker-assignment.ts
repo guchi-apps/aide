@@ -32,6 +32,7 @@ export const setWorkerAssignmentTool: Tool = {
     "（メンテナンス・再起動・Mac miniでの動作確認の前に使う）。mode=auto で自動（主はDeskMini、問い合わせが15分途切れたらMac miniへ、" +
     "DeskMiniが30分続いたら戻す）に戻す。担当が変わると、新しい担当ホストの次のジョブ実行時にDiscordへ通知される。" +
     "Zaimのログイン状態はホストごとに別なので、移した先で再ログインが要ることがある。",
+  requiredScopes: ["worker-assignment:write"],
   inputSchema: {
     type: "object",
     properties: {
