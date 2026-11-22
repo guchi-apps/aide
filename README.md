@@ -2627,14 +2627,17 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 - Mac mini の LaunchAgent は `deploy/macmini/install.sh` が表から生成して登録する（`run-job.sh` が
   `timeout` で `TimeoutStartSec` の代わりをする）。systemd との差は `Persistent=true` が無い（停止中の分は
   取り戻さない）・`RandomizedDelaySec` が無い・`Asia/Tokyo` は Mac mini のタイムゾーン設定で代替、の3点。
-  `printer-watch`（LAN到達性が未確認）は既定では登録しない（`claude-sessions-sync` は #879 で macOS 対応済みのため既定に含める）。
+  `printer-watch` は myroom の公開URLへHTTP GETするだけでプリンターへLAN接続しないため、既定に含める（#886）。
+  常駐の受け口 `zaim-web` は担当判定が無く登録した機が受け口になるため、既定には入れず `install.sh zaim-web` と明示したときだけ
+  KeepAlive の LaunchAgent（`run-zaim-web.sh`）として登録する。
   `self-update` は Linux 以外では `git pull` と `npm ci` だけ行い、サブPC専用の `setup.sh --only systemd` と
   `systemctl` は呼ばない（#883）。
 - Mac mini の `~/apps/aide` には `.env`・`data/`・Playwright（`npm i -g playwright && playwright install
   chromium`）が別途要る。導入は実施する時点でユーザーに確認する。
 
 ```bash
-cd ~/apps/aide && deploy/macmini/install.sh              # 登録（既定の8ジョブ）
+cd ~/apps/aide && deploy/macmini/install.sh              # 登録（既定の9ジョブ）
+deploy/macmini/install.sh zaim-web                       # 受け口（常駐）だけ登録
 launchctl print gui/$(id -u)/com.guchi-apps.aide.zaim-keep-alive
 tail -n 50 ~/Library/Logs/aide/zaim-keep-alive.log
 deploy/macmini/install.sh --uninstall                    # 全部外す
@@ -2648,7 +2651,7 @@ deploy/macmini/install.sh --uninstall                    # 全部外す
 2. Mac mini の `.env` に `AIDE_WORKER_JOBS=zaim-refresh,zaim-sync,zaim-money-sync,zaim-keep-alive` と
    `AIDE_ZAIM_WEB_HOST`（Tailscale のアドレス）・`AIDE_ZAIM_WRITE_SECRET` を入れ、
    `ZAIM_EMAIL`・`ZAIM_PASSWORD` を使うなら入れて、`zaim-keep-alive` を手で1回流してログインが通ることを確かめる。
-3. Mac mini で受け口（`npm run zaim-web-server`）を起動し、VPS の `AIDE_ZAIM_WEB_UPSTREAM_URL` を
+3. Mac mini で受け口を起動し（`deploy/macmini/install.sh zaim-web`。ログは `~/Library/Logs/aide/zaim-web.log`）、VPS の `AIDE_ZAIM_WEB_UPSTREAM_URL` を
    Mac mini の Tailscale アドレス（ポート4748）へ変えて VPS を再起動する。
 
 戻すときは逆向きに、Mac mini 側の担当と受け口を外してから、サブPC側へ足す。
