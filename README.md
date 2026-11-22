@@ -2627,12 +2627,14 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 - Mac mini の LaunchAgent は `deploy/macmini/install.sh` が表から生成して登録する（`run-job.sh` が
   `timeout` で `TimeoutStartSec` の代わりをする）。systemd との差は `Persistent=true` が無い（停止中の分は
   取り戻さない）・`RandomizedDelaySec` が無い・`Asia/Tokyo` は Mac mini のタイムゾーン設定で代替、の3点。
-  `claude-sessions-sync`（`/proc` を読む）と `printer-watch`（LAN到達性が未確認）は既定では登録しない。
+  `printer-watch`（LAN到達性が未確認）は既定では登録しない（`claude-sessions-sync` は #879 で macOS 対応済みのため既定に含める）。
+  `self-update` は Linux 以外では `git pull` と `npm ci` だけ行い、サブPC専用の `setup.sh --only systemd` と
+  `systemctl` は呼ばない（#883）。
 - Mac mini の `~/apps/aide` には `.env`・`data/`・Playwright（`npm i -g playwright && playwright install
   chromium`）が別途要る。導入は実施する時点でユーザーに確認する。
 
 ```bash
-cd ~/apps/aide && deploy/macmini/install.sh              # 登録（既定の7ジョブ）
+cd ~/apps/aide && deploy/macmini/install.sh              # 登録（既定の8ジョブ）
 launchctl print gui/$(id -u)/com.guchi-apps.aide.zaim-keep-alive
 tail -n 50 ~/Library/Logs/aide/zaim-keep-alive.log
 deploy/macmini/install.sh --uninstall                    # 全部外す
