@@ -9,6 +9,8 @@ import { handleMoneySummary, handleMoneyTransactions } from "./api/read.ts";
 import { DEV_AUTH_DISABLED_CLIENT_ID } from "./mcp/types.ts";
 import { handleLocation } from "./api/location.ts";
 import { handleWorkReports } from "./api/work-reports.ts";
+import { handleWorkerAssignment, handleWorkerClaim } from "./api/worker-assignment.ts";
+import { loadAssignment } from "./core/worker-assignment.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
   handleZaimMoneyListRefresh,
@@ -232,6 +234,18 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
 
+  // ---- worker ジョブの担当ホスト（#891） ----
+  // 各ホストの worker が実行前に問い合わせる口（AIDE_INGEST_SECRET）と、StatusHub が担当を
+  // 表示・切り替える口（AIDE_STATUS_SECRET / AIDE_WORKER_CONTROL_SECRET）。
+  if (path === "/api/worker/claim") {
+    await handleWorkerClaim(req, res);
+    return;
+  }
+  if (path === "/api/worker/assignment") {
+    await handleWorkerAssignment(req, res);
+    return;
+  }
+
   // ---- 位置共有（#715） ----
   // iOSアプリが端末トークンで測位を送る口と、共有の有効化・停止。MCPのOAuthとは別系統。
   if (path === "/api/location" || path === "/api/location/enable" || path === "/api/location/disable") {
@@ -369,7 +383,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       res,
       baseUrl,
       access === "disabled"
-        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read", "salary-agent:read", "salary-agent:write"]
+        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read", "salary-agent:read", "salary-agent:write", "worker-assignment:write"]
         : (access.scopes ?? []),
       access === "disabled" ? DEV_AUTH_DISABLED_CLIENT_ID : access.clientId,
     );
@@ -378,6 +392,9 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
 
   res.writeHead(404, { "Content-Type": "text/plain" }).end("not found\n");
 }
+
+// Zaim Web版の中継先（担当ホストの受け口）を同期で選べるよう、担当の状態を先に読んでおく（#891）。
+await loadAssignment();
 
 server.listen(PORT, HOST, () => {
   console.log(`AIDE listening on http://${HOST}:${PORT} (mcp: /mcp)`);

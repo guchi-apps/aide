@@ -40,6 +40,7 @@ import { kurashioGetKepcoHourlyTool, kurashioImportKepcoHourlyTool } from "./too
 import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { vpsMemoryTool } from "./tools/vps-memory.ts";
 import { weatherTool } from "./tools/weather.ts";
+import { setWorkerAssignmentTool, workerAssignmentTool } from "./tools/worker-assignment.ts";
 import { zaimMasterTool, zaimPaymentTool } from "./tools/zaim.ts";
 import {
   assetManagerAddSubscriptionPriceTool,
@@ -91,6 +92,7 @@ export const READ_ONLY_TOOLS = [
   "aide_issue_deck_items",
   "aide_vps_memory",
   "aide_claude_sessions",
+  "aide_worker_assignment",
   "aide_work_reports",
   "aide_zaim_master", // 廃止済み。呼んでも何も書かない
   "aide_zaim_payment", // 廃止済み。呼んでも何も書かない
@@ -184,6 +186,8 @@ export function buildToolRegistry(): ToolRegistry {
   // 本番issue-deckのVPSメモリ計測結果の読み取り（#608）。計測・集計はissue-deck側で、AIDEは中継のみ。
   registry.register(vpsMemoryTool);
   registry.register(claudeSessionsTool);
+  registry.register(workerAssignmentTool);
+  registry.register(setWorkerAssignmentTool);
   // Zaimへの支出登録（#135）。**読み取り（候補の一覧）と書き込み（登録）を分けている。**
   // 1本に畳むと、Claude Code側で「常に許可」にしたときに書き込みまで素通しになる。
   registry.register(zaimMasterTool);

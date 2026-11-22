@@ -52,7 +52,7 @@ function section(
 export const hostStatusTool: Tool = {
   name: "aide_host_status",
   description:
-    "VPS・サブPCのホストごとの稼働状況を返す。死活とCPU・メモリ・Swap・ディスク・温度、" +
+    "VPS・DeskMini・Mac miniのホストごとの稼働状況を返す。死活とCPU・メモリ・Swap・ディスク・温度、" +
     "落ちている systemd サービス、再起動待ち、セキュリティ更新の件数を含む。" +
     "「いまVPSはどうなっているか」「サーバーに異常はないか」「ディスクは足りているか」" +
     "「落ちているサービスはないか」を尋ねられたときに呼ぶ。" +
@@ -60,7 +60,7 @@ export const hostStatusTool: Tool = {
     "complete が false のときは取得できなかったソースがあり、判定範囲が限定的であることを意味する。" +
     "履歴・上位プロセスは返さない（必要なら ops-dashboard の画面を見る）。" +
     "**外形監視は aide_uptime_monitors、AI・GitHub・1Password の残枠は aide_service_quotas。**" +
-    "tmuxセッションは件数だけで、サブPCで動いている Claude Code の内訳と" +
+    "tmuxセッションは件数だけで、worker のホスト（DeskMini／Mac mini）で動いている Claude Code の内訳と" +
     "リモートコントロールのURLは aide_claude_sessions が返す。",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   handler: async () => {

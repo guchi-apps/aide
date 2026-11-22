@@ -6,7 +6,7 @@
 #
 #   run-job.sh <ジョブ名> <上限秒>
 #
-# 担当ホストの判定は run.ts（`AIDE_WORKER_JOBS`）が行う。担当外なら何もせず0で終わる。
+# 担当ホストの判定は run.ts が AIDE（VPS）へ問い合わせて行う（#891）。担当外なら何もせず0で終わる。
 # PATH は Homebrew の node@24 と GNU coreutils（`timeout`）を先頭に並べ直す
 # （`bash -l` の path_helper が並べ替えるため。issue-deck の run-with-env.sh と同じ事情）。
 set -euo pipefail

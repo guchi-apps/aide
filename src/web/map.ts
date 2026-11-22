@@ -145,6 +145,8 @@ export const CALLERS: Caller[] = [
       "aide_issue_deck_items",
       "aide_vps_memory",
       "aide_claude_sessions",
+      "aide_worker_assignment",
+      "aide_set_worker_assignment",
       "aide_zaim_master",
       "aide_zaim_payment",
     ],
@@ -213,7 +215,7 @@ export const CALLERS: Caller[] = [
     name: "StatusHub",
     via: "API",
     what: "AIDEの動作状況・dotの作業報告を表示",
-    uses: ["/api/status", "/api/status/checks", "/api/work-reports"],
+    uses: ["/api/status", "/api/status/checks", "/api/work-reports", "/api/worker/assignment"],
   },
 ];
 
@@ -320,12 +322,12 @@ export const GROUPS: DestinationGroup[] = [
         what: "開発状況を読む／IssueDeckの進捗・要対応・予約を読む／本番issue-deckのVPSメモリ計測を読む／Issueを起票／画像をIssueDeckへアップロード／リリース候補の全体レビューと修正の担当・テスト・独立レビューを中継",
         uses: ["aide_dev_status", "aide_repo_status", "aide_repo_labels", "aide_create_issue", "issue_deck_upload_image", "issue_deck_list_release_candidates", "issue_deck_get_release_candidate", "issue_deck_get_fix_status", "issue_deck_claim_fix", "issue_deck_release_fix", "issue_deck_pause_fix", "issue_deck_resume_fix", "issue_deck_report_fix_test", "issue_deck_report_fix_review", "aide_issue_deck_summary", "aide_issue_deck_items", "aide_vps_memory"],
       },
-      { id: "ops-dashboard", name: "StatusHub", dir: "read", what: "VPS・サブPCの稼働状況", uses: ["aide_host_status", "aide_uptime_monitors", "aide_service_quotas"] },
+      { id: "ops-dashboard", name: "StatusHub", dir: "read", what: "VPS・DeskMini・Mac miniの稼働状況", uses: ["aide_host_status", "aide_uptime_monitors", "aide_service_quotas"] },
       {
         id: "claude-code",
         name: "Claude Code",
         dir: "read",
-        what: "サブPCで動くセッション",
+        what: "worker のホスト（DeskMini／Mac mini）で動くセッション",
         uses: ["aide_claude_sessions"],
       },
       { id: "discord", name: "Discord", dir: "write", what: "ジョブ・プリンターの異常を通知", uses: [] },
@@ -390,15 +392,15 @@ function tags(dir: Direction): string {
 
 /**
  * 図の中央。ロゴは**左上のブランド表示と同じデータ**（`brand.ts`）を使い、`取得・整形・中継` は文字で置く。
- * ロゴの下に「VPS」「Worker＝サブPC」の2段を積む（#431）。ロゴだけだとAIDEが常時1台で動いていると
- * 誤解されるため、重い処理を担うWorkerがサブPCで動いていることを文字で示す。
+ * ロゴの下に「VPS」「Worker＝DeskMini／Mac mini」の2段を積む（#431）。ロゴだけだとAIDEが常時1台で動いていると
+ * 誤解されるため、重い処理を担うWorkerがworker のホスト（DeskMini／Mac mini）で動いていることを文字で示す。
  * Workerは下の一覧の`#worker-jobs`カードへ飛ぶページ内リンク。
  */
 function hubHtml(): string {
   return `<div class="hub">${logoSvg(logoSize(52))}
 <div class="hub-sub">取得・整形・中継</div><hr>
 <div class="hub-vps">VPS ・常時稼働</div>
-<a class="hub-worker" href="#worker-jobs"><b>Worker ＝ サブPC</b><span>重い処理を定期実行（${JOB_CATALOG.length}件）</span></a></div>`;
+<a class="hub-worker" href="#worker-jobs"><b>Worker ＝ DeskMini／Mac mini</b><span>重い処理を定期実行（${JOB_CATALOG.length}件）</span></a></div>`;
 }
 
 /** 使う側の枠。押すと下の一覧の行（`#from-…`）へ飛ぶ。スマホ幅では短い名前を出す。 */
@@ -598,7 +600,7 @@ function groupCard(
 }
 
 /**
- * Worker（サブPC・重い処理）の一覧（#431）。図のハブから`#worker-jobs`でここへ飛べる。
+ * Worker（DeskMini／Mac mini・重い処理）の一覧（#431）。図のハブから`#worker-jobs`でここへ飛べる。
  * 出典は機能一覧の「workerジョブ」節と同じ `JOB_CATALOG`（`src/worker/jobs/catalog.ts`）で、
  * 実行間隔・何をするかを図の宣言とは別に自動で追従させる。
  */
@@ -610,7 +612,7 @@ function workerCard(): string {
   ).join("");
   return card({
     id: "worker-jobs",
-    title: "Worker（サブPC・重い処理）",
+    title: "Worker（DeskMini／Mac mini・重い処理）",
     meta: String(JOB_CATALOG.length),
     body: `<ul class="items">${items}</ul>`,
     wide: true,
@@ -852,7 +854,7 @@ export function renderMapPage(options: MapPageOptions = {}): string {
     : "";
   const body = `<section class="hero">
 <div class="hero-top"><h1>アプリ連携</h1>${syncButton(options.sync)}</div>
-<p class="lead">AIDEを中心に、どのアプリがどうつながっているかを示します。左（スマホでは上）がAIDEを使うアプリ、右（スマホでは下）がAIDEが読みに行く・書き込む先です。アプリを押すと、下の一覧の該当する行へ移ります。重い処理（Zaimの巡回など）はサブPCで動くWorkerが定期的に行い、結果をVPSへ送ります。</p>
+<p class="lead">AIDEを中心に、どのアプリがどうつながっているかを示します。左（スマホでは上）がAIDEを使うアプリ、右（スマホでは下）がAIDEが読みに行く・書き込む先です。アプリを押すと、下の一覧の該当する行へ移ります。重い処理（Zaimの巡回など）はworker のホスト（DeskMini／Mac mini）で動くWorkerが定期的に行い、結果をVPSへ送ります。</p>
 ${LEGEND}${warning}
 </section>
 ${options.sync ? syncResult(options.sync) : ""}

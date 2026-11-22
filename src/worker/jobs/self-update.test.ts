@@ -159,7 +159,7 @@ test("package-lock.json が変わらない更新では npm ci を呼ばない", 
   ]);
 });
 
-test("Linux 以外ではサブPC専用の setup.sh と systemctl を呼ばず、pull と npm ci だけ行う", async () => {
+test("Linux 以外ではworker のホスト（DeskMini／Mac mini）専用の setup.sh と systemctl を呼ばず、pull と npm ci だけ行う", async () => {
   const { options, calls } = optionsFor([
     "", "develop\n", "", "before\n", "after\n", "", "after\n", "package-lock.json\n", "",
   ]);

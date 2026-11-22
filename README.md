@@ -663,7 +663,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_salary_approval_status` | **給与専用**。プレビューを本人が Asset Manager の画面で承認したかを読む（状態とIDだけ。金額は返らない）。`approved` になるまで保存しない。scope `salary-agent:read` |
 | `asset_manager_salary_commit` | **給与専用の書き込みツール**。本人が Asset Manager の画面で承認した給与明細1件を給与台帳へ登録する。送る前に承認状態を読み、`approved` でなければ送らない。保存後も `verified: false` で、読み戻してから報告する。scope `salary-agent:write` |
 | `asset_manager_salary_lookup` | **給与専用**。Salary IDで登録済みの明細を読み戻す（保存後の照合）。元メールでは引けず、タイムアウト後は同じメール・同じPDFで `asset_manager_salary_preview` を引き直し、`existing.alreadyImportedSalaryId` で登録の有無を判定する。scope `salary-agent:read` |
-| `aide_host_status` | VPS・サブPCのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
+| `aide_host_status` | VPS・DeskMini・Mac miniのホストごとの稼働状況。死活とCPU・メモリ・Swap・ディスク・温度、落ちている systemd サービス、再起動待ち |
 | `aide_uptime_monitors` | 外形監視（Uptime Kuma / UptimeRobot）の停止・確認中 |
 | `aide_service_quotas` | AI・GitHub Actions・1Password の残枠とリセット時刻・枠の長さ・取得時刻 |
 | `aide_room_sensors` | いまの部屋の測定値。センサーごとの室温・湿度・気圧・CO2・照度、屋外との気温差 |
@@ -688,7 +688,9 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `aide_issue_deck_summary` | IssueDeckの全体サマリー（未着手・実行中・予約待ち・確認待ち・手作業待ち・問題・PR・本番反映・指定期間の完了）を、全体合計・リポジトリ別内訳・要対応の上位10件で返す。**読み取り専用**。集計はIssueDeck側（`/api/integrations/aide/development-summary`）で、AIDEは再集計せず中継する。GitHub由来の `aide_dev_status` とは別（#569） |
 | `aide_vps_memory` | 本番VPS上の issue-deck のメモリ計測結果（最新・最後に取得できた時刻・経過秒・PID/起動時刻ごとの区間、`history` で採取サンプル）を返す。**読み取り専用**。計測・集計はIssueDeck側（`/api/integrations/vps-memory`）で、AIDEは中継のみ。取得不可は `reason` のまま返し0MBにしない（#608） |
 | `aide_issue_deck_items` | 上のカテゴリ別の詳細一覧。`category`（`notStarted`・`reserved` 等のキー）・`repo`・`cursor`・`limit` でページングする。summary と同じエンドポイントに中継する。読み取り専用（#569） |
-| `aide_claude_sessions` | サブPCで動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳はサブPCにしか無い） |
+| `aide_claude_sessions` | worker のホスト（DeskMini／Mac mini）で動作中の Claude Code セッションの一覧。リモートコントロールのURL・プロジェクト・状態（`busy` / `waiting` / `idle`）・待っている理由・経過時間を返す。**キャッシュを読むだけ**（台帳は worker のホストにしか無い） |
+| `aide_worker_assignment` | worker ジョブの担当ホスト（subpc＝DeskMini／macmini＝Mac mini）・モード（自動か固定か）・各ホストの最終問い合わせと生存判定・最後の切り替え（時刻と理由）を返す。**読み取り専用**（#891） |
+| `aide_set_worker_assignment` | worker ジョブの担当のモードを `auto`・`subpc`・`macmini` に切り替える。**書き込みツール**。固定は解除するまで続く（#891）。scope `worker-assignment:write`（#897。既存の接続は再接続して明示的に許可するまで切り替えできない。読み取りは引き続き可） |
 | `aide_zaim_master` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返す |
 | `aide_zaim_payment` | **廃止**（Zaim公式APIの終了。aide#714）。呼ぶと廃止の理由を返し、Zaimへは登録しない |
 | `aide_create_notification` | aide-botへ利用者に知らせる情報を登録する。**ChatGPTスケジュール向けの書き込みツール** |
@@ -2614,47 +2616,74 @@ subpcのシステムTZはUTCなので、タイマーには `Asia/Tokyo` の明�
 
 **このスケジューリングは常時起動のホストに置く必要がある。** 開発機（メインPC）は常時起動しない前提のため、セッションを維持できない。本番では subpc が担う。
 
-### 担当ホストの固定と Mac mini（#874）
+### 担当ホストの割り振りと Mac mini（#874・#891）
 
-サブPCが使えないときに worker ジョブを Mac mini（`macmini`）で動かせるよう、**ジョブごとに担当ホストを
-固定する**。各ホストの `.env` の `AIDE_WORKER_JOBS` に担当ジョブをカンマ区切りで書くと、`src/worker/run.ts`
-が最初に判定し、**担当外のジョブは何もせず終了コード0で終わる**（`assignment.ts`）。未設定は全ジョブ担当
-（従来どおり）、`none` は何も担当しない。ジョブ名の打ち間違いは終了コード2で落とす（黙って担当が消えるのを防ぐ）。
+**worker ジョブをどのホストで動かすかは、AIDE のサーバー（VPS）が決める**（#891）。主はサブPC（`subpc`）、
+予備は Mac mini（`macmini`）で、**両ホストに全ジョブを常に登録しておく**。各ホストの `src/worker/run.ts` は
+ジョブの実行前に `POST /api/worker/claim`（`AIDE_INGEST_SECRET`）で「このホストが動かしてよいか」を問い合わせ、
+担当外なら何もせず終了コード0で終わる。判定は `src/core/worker-assignment.ts`、状態は VPS の
+`data/worker-assignment.json`（ホスト名・時刻・モード・切り替えの理由だけ）。
 
+| 状況 | 動き |
+|---|---|
+| 自動（既定）・両方動いている | 主（subpc）だけが動く |
+| 担当ホストの問い合わせが **15分** 途切れ、もう一方が生きている | もう一方へ移す（`failover`） |
+| 予備が担当中に、主の問い合わせが **30分** 続いた（間が10分を超えたら数え直す） | 主へ戻す（`failback`） |
+| 固定（`subpc` / `macmini`） | 解除するまでそのホスト。止まっていても移さない（`manual`） |
+| VPS に届かない・認証の誤り | **動かさない**（二重実行より停止に気づける方を取る。`job-<name>` が古くなり動作状況が知らせる） |
+| `AIDE_INGEST_URL` が無い（開発機） | 問い合わせずに動かす（従来どおり） |
+| VPS が404を返す（`main` へ未リリースの版） | `AIDE_WORKER_JOBS` だけで判定する（従来どおり）。worker は `develop` を毎時追従し VPS は `main` からデプロイされるため、リリースまでの間に全ジョブが止まらないようにしている |
+
+- **ハートビートは問い合わせそのもの。** 2分ごとのジョブ（`claude-sessions-sync`・`printer-watch`）が両ホストで
+  走るので、専用のタイマーは持たない。担当が移るのは「担当ホストから15分問い合わせが無い」ときだけなので、
+  生きているホストから担当を奪うことはなく、2台で同時に動かない。
+- **サブPCが復旧した直後は動かさない。** systemd の `Persistent=true` で取り戻す実行も問い合わせを通るため、
+  30分続くまでは担当外として見送る（`AIDE_WORKER_JOBS=none` の手作業は要らない）。
+- **`self-update` は担当に関係なく両ホストで動く**（ホスト自身の更新のため）。問い合わせはハートビートとして送る。
+- **`claude-sessions-sync` は担当の判定に従う**（担当ホストのセッションだけが `aide_claude_sessions` に出る）。
+  台帳はホストごとにあり、送り先はキー1件（`claude-sessions`）への上書きなので、両ホストで動かすと2分ごとに
+  一覧が入れ替わる。予備の Mac mini のセッションは、Mac mini が担当のときだけ見える（#891 の計画レビューで判断）。
+- 切り替わる（自動・手動とも）と、**新しい担当ホストの次のジョブ実行時に、そのホストの `AIDE_DISCORD_WEBHOOK_URL` から
+  1回だけ通知する**（VPS には Webhook を配線していないため）。Zaim のログイン状態はホストごとに別なので、
+  引き継いだ側で再ログインが要ることがある。
+- **手動の切り替え**は MCP（`aide_worker_assignment` で表示・`aide_set_worker_assignment` で変更）か、
+  `GET` / `POST /api/worker/assignment`（StatusHub 用。読み取りは `AIDE_STATUS_SECRET` か
+  `AIDE_WORKER_CONTROL_SECRET`、変更は `AIDE_WORKER_CONTROL_SECRET` だけ。本文は `{"mode":"auto"|"subpc"|"macmini"}`）。
+  メンテナンス・再起動・Mac mini での動作確認の前に固定し、終わったら `auto` へ戻す。
+- **ホスト名**はサーバーが `subpc`・`macmini` だけを知っている。OS のホスト名の先頭ラベルが違う機は `.env` に
+  `AIDE_WORKER_HOST` を書く（違うと問い合わせが400になり、そのホストでは何も動かない）。
+- **`AIDE_WORKER_JOBS`（#874）は問い合わせの手前のローカルの絞り込みとして残す。** 載っていないジョブは
+  サーバーの判定に関係なく動かさない。通常は未設定（絞り込まない）にする。
+  **ただし `self-update` だけは `AIDE_WORKER_JOBS` に含まれていなくても動く**（#897。絞り込みで更新が止まると、
+  担当の割り振りに対応した版を取り込めない）。Mac mini を Zaim 系だけに絞る従来の設定が残っているホストは、
+  自動引継ぎのために `AIDE_WORKER_JOBS` を未設定（または `all`）へ移し、Mac mini で `deploy/macmini/install.sh` を
+  再実行して全ジョブのLaunchAgentを入れる（実機への反映とclaim応答の確認は main 公開後の作業）。
 - **担当外の見送りは実行記録（`job-<name>`）に残さず、標準出力に1行出すだけにしている。** 記録は全ホスト
   共通のキー1件への上書きなので、担当外のホストが成功を書くと、担当ホストが止まっていても動作状況
   （`/api/status`）が新鮮に見えてしまう。見送りは launchd のログ／journald で読む。
+
+**Zaim Web版の受け口（`zaim-web`）は両ホストで常駐させ、VPS が担当ホストの受け口へ中継する。**
+VPS の `AIDE_ZAIM_WEB_UPSTREAM_URL` を `subpc=http://<サブPCのTailscaleアドレス>:4748,macmini=http://<Mac miniの>:4748`
+の形で書くと、`currentOwner()` の受け口を選ぶ（URL1つの書き方は従来どおりそこへ固定）。Zaim のログイン状態を
+保つ `zaim-keep-alive` が担当ホストでだけ動くため、受け口も担当と一緒に切り替える。両ホストの `.env` に
+`AIDE_ZAIM_WEB_HOST`・`AIDE_ZAIM_WRITE_SECRET` が要る。
+
 - Mac mini の LaunchAgent は `deploy/macmini/install.sh` が表から生成して登録する（`run-job.sh` が
-  `timeout` で `TimeoutStartSec` の代わりをする）。systemd との差は `Persistent=true` が無い（停止中の分は
+  `timeout` で `TimeoutStartSec` の代わりをする）。引数を省くと全ジョブと受け口（KeepAlive の `run-zaim-web.sh`）を登録する。
+  systemd との差は `Persistent=true` が無い（停止中の分は
   取り戻さない）・`RandomizedDelaySec` が無い・`Asia/Tokyo` は Mac mini のタイムゾーン設定で代替、の3点。
   `printer-watch` は myroom の公開URLへHTTP GETするだけでプリンターへLAN接続しないため、既定に含める（#886）。
-  常駐の受け口 `zaim-web` は担当判定が無く登録した機が受け口になるため、既定には入れず `install.sh zaim-web` と明示したときだけ
-  KeepAlive の LaunchAgent（`run-zaim-web.sh`）として登録する。
   `self-update` は Linux 以外では `git pull` と `npm ci` だけ行い、サブPC専用の `setup.sh --only systemd` と
   `systemctl` は呼ばない（#883）。
 - Mac mini の `~/apps/aide` には `.env`・`data/`・Playwright（`npm i -g playwright && playwright install
   chromium`）が別途要る。導入は実施する時点でユーザーに確認する。
 
 ```bash
-cd ~/apps/aide && deploy/macmini/install.sh              # 登録（既定の9ジョブ）
-deploy/macmini/install.sh zaim-web                       # 受け口（常駐）だけ登録
+cd ~/apps/aide && deploy/macmini/install.sh              # 登録（全ジョブと受け口）
 launchctl print gui/$(id -u)/com.guchi-apps.aide.zaim-keep-alive
 tail -n 50 ~/Library/Logs/aide/zaim-keep-alive.log
 deploy/macmini/install.sh --uninstall                    # 全部外す
 ```
-
-**担当ホストを付け替える順序（例: Zaim 系をサブPC → Mac mini）。** 空白の時間を作らず、重複もさせないため、
-必ず次の順に行う。
-
-1. サブPCの `.env` の `AIDE_WORKER_JOBS` から Zaim 系を外す（例: `self-update,weather-sync,gmail-watch`）。
-   サブPCの `aide-zaim-web.service` も止める。
-2. Mac mini の `.env` に `AIDE_WORKER_JOBS=zaim-refresh,zaim-sync,zaim-money-sync,zaim-keep-alive` と
-   `AIDE_ZAIM_WEB_HOST`（Tailscale のアドレス）・`AIDE_ZAIM_WRITE_SECRET` を入れ、
-   `ZAIM_EMAIL`・`ZAIM_PASSWORD` を使うなら入れて、`zaim-keep-alive` を手で1回流してログインが通ることを確かめる。
-3. Mac mini で受け口を起動し（`deploy/macmini/install.sh zaim-web`。ログは `~/Library/Logs/aide/zaim-web.log`）、VPS の `AIDE_ZAIM_WEB_UPSTREAM_URL` を
-   Mac mini の Tailscale アドレス（ポート4748）へ変えて VPS を再起動する。
-
-戻すときは逆向きに、Mac mini 側の担当と受け口を外してから、サブPC側へ足す。
 
 ### systemdユニット
 

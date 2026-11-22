@@ -48,7 +48,7 @@ import { bearerToken, secretMatches } from "./secret.ts";
  *
  * 呼び出し元は同じVPS上で動くので `http://127.0.0.1:<port>` で届く。外向けURLは要らない。
  * 公開URL（`aide.gucchii.com`）からはApacheの `<LocationMatch>` で `/api/zaim` と `/api/money` を
- * 落とす（guchi-apps/vps#101。`/api` を丸ごとは落とせない。workerがサブPCから
+ * 落とす（guchi-apps/vps#101。`/api` を丸ごとは落とせない。workerがworker のホスト（DeskMini／Mac mini）から
  * `POST /api/cache/:key` を外向けURLへ送るため）。
  *
  * **遮断が入っても、この口のシークレットと総当たり対策は要る。** Apacheを通らない
@@ -61,7 +61,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 /**
  * 環境変数 `AIDE_ZAIM_WRITE_SECRET` だけを読む。
  *
- * サブPCの受け口（`worker/zaim-web-routes.ts`）が起動判定に使う。サブPCは issue-deck の
+ * worker のホスト（DeskMini／Mac mini）の受け口（`worker/zaim-web-routes.ts`）が起動判定に使う。worker のホスト（DeskMini／Mac mini）は issue-deck の
  * 共有トークンAPIの接続先を持たないため、環境変数のまま読む。**値は共有トークン
  * `AIDE_ZAIM_WRITE_SECRET` と同じものを使う**（VPSからの中継をこの値で照合するため）。
  */
@@ -74,8 +74,8 @@ export function zaimWriteSecret(): string | null {
  * 優先し、取得できなければ環境変数 `AIDE_ZAIM_WRITE_SECRET` へフォールバックする
  * （`src/api/read.ts` の `readSecret()` と同じ形）。
  *
- * サブPCへの中継（`web-payment-forward.ts`）にもこの値を渡す。サブPC側は環境変数で照合するので、
- * 共有トークンとサブPCの `.env` は同じ値にそろえておく。
+ * worker のホスト（DeskMini／Mac mini）への中継（`web-payment-forward.ts`）にもこの値を渡す。worker のホスト（DeskMini／Mac mini）側は環境変数で照合するので、
+ * 共有トークンとworker のホスト（DeskMini／Mac mini）の `.env` は同じ値にそろえておく。
  */
 export async function resolveZaimWriteSecret(): Promise<string | null> {
   const shared = await getSharedToken("AIDE_ZAIM_WRITE_SECRET", "aide");
@@ -234,10 +234,10 @@ async function runOrForwardWebPayment(
  * | 応答までの時間 | 1秒未満 | **数十秒**（ヘッドレスChromiumを起動する） |
  *
  * **この口はどのマシンでも画面を操作できるわけではない。** Playwrightとログイン状態
- * （`data/zaim/storage-state.json`）があるのはサブPCだけで、VPSのサーバーには無い。
- * そこで `AIDE_ZAIM_WEB_UPSTREAM_URL` が設定されていれば、**同じ口を開いているサブPCの
+ * （`data/zaim/storage-state.json`）があるのはworker のホスト（DeskMini／Mac mini）だけで、VPSのサーバーには無い。
+ * そこで `AIDE_ZAIM_WEB_UPSTREAM_URL` が設定されていれば、**同じ口を開いているworker のホスト（DeskMini／Mac mini）の
  * 受け口へ中継する**（#215。受け口は `src/worker/zaim-web-server.ts`）。未設定なら
- * 従来どおり自分のところで画面を操作する——サブPC側の受け口がこちらの経路を通る。
+ * 従来どおり自分のところで画面を操作する——worker のホスト（DeskMini／Mac mini）側の受け口がこちらの経路を通る。
  *
  * **呼び出し元はタイムアウトを長く取ること。** 画面の操作は数十秒かかるので、既定の
  * 短いタイムアウトで切ると「登録されたか分からない」状態を作ることになる。中継する場合も
@@ -439,11 +439,11 @@ export async function handleZaimWebMemoEdit(req: IncomingMessage, res: ServerRes
  * `job.result.entry` が `GET /api/money/transactions` の `entries[]` と同じ `items` / `itemsStatus` /
  * `itemsNote` 契約で、`itemsStatus` が `complete` のときだけ商品明細として確定してよい。
  * 失敗は `job.failure.kind`（`busy`・`session_expired`・`not_found`・`detail_failed`・`fetch_failed`）と
- * `retryable` で判別する。中継先（サブPC）の問題は `subpc_unreachable`・`subpc_timeout`・
+ * `retryable` で判別する。中継先（worker のホスト（DeskMini／Mac mini））の問題は `subpc_unreachable`・`subpc_timeout`・
  * `subpc_rejected`・`subpc_bad_response`（HTTP 502）で、取得を試みていない。
  *
- * 認証は他のZaim口と同じ `AIDE_ZAIM_WRITE_SECRET`。実行はサブPCの受け口（`zaim-web-server.ts`）で、
- * VPSでは `AIDE_ZAIM_WEB_UPSTREAM_URL` へ中継する（ジョブの状態はサブPCのメモリにあり、受け口の
+ * 認証は他のZaim口と同じ `AIDE_ZAIM_WRITE_SECRET`。実行はworker のホスト（DeskMini／Mac mini）の受け口（`zaim-web-server.ts`）で、
+ * VPSでは `AIDE_ZAIM_WEB_UPSTREAM_URL` へ中継する（ジョブの状態はworker のホスト（DeskMini／Mac mini）のメモリにあり、受け口の
  * 再起動で消える。そのときの `GET` は `job_not_found`〔404〕で、依頼し直せばよい）。
  */
 export async function handleZaimReceiptRefresh(
@@ -502,7 +502,7 @@ export async function handleZaimReceiptRefresh(
       failure: {
         kind: "job_not_found",
         retryable: true,
-        message: "ジョブが見つかりません（期限切れか、サブPCの受け口が再起動しました）。依頼し直してください。",
+        message: "ジョブが見つかりません（期限切れか、worker のホスト（DeskMini／Mac mini）の受け口が再起動しました）。依頼し直してください。",
       },
     });
     return;
@@ -526,7 +526,7 @@ export async function handleZaimReceiptRefresh(
  * 成功は `job.status === "succeeded"` かつ `job.fetchedAt`。このあと `GET /api/money/transactions` の
  * `fetchedAt` が更新されている。失敗は `job.failure.kind`（`busy`・`session_expired`・`fetch_failed`・
  * `internal`）と `retryable`。受付時に別のZaim操作・定期巡回と競合していれば **429 `busy`**。
- * 中継先（サブPC）の問題は商品内訳の再取得と同じ `subpc_*`（502）。認証・中継も同じ。
+ * 中継先（worker のホスト（DeskMini／Mac mini））の問題は商品内訳の再取得と同じ `subpc_*`（502）。認証・中継も同じ。
  */
 export async function handleZaimMoneyListRefresh(
   req: IncomingMessage,
@@ -571,7 +571,7 @@ export async function handleZaimMoneyListRefresh(
       failure: {
         kind: "job_not_found",
         retryable: true,
-        message: "ジョブが見つかりません（期限切れか、サブPCの受け口が再起動しました）。依頼し直してください。",
+        message: "ジョブが見つかりません（期限切れか、worker のホスト（DeskMini／Mac mini）の受け口が再起動しました）。依頼し直してください。",
       },
     });
     return;

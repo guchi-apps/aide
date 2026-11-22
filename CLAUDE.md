@@ -56,9 +56,9 @@ AIDE_AUTH_DISABLED=1 PORT=19211 node --env-file-if-exists=.env src/server.ts
 `typescript` と `@types/node` の2つだけ。**実行時依存は増やさない方針**（`imapflow` は例外として承認済み）なので、
 依存を足す判断は下記「依存関係の追加」に従う。
 
-## サブPCの本体チェックアウト（`~/apps/aide`）で作業しない
+## DeskMiniの本体チェックアウト（`~/apps/aide`）で作業しない
 
-**サブPCの `/home/guchi/apps/aide` は本番の巡回・受け口が動いている実体で、`aide-self-update` が毎時
+**DeskMiniの `/home/guchi/apps/aide` は本番の巡回・受け口が動いている実体で、`aide-self-update` が毎時
 `origin/develop` へ追従させている。** ここでブランチを切り替えたりコミットしたりせず、作業は必ず
 `~/apps/aide-worktrees/issue-<番号>` などの git worktree で行う。
 
@@ -236,7 +236,7 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
   `scripts/edit-memo.mjs`）。**この経路は書き換え前のメモを覚えておらず元に戻せない**ので、
   画面の当て方を確かめる必要があるときは、保存を行わない `ZAIM_WEB_MEMO_EDIT_DRY_RUN=1`
   を必ず付ける（#354）
-- **サブPCで動いている受け口（`aide-zaim-web.service` / `npm run zaim-web-server`）を止める・
+- **DeskMiniで動いている受け口（`aide-zaim-web.service` / `npm run zaim-web-server`）を止める・
   再起動すること**（#215）。VPSからのZaim登録がその間ずっと届かなくなる。手元で挙動を
   確かめるときは `AIDE_ZAIM_WEB_PORT` を空きポートにして別に起動する
 

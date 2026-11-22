@@ -11,6 +11,7 @@ import { kurashioGetKepcoHourlyTool, kurashioImportKepcoHourlyTool } from "./too
 import { createTravelTool, getTravelTool } from "./tools/travels.ts";
 import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { parseSupportedScopes } from "../auth/oauth.ts";
+import { setWorkerAssignmentTool } from "./tools/worker-assignment.ts";
 
 // 記録の置き場を差し替えてから読み込む（access-log.test.ts と同じ理由）。
 const dir = await mkdtemp(join(tmpdir(), "aide-mcp-transport-test-"));
@@ -107,6 +108,23 @@ async function waitForEntries(count: number): Promise<McpAccessEntry[]> {
 }
 
 describe("MCPのやり取りの記録", () => {
+  it("担当切替は専用の書き込みscopeが無い接続（scopeなし・読み取りのみ）では実行されない（#897）", async () => {
+    assert.deepEqual(parseSupportedScopes("worker-assignment:write worker-assignment:admin"), ["worker-assignment:write"]);
+    let calls = 0;
+    const registry = new ToolRegistry();
+    registry.register({ ...setWorkerAssignmentTool, handler: () => { calls++; return { content: [{ type: "text", text: "called" }] }; } });
+    const instance = new McpTransport(registry, { name: "aide", version: "test" });
+    const params = { name: setWorkerAssignmentTool.name, arguments: { mode: "macmini" } };
+    for (const scopes of [[], ["tasks:read", "work-reports:read", "salary-agent:read"], ["tasks:write"]]) {
+      const res = response();
+      await instance.handle(request({ jsonrpc: "2.0", id: 1, method: "tools/call", params }), res, BASE_URL, scopes);
+      assert.match(res.body, /"isError":true/);
+    }
+    assert.equal(calls, 0);
+    await instance.handle(request({ jsonrpc: "2.0", id: 2, method: "tools/call", params }), response(), BASE_URL, ["worker-assignment:write"]);
+    assert.equal(calls, 1);
+  });
+
   it("kurashioの請求ツールは読み取りscopeで登録できず、登録scopeで照会できない", async () => {
     assert.deepEqual(parseSupportedScopes("kurashio-bills:read kurashio-bills:write kurashio-bills:admin"),
       ["kurashio-bills:read", "kurashio-bills:write"]);
