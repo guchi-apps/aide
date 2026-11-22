@@ -59,6 +59,9 @@ export function isAppFacingApi(name: string): boolean {
   // `/api/app-version` はデプロイとリリース確認が版を照合する口で（#662）、`/health` と同じく
   // アプリとのつながりではない。
   if (name === "/api/app-version") return false;
+  // `/api/worker/claim` は worker（DeskMini／Mac mini）が担当を問い合わせる口で（#891）、
+  // 取得結果の送信（`/api/cache/:key`）と同じく自前の worker の内部経路。
+  if (name === "/api/worker/claim") return false;
   return name.startsWith("/api/") && !name.includes(":");
 }
 

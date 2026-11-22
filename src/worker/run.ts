@@ -17,6 +17,7 @@ import {
   summarizeFailure,
 } from "./notify.ts";
 import { recordJobRun } from "./record.ts";
+import { askServer, notifySwitch, workerHostName } from "./server-assignment.ts";
 
 /**
  * worker のエントリポイント。
@@ -80,6 +81,29 @@ try {
 if (!isAssigned(assignment, name as JobName)) {
   console.log(`[${name}] 担当外のため見送り（${hostname()}。${WORKER_JOBS_ENV} に含まれていません）`);
   process.exit(0);
+}
+
+// 担当ホストの正はサーバー（VPS）にある（#891）。`AIDE_WORKER_JOBS` はその手前のローカルの絞り込みとして残す。
+// self-update はホスト自身の更新なので、担当に関係なく動かす（問い合わせはハートビートとして送る）。
+const claimed = await askServer(name);
+if (claimed.kind === "unsupported") {
+  console.log(`[${name}] サーバーが担当の割り振りに未対応のため、${WORKER_JOBS_ENV} だけで判定しました`);
+}
+if (claimed.kind === "decided" && claimed.response.notice) {
+  await notifySwitch(claimed.response.notice, claimed.response.mode);
+}
+if (name !== "self-update") {
+  if (claimed.kind === "failed") {
+    // 届かないときは二重実行を避けて動かさない。記録も残さない（job-<name> が古くなって気づける）。
+    console.error(`[${name}] 担当を問い合わせられないため見送り（${workerHostName()}）: ${claimed.reason}`);
+    process.exit(0);
+  }
+  if (claimed.kind === "decided" && !claimed.response.run) {
+    console.log(
+      `[${name}] 担当外のため見送り（${workerHostName()}。担当は ${claimed.response.owner}・モード ${claimed.response.mode}）`,
+    );
+    process.exit(0);
+  }
 }
 
 const startedAtMs = Date.now();
