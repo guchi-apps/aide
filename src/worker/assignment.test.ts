@@ -24,3 +24,12 @@ describe("parseAssignment", () => {
     assert.throws(() => parseAssignment("zaim-sync,zaim-snyc"), /zaim-snyc/);
   });
 });
+
+describe("self-update は AIDE_WORKER_JOBS に左右されない（#897）", () => {
+  it("none・一部のジョブだけの絞り込みでも担当に含める", () => {
+    for (const raw of ["none", "zaim-refresh,zaim-sync,zaim-money-sync,zaim-keep-alive", undefined]) {
+      assert.equal(isAssigned(parseAssignment(raw), "self-update"), true, String(raw));
+    }
+    assert.equal(isAssigned(parseAssignment("zaim-sync"), "weather-sync"), false);
+  });
+});
