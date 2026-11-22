@@ -37,6 +37,12 @@ export function parseAssignment(raw: string | undefined): Assignment {
   return { kind: "some", jobs: new Set(jobs) };
 }
 
+/**
+ * `self-update` はホスト自身の更新なので、ローカルの絞り込み（`AIDE_WORKER_JOBS`）にも従わせない（#897）。
+ * 従わせると、Mac miniをZaim系だけへ絞った既存設定で更新が止まり、担当の割り振り（claim）に
+ * 対応した版を取り込めない。
+ */
 export function isAssigned(assignment: Assignment, job: JobName): boolean {
+  if (job === "self-update") return true;
   return assignment.kind === "all" || assignment.jobs.has(job);
 }
