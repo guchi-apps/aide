@@ -37,8 +37,8 @@ JOBS=(
   "printer-watch|60|StartInterval:120"
 )
 # 担当に入れるのは、macOS 対応を確かめたジョブだけにする（既定の登録対象から外すものはここに書く）。
-# claude-sessions-sync は /proc を読むため macOS では動かない（別途対応）。
-DEFAULT_EXCLUDE=(claude-sessions-sync printer-watch)
+# claude-sessions-sync は #879 で macOS 対応済みのため既定に含める。
+DEFAULT_EXCLUDE=(printer-watch)
 
 calendar_xml() {
   local spec="$1" item hour minute
