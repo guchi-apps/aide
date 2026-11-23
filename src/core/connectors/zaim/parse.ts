@@ -7,6 +7,8 @@ import type {
   ZaimMoneyMode,
   ZaimOnlineAccount,
   ZaimPoint,
+  ZaimPointExpiration,
+  ZaimRawPoint,
   ZaimRawEntry,
   ZaimRawMoneyEntry,
   ZaimRawMoneyListResult,
@@ -174,6 +176,17 @@ export function parsePointAmount(text: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+function parseExpirations(entry: ZaimRawPoint): ZaimPointExpiration[] {
+  const parsed: ZaimPointExpiration[] = [];
+  for (const row of entry.expirations ?? []) {
+    const date = collapseWhitespace(row.date);
+    const amount = parsePointAmount(row.amount);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || amount === null) continue;
+    parsed.push({ date, amount });
+  }
+  return parsed.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function parsePoints(raw: ZaimRawScrapeResult, onlineAccounts: readonly ZaimOnlineAccount[]): ZaimPoint[] {
   const points: ZaimPoint[] = [];
   const seen = new Set<string>();
@@ -184,11 +197,13 @@ function parsePoints(raw: ZaimRawScrapeResult, onlineAccounts: readonly ZaimOnli
     const key = toMatchKey(name);
     if (seen.has(key)) continue;
     seen.add(key);
+    const expirations = parseExpirations(entry);
     points.push({
       name,
       amount,
       unit: /マイル|マイレージ/.test(name) ? "mile" : "point",
       lastUpdatedAt: matchLastUpdatedAt(onlineAccounts, name),
+      ...(expirations.length > 0 ? { expirations } : {}),
     });
   }
   return points;

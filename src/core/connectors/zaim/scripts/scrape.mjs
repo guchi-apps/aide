@@ -1,7 +1,7 @@
 import { ZAIM_CONTEXT_OPTIONS } from "./context.mjs"
 import { readOnlineAccounts, resolveOnlineAccountsUrl } from "./online-accounts.mjs"
 import { resolveStatePath } from "./paths.mjs"
-import { readPoints } from "./points.mjs"
+import { readExpirations, readPoints } from "./points.mjs"
 import { loadPlaywright } from "./playwright-loader.mjs"
 import { assertLoggedIn } from "./session-check.mjs"
 
@@ -227,6 +227,22 @@ try {
     } catch (error) {
         // stdout はJSON専用なので stderr へ出す。
         console.error("連携口座の最終更新を取得できませんでした", error)
+    }
+
+    // ポイントの有効期限別の内訳（#901）は各サービスの詳細ページにしか無い。残高のあるものだけ
+    // 巡回し、1件が読めなくても他は返す（読めなかったものは `expirations` を持たない）。
+    for (const point of points) {
+        if (!point.id || !/\d/.test(point.amount)) continue
+        try {
+            await page.goto(new URL(`/point_accounts/${point.id}`, balanceUrl).href, {
+                waitUntil: "networkidle",
+                timeout: PAGE_TIMEOUT,
+            })
+            await assertLoggedIn(page)
+            point.expirations = await readExpirations(page)
+        } catch (error) {
+            console.error("ポイントの有効期限別の内訳を取得できませんでした", error)
+        }
     }
 
     // Zaimの認証Cookieは数時間で失効する。巡回のたびに更新後のCookieを保存し直すことで、

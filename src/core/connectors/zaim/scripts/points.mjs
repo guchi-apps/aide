@@ -28,6 +28,30 @@ export function extractPointRows(elements) {
     return results
 }
 
+/**
+ * 詳細ページ（`/point_accounts/<id>`）の「有効期限」タブ。見出し行（`th`）の下に
+ * `<td>2027-01-31</td><td>1,729 pt</td>` の行が期限の早い順に並ぶ（#901）。
+ * 残高が無いサービスは見出し行だけ。
+ */
+export const EXPIRATION_ROW_SELECTOR = ".description table tr"
+
+/** ページ内で実行される。モジュールスコープの変数は参照できない。 */
+export function extractExpirationRows(rows) {
+    const clean = (text) => (text ?? "").replace(/\s+/g, " ").trim()
+    const results = []
+    for (const row of rows) {
+        const cells = row.querySelectorAll("td")
+        if (cells.length < 2) continue
+        results.push({ date: clean(cells[0].textContent), amount: clean(cells[1].textContent) })
+    }
+    return results
+}
+
+/** 詳細ページを開いた状態で、期限別の内訳（表示のまま）を読む。 */
+export async function readExpirations(page) {
+    return page.locator(EXPIRATION_ROW_SELECTOR).evaluateAll(extractExpirationRows)
+}
+
 export async function readPoints(page) {
     return page.locator(POINT_ROW_SELECTOR).evaluateAll(extractPointRows)
 }
