@@ -12,3 +12,16 @@ export declare const POINT_ROW_SELECTOR: string;
 export declare function extractPointRows(elements: unknown[]): ZaimRawPointEntry[];
 
 export declare function readPoints(page: unknown): Promise<ZaimRawPointEntry[]>;
+
+export interface ZaimRawExpirationEntry {
+  /** `2027-01-31` の表示のまま。 */
+  date: string;
+  /** `1,729 pt` の表示のまま。 */
+  amount: string;
+}
+
+export declare const EXPIRATION_ROW_SELECTOR: string;
+
+export declare function extractExpirationRows(rows: unknown[]): ZaimRawExpirationEntry[];
+
+export declare function readExpirations(page: unknown): Promise<ZaimRawExpirationEntry[]>;
