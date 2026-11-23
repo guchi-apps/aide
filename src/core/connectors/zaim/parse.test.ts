@@ -629,6 +629,29 @@ describe("buildZaimSnapshot: ポイント・マイル（#872）", () => {
         ])
     })
 
+    it("期限別の内訳は、読めた行だけを日付の早い順で載せ、無ければ省略する（#901）", () => {
+        const points = buildZaimSnapshot({
+            ...raw,
+            points: [
+                {
+                    name: "楽天ポイント",
+                    amount: "210 pt",
+                    expirations: [
+                        { date: "2028-01-31", amount: "1,000 pt" },
+                        { date: "2027-01-31", amount: "1,729 pt" },
+                        { date: "不明", amount: "5 pt" },
+                    ],
+                },
+                { name: "Vポイント", amount: "5 pt", expirations: [] },
+            ],
+        }).points
+        assert.deepEqual(points?.[0]?.expirations, [
+            { date: "2027-01-31", amount: 1729 },
+            { date: "2028-01-31", amount: 1000 },
+        ])
+        assert.equal(points?.[1] && "expirations" in points[1], false)
+    })
+
     it("円の balances にポイントは混ざらない", () => {
         assert.deepEqual(buildZaimSnapshot(raw).balances.map((b) => b.name), ["現金"])
     })

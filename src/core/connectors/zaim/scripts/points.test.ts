@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { extractPointRows } from "./points.mjs";
+import { extractExpirationRows, extractPointRows } from "./points.mjs";
 
 // 必要な範囲だけのスタブ（`querySelector`・`cloneNode`・`querySelectorAll`・`getAttribute`）。
 
@@ -35,5 +35,21 @@ describe("extractPointRows", () => {
 
   it("名前か値の要素が無い行は落とす", () => {
     assert.deepEqual(extractPointRows([{ getAttribute: () => "", querySelector: () => null }]), []);
+  });
+});
+
+describe("extractExpirationRows", () => {
+  const row = (...cells: string[]) => ({
+    querySelectorAll: () => cells.map((textContent) => ({ textContent })),
+  });
+
+  it("期限と数量を表示のまま取り出し、見出し行（tdが無い）は飛ばす", () => {
+    assert.deepEqual(
+      extractExpirationRows([row(), row(" 2027-01-31 ", " 1,729 pt "), row("2028-01-31", "572 pt")]),
+      [
+        { date: "2027-01-31", amount: "1,729 pt" },
+        { date: "2028-01-31", amount: "572 pt" },
+      ],
+    );
   });
 });

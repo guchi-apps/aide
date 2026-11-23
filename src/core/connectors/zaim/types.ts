@@ -19,11 +19,16 @@ export interface ZaimRawOnlineAccount {
   lastUpdatedAt: string;
 }
 
+/** ホーム画面の1件。`expirations` は詳細ページから読めたときだけ（#901。旧スクリプトの出力には無い）。 */
+export interface ZaimRawPoint extends ZaimRawEntry {
+  expirations?: { date: string; amount: string }[];
+}
+
 export interface ZaimRawScrapeResult {
   url: string;
   balances: ZaimRawEntry[];
   /** ホーム画面「現在のポイント」区画。`amount` は `12,345 pt` や `-` の表示のまま。旧スクリプトの出力には無い。 */
-  points?: ZaimRawEntry[];
+  points?: ZaimRawPoint[];
   securities: ZaimRawSecuritiesPage[];
   /** 連携口座の最終更新。取得できなかった場合は空配列（巡回自体は失敗させない）。 */
   onlineAccounts?: ZaimRawOnlineAccount[];
@@ -62,6 +67,17 @@ export interface ZaimPoint {
   unit: ZaimPointUnit;
   /** 連携サービスの最終更新（ISO8601）。名前を結び付けられなければ null。 */
   lastUpdatedAt: string | null;
+  /**
+   * 有効期限別の内訳（期限の早い順）。Zaimの詳細ページから読めたサービスだけが持つ。
+   * 残高があるのに内訳が空・読めなかったときは省略する（旧クライアントとの後方互換）。
+   */
+  expirations?: ZaimPointExpiration[];
+}
+
+export interface ZaimPointExpiration {
+  /** `YYYY-MM-DD`（失効日）。 */
+  date: string;
+  amount: number;
 }
 
 export interface ZaimHolding {
