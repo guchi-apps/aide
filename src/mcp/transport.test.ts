@@ -12,6 +12,7 @@ import { createTravelTool, getTravelTool } from "./tools/travels.ts";
 import { kurashioBillContractsTool, kurashioGetBillTool, kurashioImportBillTool } from "./tools/kurashio-bills.ts";
 import { parseSupportedScopes } from "../auth/oauth.ts";
 import { setWorkerAssignmentTool } from "./tools/worker-assignment.ts";
+import { buildToolRegistry } from "./catalog.ts";
 
 // 記録の置き場を差し替えてから読み込む（access-log.test.ts と同じ理由）。
 const dir = await mkdtemp(join(tmpdir(), "aide-mcp-transport-test-"));
@@ -123,6 +124,29 @@ describe("MCPのやり取りの記録", () => {
     assert.equal(calls, 0);
     await instance.handle(request({ jsonrpc: "2.0", id: 2, method: "tools/call", params }), response(), BASE_URL, ["worker-assignment:write"]);
     assert.equal(calls, 1);
+  });
+
+  it("メールの道具は mail:read が無ければ呼べず、あれば本人（subject）をhandlerへ渡す（#905）", async () => {
+    assert.deepEqual(parseSupportedScopes("mail:read mail:send"), ["mail:read"]);
+    for (const name of ["aide_mail_search", "aide_mail_get"]) {
+      const real = buildToolRegistry().get(name)!;
+      let seen: unknown = null;
+      let calls = 0;
+      const registry = new ToolRegistry();
+      registry.register({ ...real, handler: (_args, ctx) => { calls++; seen = ctx.subject; return { content: [{ type: "text", text: "called" }] }; } });
+      const instance = new McpTransport(registry, { name: "aide", version: "test" });
+      for (const scopes of [[], ["tasks:read", "location:read"]]) {
+        const res = response();
+        await instance.handle(request({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name } }), res, BASE_URL, scopes);
+        assert.match(res.body, /"isError":true/);
+        assert.match(res.body, /mail:read の認可が必要/);
+      }
+      assert.equal(calls, 0, name);
+      const subject = { sub: "sub-1", email: "owner@example.com" };
+      await instance.handle(request({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name } }), response(), BASE_URL, ["mail:read"], "c", subject);
+      assert.equal(calls, 1, name);
+      assert.deepEqual(seen, subject);
+    }
   });
 
   it("kurashioの請求ツールは読み取りscopeで登録できず、登録scopeで照会できない", async () => {

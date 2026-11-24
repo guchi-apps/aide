@@ -86,6 +86,11 @@ export interface ToolContext {
    * 再接続（動的クライアント登録のやり直し）で変わりうるため、所有者ではなく報告元の識別に使う。
    */
   clientId?: string | null;
+  /**
+   * 認可したときにログインしていた本人（`mail:read` を付与した認可だけが記録する。#905）。
+   * **サーバーが検証した値。** 本人記録の無い古いトークン・パスワードだけの認可では無い。
+   */
+  subject?: { sub: string; email: string } | null;
 }
 
 /** 認証無効の開発起動（`AIDE_AUTH_DISABLED=1`）でのみ使うclientId。OAuthで付与された権限とは別物。 */

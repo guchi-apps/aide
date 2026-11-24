@@ -129,6 +129,22 @@ describe("MCPツールの登録簿", () => {
     assert.deepEqual(registry.get("kurashio_import_kepco_hourly")?.requiredScopes, ["kurashio-energy:write"]);
   });
 
+  it("メールの道具は読み取り専用の2本だけで、専用scope mail:read を要求する（#905）", () => {
+    const registry = buildToolRegistry();
+    for (const name of ["aide_mail_search", "aide_mail_get"]) {
+      assert.deepEqual(registry.get(name)?.requiredScopes, ["mail:read"], name);
+      assert.equal(tool(name).annotations?.readOnlyHint, true, name);
+    }
+    // 送信・下書き・返信・整理・削除の道具は足さない。
+    assert.deepEqual(
+      NAMES.filter((name) => /mail|gmail/i.test(name)).sort(),
+      ["aide_mail_get", "aide_mail_search"],
+    );
+    const search = tool("aide_mail_search").inputSchema;
+    assert.deepEqual(search["required"], ["query"]);
+    assert.deepEqual(tool("aide_mail_get").inputSchema["required"], ["ids"]);
+  });
+
   it("分けた相手を説明文で名指ししている", () => {
     // 名指しが無いと、似た問いでどちらを呼べばよいかをClaudeが決められない。
     const pairs: [string, RegExp][] = [
