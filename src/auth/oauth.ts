@@ -19,6 +19,7 @@ import {
   findToken,
 } from "./store.ts";
 import { escapeHtml, renderPage } from "../web/layout.ts";
+import type { AuthorizedSubject } from "./types.ts";
 
 /** タスク専用の読み取り・書き込みを別承認単位にする。 */
 export const TASK_READ_SCOPE = "tasks:read";
@@ -44,6 +45,11 @@ export const SALARY_AGENT_READ_SCOPE = "salary-agent:read";
 export const SALARY_AGENT_WRITE_SCOPE = "salary-agent:write";
 /** worker ジョブの担当ホストの切り替え（#897）。固定は定期jobを止めうるので、読み取り系とは別の承認単位にする。 */
 export const WORKER_ASSIGNMENT_WRITE_SCOPE = "worker-assignment:write";
+/**
+ * 受信メールの検索・本文取得（#905）。読み取り専用で、**認可したのがメールの持ち主本人だったときだけ**
+ * 付与する（認可時にGoogleログインの本人をトークンへ記録する。`AuthorizedSubject`）。
+ */
+export const MAIL_READ_SCOPE = "mail:read";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
@@ -61,6 +67,7 @@ const SUPPORTED_SCOPES = new Set([
   SALARY_AGENT_READ_SCOPE,
   SALARY_AGENT_WRITE_SCOPE,
   WORKER_ASSIGNMENT_WRITE_SCOPE,
+  MAIL_READ_SCOPE,
 ]);
 
 /**
@@ -317,10 +324,22 @@ ${error ? `<p class="err">${escapeHtml(error)}</p>` : ""}
   });
 };
 
+/**
+ * `mail:read` を求める認可で本人を確かめるための口（#905）。パスワードだけの認可は本人を持たないため、
+ * 画面のGoogleログイン（`src/web/login.ts`）のセッションを借りる。
+ */
+export interface AuthorizeIdentity {
+  /** いまログインしている本人。未ログイン・Googleログイン未設定なら null。 */
+  current(req: IncomingMessage): Promise<AuthorizedSubject | null>;
+  /** 未ログインのときの送り先（Googleログインの開始パス）。Googleログイン未設定なら null。 */
+  loginPath: string | null;
+}
+
 export async function handleAuthorize(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
+  identity: AuthorizeIdentity | null = null,
 ): Promise<void> {
   const config = loadAuthConfig();
   const clientId = url.searchParams.get("client_id") ?? "";
@@ -328,7 +347,8 @@ export async function handleAuthorize(
   const challenge = url.searchParams.get("code_challenge") ?? "";
   const method = url.searchParams.get("code_challenge_method") ?? "";
   const state = url.searchParams.get("state");
-  const scopes = parseSupportedScopes(url.searchParams.get("scope"));
+  let scopes = parseSupportedScopes(url.searchParams.get("scope"));
+  let subject: AuthorizedSubject | null = null;
 
   const client = await findClient(clientId);
   // redirect_uri が登録済みでない場合、そこへリダイレクトするとオープンリダイレクトになる。
@@ -344,6 +364,24 @@ export async function handleAuthorize(
       .writeHead(400, { "Content-Type": "text/plain; charset=utf-8" })
       .end("PKCE (code_challenge_method=S256) が必要です");
     return;
+  }
+
+  // `mail:read` は本人をトークンに結び付けて初めて意味を持つ。パスワードの前に、本人を確かめる。
+  if (scopes.includes(MAIL_READ_SCOPE) && config.enabled) {
+    subject = (await identity?.current(req)) ?? null;
+    if (!subject) {
+      if (identity?.loginPath) {
+        // Googleログインへ送り、戻ってきたらこの認可画面を開き直す（`safeLanding` が認可のパスだけ許す）。
+        const back = `${url.pathname}${url.search}`;
+        res
+          .writeHead(302, { Location: `${identity.loginPath}?next=${encodeURIComponent(back)}`, "Cache-Control": "no-store" })
+          .end();
+        return;
+      }
+      // 本人を確かめる手段が無い環境では、メールの権限だけ付けずに続ける（接続全体は失敗させない）。
+      console.warn("[auth] Googleログインが未設定のため mail:read を付与しません");
+      scopes = scopes.filter((scope) => scope !== MAIL_READ_SCOPE);
+    }
   }
   if (req.method === "GET") {
     res
@@ -390,6 +428,7 @@ export async function handleAuthorize(
     codeChallenge: challenge,
     resource: url.searchParams.get("resource"),
     scopes,
+    ...(subject && scopes.includes(MAIL_READ_SCOPE) ? { subject } : {}),
     expiresAt: Date.now() + AUTH_CODE_TTL_MS,
   });
 
@@ -413,7 +452,7 @@ export async function handleToken(req: IncomingMessage, res: ServerResponse): Pr
       json(res, 400, { error: "invalid_grant", error_description: "リフレッシュトークンが無効です" });
       return;
     }
-    await issueTokens(res, previous.clientId, previous.scopes ?? []);
+    await issueTokens(res, previous.clientId, previous.scopes ?? [], previous.subject);
     return;
   }
 
@@ -436,10 +475,15 @@ export async function handleToken(req: IncomingMessage, res: ServerResponse): Pr
     return;
   }
 
-  await issueTokens(res, authCode.clientId, authCode.scopes ?? []);
+  await issueTokens(res, authCode.clientId, authCode.scopes ?? [], authCode.subject);
 }
 
-async function issueTokens(res: ServerResponse, clientId: string, scopes: string[]): Promise<void> {
+async function issueTokens(
+  res: ServerResponse,
+  clientId: string,
+  scopes: string[],
+  subject?: AuthorizedSubject,
+): Promise<void> {
   const accessToken = token();
   const refreshToken = token();
   const now = Date.now();
@@ -450,6 +494,7 @@ async function issueTokens(res: ServerResponse, clientId: string, scopes: string
     expiresAt: now + ACCESS_TOKEN_TTL_MS,
     refreshExpiresAt: now + REFRESH_TOKEN_TTL_MS,
     scopes,
+    ...(subject ? { subject } : {}),
     createdAt: new Date(now).toISOString(),
   });
   json(res, 200, {

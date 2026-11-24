@@ -240,7 +240,21 @@ export const DEFAULT_LANDING = "/map";
  * に載せると、ログイン直後に別サイトへ送り出す踏み台になる。
  */
 export function safeLanding(value: string | null | undefined): string {
-  return isSiteNavPath(value) ? value! : DEFAULT_LANDING;
+  return isSiteNavPath(value) || isOAuthAuthorizeReturn(value) ? value! : DEFAULT_LANDING;
+}
+
+/**
+ * MCPの認可画面（`/oauth/authorize?...`）へ戻る指定か（#905）。`mail:read` を求める認可は本人の
+ * ログインを挟むため、戻り先に認可のURLを載せる。**パスが `/oauth/authorize?` で始まる相対パスだけ**
+ * 許し、長さも絞る（Cookieに載せるため。外部URL・改行・バックスラッシュは通さない）。
+ */
+export function isOAuthAuthorizeReturn(value: string | null | undefined): boolean {
+  return (
+    typeof value === "string" &&
+    value.length <= 2000 &&
+    value.startsWith("/oauth/authorize?") &&
+    !/[\\\s]/.test(value)
+  );
 }
 
 /** 設定上そのエンドポイントが存在しない場合。サーバーの既定の404と同じ見た目にする。 */

@@ -19,6 +19,7 @@ import {
 import { hostStatusTool, serviceQuotasTool, uptimeMonitorsTool } from "./tools/ops.ts";
 import { connectionPermissionsTool } from "./tools/connection-permissions.ts";
 import { currentLocationTool } from "./tools/location.ts";
+import { mailGetTool, mailSearchTool } from "./tools/mail.ts";
 import { pingTool } from "./tools/ping.ts";
 import { printerStatusTool } from "./tools/printer.ts";
 import { roomButtonsTool, roomPressTool } from "./tools/room-control.ts";
@@ -79,6 +80,8 @@ export const READ_ONLY_TOOLS = [
   "aide_printer_status",
   "aide_room_buttons",
   "aide_current_location",
+  "aide_mail_search",
+  "aide_mail_get",
   "aide_weather",
   "aide_schedule",
   "aide_tasks",
@@ -152,6 +155,9 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(airconControlTool);
   // 現在地の最終測位（#715）。専用scope `location:read`。保存位置の書き込みはMCPには置かない。
   registry.register(currentLocationTool);
+  // 受信メールの検索・本文取得（#905）。読み取りだけ。専用scope `mail:read` と本人照合つき。送信・整理の道具は置かない。
+  registry.register(mailSearchTool);
+  registry.register(mailGetTool);
   registry.register(weatherTool);
   registry.register(scheduleTool);
   // 正式なNotionタスクはYoteiFlowの専用APIだけを通す。読み取りと書き込みはOAuth scopeも別。

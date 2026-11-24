@@ -193,7 +193,15 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
     return;
   }
   if (path === "/oauth/authorize" && (req.method === "GET" || req.method === "POST")) {
-    await handleAuthorize(req, res, url);
+    await handleAuthorize(req, res, url, {
+      // `mail:read` を求める認可で、ログイン中の本人（Googleログイン）を記録する（#905）。
+      async current(request) {
+        if (!supabaseAuthConfig) return null;
+        const session = await currentSession(request, loginOptions);
+        return session?.email && session.sub ? { sub: session.sub, email: session.email } : null;
+      },
+      loginPath: supabaseAuthConfig ? "/status/auth/start" : null,
+    });
     return;
   }
   if (path === "/oauth/token" && req.method === "POST") {
@@ -383,9 +391,10 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       res,
       baseUrl,
       access === "disabled"
-        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read", "salary-agent:read", "salary-agent:write", "worker-assignment:write"]
+        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read", "salary-agent:read", "salary-agent:write", "worker-assignment:write", "mail:read"]
         : (access.scopes ?? []),
       access === "disabled" ? DEV_AUTH_DISABLED_CLIENT_ID : access.clientId,
+      access === "disabled" ? null : (access.subject ?? null),
     );
     return;
   }
