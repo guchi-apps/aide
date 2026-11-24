@@ -42,7 +42,8 @@ import { bearerToken, secretMatches } from "./secret.ts";
  *
  * 認証は専用の共有シークレット `AIDE_MAIL_API_TOKEN`（issue-deckの共有トークン。取れなければ環境変数）。
  * 他の口のトークンとは共用しない。未設定なら503で閉じる。**本文・件名・差出人はログに出さない。**
- * MCPツールには出さない（README「Gmailを載せていない理由」の判断はMCP層について据え置き）。
+ * MCPには読み取り専用の2本（`aide_mail_search`・`aide_mail_get`。#905）だけを出し、整理・送信は出さない
+ * （README「Gmailを載せていない理由」。同じ `connectMailbox()` を使う）。
  */
 
 // ---- 取得元・一覧の条件（旧メール画面 `src/web/mail.ts` から移した。画面は #798 で廃止） ----

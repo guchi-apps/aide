@@ -111,6 +111,7 @@ export class McpTransport {
     baseUrl: string,
     scopes: readonly string[] = [],
     clientId: string | null = null,
+    subject: { sub: string; email: string } | null = null,
   ): Promise<void> {
     switch (req.method) {
       case "OPTIONS":
@@ -126,7 +127,7 @@ export class McpTransport {
         return;
       }
       case "POST":
-        await this.#handlePost(req, res, baseUrl, scopes, clientId);
+        await this.#handlePost(req, res, baseUrl, scopes, clientId, subject);
         return;
       default:
         res.writeHead(405, { Allow: "GET, POST, DELETE, OPTIONS", ...CORS_HEADERS }).end();
@@ -155,6 +156,7 @@ export class McpTransport {
     baseUrl: string,
     scopes: readonly string[],
     clientId: string | null,
+    subject: { sub: string; email: string } | null,
   ): Promise<void> {
     let payload: unknown;
     try {
@@ -196,7 +198,7 @@ export class McpTransport {
     const responses: JsonRpcResponse[] = [];
     for (const message of messages) {
       const startedAt = Date.now();
-      const response = await this.#dispatch(message, ctx, scopes, clientId);
+      const response = await this.#dispatch(message, ctx, scopes, clientId, subject);
       // 記録は待たない。ディスクへの書き込みでMCPの応答を遅らせる理由が無く、
       // 失敗しても応答は変わらない（src/mcp/access-log.ts）。
       void recordMcpAccess({
@@ -229,6 +231,7 @@ export class McpTransport {
     ctx: RpcContext,
     scopes: readonly string[],
     clientId: string | null,
+    subject: { sub: string; email: string } | null,
   ): Promise<JsonRpcResponse | null> {
     const { method, params, id } = message;
     const isNotification = id === undefined || id === null;
@@ -309,7 +312,7 @@ export class McpTransport {
 
         const args = (params?.["arguments"] ?? {}) as Record<string, unknown>;
         try {
-          return ok(compactToolResult(await tool.handler(args, { sessionId: ctx.sessionId, scopes, clientId })));
+          return ok(compactToolResult(await tool.handler(args, { sessionId: ctx.sessionId, scopes, clientId, subject })));
         } catch (cause) {
           // ツールの失敗はプロトコルエラーではなく、isError付きの結果として返す。
           // そうしないとClaudeが復旧できない。

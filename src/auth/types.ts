@@ -6,6 +6,15 @@ export interface OAuthClient {
   createdAt: string;
 }
 
+/**
+ * 認可したときにログインしていた本人（`mail:read` を求める認可だけが記録する。#905）。
+ * 値はSupabaseが検証した `sub` とメールアドレスで、クライアントの自己申告ではない。
+ */
+export interface AuthorizedSubject {
+  sub: string;
+  email: string;
+}
+
 /** 認可コード。ワンタイムかつ短命。 */
 export interface AuthCode {
   code: string;
@@ -16,6 +25,8 @@ export interface AuthCode {
   resource: string | null;
   /** クライアントが明示的に要求し、利用者が認可したMCPの権限。 */
   scopes?: string[];
+  /** 認可時にログインしていた本人。`mail:read` を付与したときだけ入る。 */
+  subject?: AuthorizedSubject;
   expiresAt: number;
 }
 
@@ -33,6 +44,8 @@ export interface AccessToken {
   refreshExpiresAt?: number;
   /** リフレッシュ後も変えない認可済みの権限。古いトークンは空配列として扱う。 */
   scopes?: string[];
+  /** 認可時の本人。リフレッシュ後も引き継ぐ。`mail:read` を持つ古いトークンには無い。 */
+  subject?: AuthorizedSubject;
   createdAt: string;
 }
 
