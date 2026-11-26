@@ -1049,9 +1049,13 @@ export const assetManagerCardWithdrawalsTool: Tool = {
   name: "asset_manager_card_withdrawals",
   description:
     "Asset Managerが持つ、今後のカード引き落とし予定（見込み）を返す。読み取り専用。" +
-    "予定ごとに、表示している額（amountJpy）・推計の額（estimatedAmountJpy）・出どころ（source: estimate=推計 / confirmed=メールの確定額で上書き済み）・" +
+    "予定ごとに、請求額（billedAmountJpy: 確定額があればそれ、無ければ引き落としの振替の額、それも無ければ推計）・" +
+    "引き落とし済みの額（paidAmountJpy）・これから引き落とされる残りの額（amountJpy = 請求額 − 済み額。口座の残高判定に使う額）・" +
+    "推計の額（estimatedAmountJpy）・出どころ（source: estimate=推計 / confirmed=メールの確定額で上書き済み）・" +
     "確定額の内容（confirmation）を含む。cards は設定がそろったカードの名前と id の対応、unmatchedConfirmations はどの予定にも当たらなかった確定額。" +
     "カード会社のメールの確定額と見込みが食い違っていないかを確かめるときに呼ぶ。" +
+    "メールの額と比べるのは billedAmountJpy（引き落とし後は amountJpy が残りの0円などになるため、amountJpy と比べると食い違いと誤判定する）。" +
+    "billedAmountJpy が無い応答（Asset Manager が asset-manager#1653 より前）では amountJpy が請求額。" +
     "食い違いがあって確定額で上書きするときは、別ツール asset_manager_confirm_card_withdrawal を使う（このツールは書き込まない）。" +
     "days は今後何日分か（1〜62。省略時はAsset Managerの既定の30日）。",
   inputSchema: {
