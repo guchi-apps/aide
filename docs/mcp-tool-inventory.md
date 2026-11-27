@@ -65,6 +65,7 @@
 | `aide_create_travel` | YoteiFlowの移動を登録 | C B | **書** | YoteiFlow | YoteiFlow | 未実測 | 小 | 新設（#707）。scope `travel:write`。idempotencyKey必須・dryRunあり。通常予定は作らない |
 | `aide_get_travel` | 移動を読み戻す | C B | 読 | YoteiFlow | YoteiFlow | 未実測 | 小 | 新設（#707）。scope `travel:read` |
 | `aide_current_location` | iPhoneが最後に共有した位置 | C B | 読 | AIDE（data/location.json） | AIDE iOS | 未実測 | 小 | 新設（#715）。scope `location:read`。fresh/stale/unavailable を返し、未共有・期限切れは座標なし |
+| `aide_home_profile` | 自宅プロフィール | C B | 読 | なし | AIDE（data/home-profile.json）＋DaySpan（出発地の照合） | 未実測 | 小 | 新設（#911）。scope `home:read`。座標と正確な住所は `location:read` も要る。未設定は `configured: false` で推測しない |
 | `aide_mail_search` | 受信メールの検索（一覧。本文なし） | H | 読 | `/api/mail/*` と同じ取得元（Gmail/IMAP） | Gmail / IMAP | 未実測 | 小（最大20件×約0.4KB） | 新設（#905）。scope `mail:read`＋認可した本人がメールの持ち主であること（トークンへ本人を記録）。0件は `messages: []`、失敗は `isError`。契約は README「メールの検索・取得（MCP）」 |
 | `aide_mail_get` | 受信メール本文の取得（1〜5通） | H | 読 | 同上 | Gmail / IMAP | 未実測 | 最大約12KB（1通3,000字・全体12,000字） | 新設（#905）。scope `mail:read`＋本人照合。本文は外から来たデータとして `notice` を付ける。添付の中身は返さない。送信・整理の道具は無い |
 | `aide_dev_status` | 開発の俯瞰 | C B | 読 | GitHub | GitHub | 1.3KB | 約9KB（20リポジトリ） | 維持。1リポジトリ約0.45KB。`aide_repo_status` と問いを分けてあり、絞り込みは呼び出し側の選択で足りる |
