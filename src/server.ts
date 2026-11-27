@@ -41,6 +41,7 @@ import { buildToolRegistry } from "./mcp/catalog.ts";
 import { handleAasa } from "./web/aasa.ts";
 import { handleAsset } from "./web/assets.ts";
 import { handleFeaturesPage } from "./web/features.ts";
+import { HOME_SETTINGS_PATH, handleHomeSettingsPage, handleHomeSettingsSave } from "./web/home-settings.ts";
 import {
   currentSession,
   handleStatusAppAuthConsume,
@@ -136,6 +137,15 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
   }
   if (path === "/features" && (req.method === "GET" || req.method === "HEAD")) {
     await handleFeaturesPage(req, res, loginOptions);
+    return;
+  }
+  // 自宅プロフィールの設定（#911）。正本を書き換える口はここだけで、MCPからは読むだけ。
+  if (path === HOME_SETTINGS_PATH && (req.method === "GET" || req.method === "HEAD")) {
+    await handleHomeSettingsPage(req, res, loginOptions);
+    return;
+  }
+  if (path === HOME_SETTINGS_PATH && req.method === "POST") {
+    await handleHomeSettingsSave(req, res, loginOptions);
     return;
   }
   // 以前あった動作状況（→ ops-dashboard の「AIDE」タブ）と共通知識（→ IssueDeck）の画面。
@@ -391,7 +401,7 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       res,
       baseUrl,
       access === "disabled"
-        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read", "salary-agent:read", "salary-agent:write", "worker-assignment:write", "mail:read"]
+        ? ["tasks:read", "tasks:write", "work-reports:read", "work-reports:write", "review-agent:read", "review-agent:write", "kurashio-bills:read", "kurashio-bills:write", "kurashio-energy:read", "kurashio-energy:write", "travel:read", "travel:write", "location:read", "salary-agent:read", "salary-agent:write", "worker-assignment:write", "mail:read", "home:read"]
         : (access.scopes ?? []),
       access === "disabled" ? DEV_AUTH_DISABLED_CLIENT_ID : access.clientId,
       access === "disabled" ? null : (access.subject ?? null),

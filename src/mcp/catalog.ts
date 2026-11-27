@@ -61,6 +61,7 @@ import {
 } from "./tools/salary-agent.ts";
 import { researchDeskImportWeeklyReportTool } from "./tools/research-desk.ts";
 import { reportWorkTool, workReportsTool } from "./tools/work-reports.ts";
+import { homeProfileTool } from "./tools/home-profile.ts";
 
 /** 環境を一切変更しないツール。`readOnlyHint: true` を宣言する。迷うものは入れない（書き込み扱いが安全側）。 */
 export const READ_ONLY_TOOLS = [
@@ -80,6 +81,7 @@ export const READ_ONLY_TOOLS = [
   "aide_printer_status",
   "aide_room_buttons",
   "aide_current_location",
+  "aide_home_profile",
   "aide_mail_search",
   "aide_mail_get",
   "aide_weather",
@@ -155,6 +157,8 @@ export function buildToolRegistry(): ToolRegistry {
   registry.register(airconControlTool);
   // 現在地の最終測位（#715）。専用scope `location:read`。保存位置の書き込みはMCPには置かない。
   registry.register(currentLocationTool);
+  // 自宅プロフィール（#911）。専用scope `home:read`。書き込みはMCPに置かず、設定画面だけが行う。
+  registry.register(homeProfileTool);
   // 受信メールの検索・本文取得（#905）。読み取りだけ。専用scope `mail:read` と本人照合つき。送信・整理の道具は置かない。
   registry.register(mailSearchTool);
   registry.register(mailGetTool);

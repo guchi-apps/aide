@@ -305,6 +305,16 @@ ${ARRIVE_KEYFRAMES("arrive-again")}
 .draft pre{margin:0;padding:.55rem .7rem;background:var(--panel-2);border:1px solid var(--line-2);font-family:${FONT_MONO};font-size:.74rem;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
 .draft-actions{margin:.8rem 0 0;display:flex;flex-wrap:wrap;gap:.5rem;justify-content:flex-end}
 
+/* ---- 設定フォーム（自宅プロフィール。#911） ---- */
+.settings{display:flex;flex-direction:column;gap:.9rem}
+.fields,.route{display:grid;gap:.6rem;grid-template-columns:repeat(auto-fit,minmax(min(13rem,100%),1fr))}
+.route{margin:0;min-width:0;padding:.5rem .7rem .7rem;border:1px solid var(--line-2)}
+.route legend{font-size:.78rem;color:var(--muted);padding:0 .3rem}
+.settings label{display:flex;flex-direction:column;justify-content:flex-end;gap:.2rem;font-size:.78rem;color:var(--muted);min-width:0}
+.settings input,.settings select{font:inherit;font-size:1rem;width:100%;min-height:2.5rem;padding:.4rem .6rem;
+ background:var(--panel-2);color:var(--ink);border:1px solid var(--line)}
+.saved{margin:0;padding:.55rem .7rem;background:var(--ok-bg);border-left:3px solid var(--ok);font-size:.86rem}
+
 /* ---- ログイン（画面のログイン・接続の許可） ---- */
 body.centered{justify-content:center;align-items:center;padding:2rem 1rem}
 .box{background:var(--panel);border:1px solid var(--line);padding:1.6rem 1.4rem;width:100%;
@@ -333,11 +343,12 @@ export interface NavItem {
 }
 
 /** ヘッダーのナビに並べる画面。ページを増やしたらここへ足す。 */
-export type NavKey = "map" | "features";
+export type NavKey = "map" | "features" | "home";
 
 const NAV: { key: NavKey; href: string; label: string }[] = [
   { key: "map", href: "/map", label: "アプリ連携" },
   { key: "features", href: "/features", label: "機能一覧" },
+  { key: "home", href: "/settings/home", label: "自宅" },
 ];
 
 /**
