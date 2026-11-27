@@ -112,6 +112,7 @@ export const CALLERS: Caller[] = [
       "aide_aircon_control",
       "aide_weather",
       "aide_current_location",
+      "aide_home_profile",
       "aide_mail_search",
       "aide_mail_get",
       "aide_schedule",

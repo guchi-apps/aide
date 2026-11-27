@@ -86,6 +86,12 @@ export const ENDPOINTS: FeatureItem[] = [
       "アプリ連携の「機能を同期」で見つけた差から、図を直すIssueを起票する。本文は同期し直して組み立て、画面からの入力は使わない。ログインが要る。結果は /map へ戻して出す。",
   },
   {
+    name: "/settings/home",
+    meta: "GET / POST",
+    description:
+      "自宅プロフィールの設定画面。エリア・自宅からの区間と所要時間・出発の余裕時間などを登録する（aide_home_profile が返す正本）。POSTは同じオリジンからの保存だけを受ける。ログインが要る。",
+  },
+  {
     name: "/status/auth/start",
     meta: "GET",
     description: "画面のGoogleログインを始める。Supabase経由でGoogleへ送り出す。",

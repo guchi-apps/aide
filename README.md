@@ -657,6 +657,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | ツール | 内容 |
 |---|---|
 | `aide_ping` | 疎通確認。サーバー時刻・セッションIDに加え、応答中プロセスの本体バージョン（`serverVersion`。`initialize` の `serverInfo.version` と同じ値）と起動時刻（`startedAt`・UTC）を返す。本番のバージョン確認・再起動の確認にも使う |
+| `aide_home_profile` | 利用者が設定画面で登録した自宅プロフィール（エリア・自宅からの区間と所要時間・出発の余裕時間）。未設定は `configured: false` で、推測値は返さない。scope `home:read`（座標と正確な住所は `location:read` も必要。詳細は[自宅プロフィール](#自宅プロフィール911)） |
 | `aide_connection_permissions` | 現在のMCP接続に付与されたOAuth scopeの診断（読み取り専用・scope不要）。**そのリクエストの認証結果**から `authMode`（`oauth` / `auth-disabled`）・付与済み `scopes`・`work-reports:read`/`write` 等の有無（`checks`）を返す。サーバーの対応scope一覧や要求scope、別接続の権限は返さず、入力も取らない。`authMode=auth-disabled` は開発用の認証無効起動で、全権限を仮置きしているだけでOAuthの付与ではない。scopeを判定できないときは `status=indeterminate` かつ `isError` で返し、未許可とは区別する。ツールが一覧に出ないのにscopeがある場合は、ツール公開・登録情報側の問題と切り分けられる |
 | `aide_balances` | いま持っているお金。銀行・電子マネー等の残高一覧、証券口座ごとの保有銘柄、連携口座のZaim側の最終更新。**キャッシュを読むだけ**（取得時刻と経過分数を併せて返す） |
 | `aide_fixed_costs` | 毎月出ていく固定費（サブスク・保険・税金・分割払いなど）。通貨別・支払方法別・家計簿の口座別の月額合計、契約ごとの明細、31日以内の支払予定。Asset Manager を都度叩く |
@@ -3736,6 +3737,29 @@ AIDEのOAuthは従来パスワードだけで、認可した本人を持たな�
 
 デプロイ後に人が `hermes -p morrow mcp login aide` で繋ぎ直し、`mail:read` を許可する（Morrow側の手作業。Hermesは
 `scopes_supported` を全部求めるので、繋ぎ直せば付く）。接続の権限は `aide_connection_permissions` の `mail:read` で確かめられる。
+
+## 自宅プロフィール（#911）
+
+出発時刻の計算に使う自宅の登録情報。**正本はAIDEのサーバーの `data/home-profile.json`（0600・gitignore済み）**で、
+書き込むのは設定画面 `/settings/home`（ログインが要る。POSTは同じオリジンだけ）だけ。MCP `aide_home_profile` は読むだけで、
+**初期値は持たず、現在地の逆引きや過去の移動から推測もしない**。全部を空にして保存すると未設定へ戻る。
+
+| 項目 | 内容 |
+|---|---|
+| `label` | 呼び名（既定 `自宅`） |
+| `area` | `prefecture`・`city`・`town`・`postalCode`（すべて任意） |
+| `exactAddress` / `coordinates` | 任意。出発時刻の計算には通常使わない |
+| `accessRoutes[]` | `to`（移動の `origin` と**完全一致**）・`mode`（`CAR` / `PUBLIC_TRANSIT` / `WALK` / `OTHER`）・`typicalMinutes`・`bufferMinutes`・`priority`（小さいほど優先） |
+| `departurePreferences` | `defaultBufferMinutes`・`stationArrivalBufferMinutes`・`rainExtraMinutes` |
+| `updatedAt` / `version` | 保存のたびに更新。`version` は画面の行き違い（上書き）の防止にも使う |
+
+- 応答は `checkedAt`・`configured`・`complete`・`problems`・`profile`・`updatedAt`。`configured: false` は「自宅が無い」ではなく**未設定**
+- `complete` は、都道府県と市区町村・区間1件以上・`defaultBufferMinutes` がそろった状態
+- `problems` には不足のほか、今後7日の各日で**最初の移動**の `origin` に一致する `accessRoutes[].to` が無いことも載る
+  （`origin` が `自宅`・`label` の移動は対象外。DaySpanを読めないときは「照合していない」と載る）
+- **権限**: `home:read` が必要。`exactAddress` と `coordinates` は `location:read` もある接続にだけ返し、それ以外はエリア
+  （町域・郵便番号を含む）まで。既存の接続には付かないので、`home:read` を要求して再認可する
+- **プライバシー**: 住所・座標は通知・日次ブリーフ・ログに含めない（保存のログは版番号だけ。MCPのアクセス記録は引数と応答を残さない）
 
 ## 位置共有（iOS → AIDE → MCP、#715）
 

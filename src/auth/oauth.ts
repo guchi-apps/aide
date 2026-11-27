@@ -50,6 +50,8 @@ export const WORKER_ASSIGNMENT_WRITE_SCOPE = "worker-assignment:write";
  * 付与する（認可時にGoogleログインの本人をトークンへ記録する。`AuthorizedSubject`）。
  */
 export const MAIL_READ_SCOPE = "mail:read";
+/** 自宅プロフィール（#911）。読み取り専用。座標と正確な住所は `location:read` も要る。 */
+export const HOME_READ_SCOPE = "home:read";
 const SUPPORTED_SCOPES = new Set([
   TASK_READ_SCOPE,
   TASK_WRITE_SCOPE,
@@ -68,6 +70,7 @@ const SUPPORTED_SCOPES = new Set([
   SALARY_AGENT_WRITE_SCOPE,
   WORKER_ASSIGNMENT_WRITE_SCOPE,
   MAIL_READ_SCOPE,
+  HOME_READ_SCOPE,
 ]);
 
 /**
