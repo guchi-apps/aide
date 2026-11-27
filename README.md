@@ -711,7 +711,7 @@ ClaudeアプリのカスタムコネクタにこのURLを登録する。**末尾
 | `asset_manager_add_subscription_price` | Asset Managerの既存サブスクへ料金改定を履歴として追加する。**書き込みツール**（作成のみ。既存料金を上書き・削除しない） |
 | `asset_manager_update_subscription` | Asset Managerの既存契約の項目（名前・支払方法・ラベル・メモ・開始日・終了日・自動更新・解約予定）を、指定した項目だけ編集する。**書き込みツール**（条件3の例外。削除なし。契約IDと名前の両方が一致しないと変更しない。変更前後を返す） |
 | `asset_manager_record_subscription_cancellation` | 契約へ解約情報（検討中／事業者での手続き完了＝自動更新停止＋終了日＋メモ追記）を記録する。**書き込みツール**（条件3の例外。台帳の記録だけで事業者の契約は変更しない） |
-| `asset_manager_card_withdrawals` | Asset Managerのカード引き落とし見込み（今後`days`日・既定30日）。予定ごとの見込み額・推計額・出どころ（推計／メールの確定額）・確定額の内容を返す。**読み取り専用**（Morrowがメールの確定額との食い違いを検出するために呼ぶ。#855） |
+| `asset_manager_card_withdrawals` | Asset Managerのカード引き落とし見込み（今後`days`日・既定30日）。予定ごとの請求額（`billedAmountJpy`）・引き落とし済みの額（`paidAmountJpy`）・残りの額（`amountJpy`＝請求額−済み額）・推計額・出どころ（推計／メールの確定額）・確定額の内容を返す。**読み取り専用**（Morrowがメールの確定額との食い違いを検出するために呼ぶ。#855）。**メールの額と比べるのは`billedAmountJpy`**で、`amountJpy`は引き落とし後に残りの額（0円など）へ変わる（asset-manager#1653。#909） |
 | `asset_manager_confirm_card_withdrawal` | メールの確定額でカード引き落とし見込みを上書きする。**書き込みツール**（冪等キーは`sourceKey`＝メールのMessage-ID。同じ`sourceKey`・同じ内容の再送は何も変えず、内容が違えば409で拒否し、同じカード・同じ引き落とし日に別の`sourceKey`なら新しいほうで上書きして前の額を返す。入力は固定の項目だけ。元の見込みへ戻す操作はこのツールに無い。Asset Manager側は`POST /api/card-withdrawals`。#855） |
 | `aide_research_desk_import_weekly_report` | Research Deskへエクステリア事業・ロッカー事業・AI関連の業界情報を登録する。**ChatGPTスケジュール向けの書き込みツール**（1回あたり全体15件・1事業5件まで。重複判定・同一イベントの統合更新・冪等性はResearch Desk側が持つ） |
 
