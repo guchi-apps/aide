@@ -24,9 +24,11 @@ import {
 } from "../core/connectors/zaim/web-memo-edit.ts";
 import { normalizeReceiptRefreshInput } from "../core/connectors/zaim/receipt-refresh.ts";
 import {
+  ZAIM_ACCOUNT_REFRESH_PATH,
   ZAIM_MONEY_LIST_REFRESH_PATH,
   forwardReceiptRefresh,
 } from "../core/connectors/zaim/receipt-refresh-forward.ts";
+import { accountRefreshJobs } from "../worker/account-refresh-jobs.ts";
 import { moneyListRefreshJobs } from "../worker/money-list-refresh-jobs.ts";
 import { receiptRefreshJobs } from "../worker/receipt-refresh-jobs.ts";
 import { getSharedToken } from "../core/connectors/issue-deck/shared-tokens.ts";
@@ -572,6 +574,77 @@ export async function handleZaimMoneyListRefresh(
         kind: "job_not_found",
         retryable: true,
         message: "ジョブが見つかりません（期限切れか、worker のホスト（DeskMini／Mac mini）の受け口が再起動しました）。依頼し直してください。",
+      },
+    });
+    return;
+  }
+  json(res, 200, { ok: true, job });
+}
+
+/**
+ * `POST /api/zaim/online-accounts/refresh` / `GET /api/zaim/online-accounts/refresh/<jobId>`（#918）
+ *
+ * **Zaimの「データを更新する」（連携口座＝銀行・カード・証券からZaimへの反映）を押し、完了後に
+ * 明細一覧の取り直し（#863 と同じ処理）まで続ける。** Zaimの取引の登録・更新・削除はしないが、
+ * Zaimは押下を受けて各金融機関へ取得しに行く。
+ *
+ * 形は明細一覧の取り直し（`handleZaimMoneyListRefresh`）と同じ非同期。反映まで**最大45分**
+ * （通常40分以上）かかる。
+ *
+ * 1. `POST`（本文は不要）→ **202** と `job`（`status: "running"`）。実行中の再依頼は受付済みの `job`
+ *    （`deduplicated: true`）を返す。定期の更新・巡回・ほかのZaim画面操作と重なれば **429 `busy`**
+ * 2. `GET .../<jobId>` を読み、`job.status` が `succeeded` / `failed` になるまで待つ
+ *
+ * 成功は `job.status === "succeeded"`（`refreshedAt`・口座ごとの `result`）。明細一覧の取り直しの成否は
+ * `job.moneyList.status` で別に返る（更新は成功しているので、ジョブは失敗にしない）。
+ * 認証・中継は明細一覧の取り直しと同じ。
+ */
+export async function handleZaimAccountRefresh(
+  req: IncomingMessage,
+  res: ServerResponse,
+  jobId: string | null,
+): Promise<void> {
+  const method = jobId === null ? "POST" : "GET";
+  if (req.method !== method) {
+    res
+      .writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: method })
+      .end(JSON.stringify({ error: "method not allowed" }));
+    return;
+  }
+  if (!(await authorize(req, res, `${method} /api/zaim/online-accounts/refresh`))) return;
+
+  const upstream = zaimWebUpstreamUrl();
+  const secret = await resolveZaimWriteSecret();
+  if (upstream && req.headers[ZAIM_WEB_FORWARDED_HEADER] !== "1" && secret) {
+    const forwarded = await forwardReceiptRefresh(
+      jobId === null ? { method: "POST", body: {} } : { method: "GET", jobId },
+      { baseUrl: upstream, secret },
+      ZAIM_ACCOUNT_REFRESH_PATH,
+    );
+    json(res, forwarded.status, forwarded.body);
+    return;
+  }
+
+  if (jobId === null) {
+    const outcome = await accountRefreshJobs.submit();
+    if (!outcome.ok) {
+      json(res, outcome.failure.kind === "busy" ? 429 : 500, { ok: false, failure: outcome.failure });
+      return;
+    }
+    json(res, 202, { ok: true, job: outcome.job, deduplicated: outcome.deduplicated });
+    return;
+  }
+
+  const job = accountRefreshJobs.get(jobId);
+  if (!job) {
+    json(res, 404, {
+      ok: false,
+      failure: {
+        kind: "job_not_found",
+        retryable: true,
+        message:
+          "ジョブが見つかりません（期限切れか、サブPCの受け口が再起動しました）。更新ボタンは押された可能性があるため、" +
+          "押し直す前に明細一覧の取り直しで反映を確かめてください。",
       },
     });
     return;
