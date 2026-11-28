@@ -3072,6 +3072,7 @@ Zaimから読み直させる。**読むだけで、Zaimの取引の登録・更�
   巡回中の手動再取得は待たずに `busy` で断り、手動再取得中の巡回は最大5分待ってから始める。
   ログイン状態のファイルを2つのChromiumが同時に更新しない。持ち主が居ない・15分を超えたロックは奪う。
   **ほかのZaimジョブ（`zaim-sync`・`zaim-keep-alive`・`zaim-refresh`）はこのロックを取らない**
+  （`zaim-sync`・`zaim-refresh` は連携口座の更新依頼（#918）用の別のロックを持つ）
 - **成功結果の後続利用**: 成功（`complete`・`partial`）した内訳はVPSのキャッシュ `zaim-money-detail-<moneyId>` へ送る。
   `GET /api/money/transactions` は**同じ取引（id・日付・金額が一致）で定期巡回より新しい**ものだけを重ね、
   その行に `itemsFetchedAt`（手動再取得の時刻）を付ける。次の巡回が走れば巡回のほうが新しくなり、重ならない。
@@ -3114,6 +3115,34 @@ Zaimの画面を操作する権限なので登録口と同じ側に置いた）�
   `session_expired`（再試行不可）・`fetch_failed`・`internal`。`GET` が404 `job_not_found` なら依頼し直す
 - **競合**: 巡回・商品内訳の再取得と `data/zaim/screen.lock` を取り合い、待たずに `busy` で断る
   （巡回側は取り直し中なら最大5分待つ）
+
+#### 連携口座の更新（`POST /api/zaim/online-accounts/refresh`・#918）
+
+Zaimの「データを更新する」（連携口座＝銀行・カード・証券からZaimへの反映）を定期の `zaim-refresh` を
+待たずに押し、**完了後に明細一覧の取り直し（上の #863 と同じ処理）まで続ける**。形・認証
+（`AIDE_ZAIM_WRITE_SECRET`）・中継（VPS→サブPC）・`subpc_*` の502は明細一覧の取り直しと同じ。
+
+1. `POST /api/zaim/online-accounts/refresh`（本文は不要）→ **202** と `job`（`status: "running"`）。実行中の
+   再依頼は受付済みの `job`（`deduplicated: true`）を返す。受付は成功ではない
+2. `GET /api/zaim/online-accounts/refresh/<jobId>` を1分おき程度で読み、`job.status` が `succeeded` / `failed` に
+   なるまで待つ。**反映まで通常40分以上、上限は約50分**（そのあと明細一覧の取り直しが数分）。
+   `job.phase` は `refreshing`（更新の反映待ち）→ `syncing_money_list`（明細一覧の取り直し中）
+
+- 成功は `job.status === "succeeded"`。`refreshedAt`（更新の完了時刻）・`result`（`pressed`・`waitedMs`・
+  `timedOut`・口座ごとの `name`／`lastUpdatedAt`／`previousLastUpdatedAt`／`advanced`）が入る。
+  `advanced: false` の口座は反映されなかった口座
+- 明細一覧の取り直しは `job.moneyList` に別で返す。`status: "succeeded"`（`fetchedAt`・`entryCount`・`months`・
+  `failedMonths`）なら `GET /api/money/transactions` が更新済み。`status: "failed"` のときは更新は済んでいるので、
+  **押し直さずに** `POST /api/zaim/money-list/refresh` を呼ぶ。残高（`zaim-sync` のキャッシュ）はこの口では
+  取り直さない
+- 失敗は `job.failure.kind`: `session_expired`（再試行不可）・`fetch_failed`・`internal`
+- **競合**: 定期の `zaim-refresh`・`zaim-sync`・`zaim-money-sync`・受け口の別のZaim操作（登録・編集・
+  取り直し）が実行中なら、受付時に **429 `busy`**。定期の `zaim-refresh` とは `data/zaim/refresh.lock` を
+  取り合い、依頼の実行中に定期の時刻が来た場合は定期側が押下を見送る。**反映待ちの間は画面ロックを
+  持たない**ので、登録・編集・取り直し・巡回は止まらない（明細一覧を取り直す数分だけ `busy` になる）
+- `GET` が404 `job_not_found` のときは、期限（完了から1時間）か受け口の再起動（`self-update` を含む）で
+  消えている。**ボタンは押された可能性がある**ので、先に明細一覧の取り直しで確かめる
+- 反映の順序: サブPC（`develop` の取り込み後に受け口が再起動）が先、VPS（`main`）が後
 
 ### キャッシュを素で返さない理由
 

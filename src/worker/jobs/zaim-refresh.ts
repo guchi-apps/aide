@@ -1,4 +1,9 @@
 import { refreshZaimOnlineAccounts } from "../../core/connectors/zaim/refresh.ts";
+import {
+  ZAIM_REFRESH_FILE_LOCK_MAX_AGE_MS,
+  ZAIM_REFRESH_FILE_LOCK_PATH,
+  tryAcquireZaimScreenFileLock,
+} from "../../core/connectors/zaim/screen-file-lock.ts";
 
 /**
  * Zaimの連携口座を一括更新する。
@@ -14,8 +19,24 @@ import { refreshZaimOnlineAccounts } from "../../core/connectors/zaim/refresh.ts
  * **更新漏れの判定はここでは行わない。** 押した直後に読める「最終更新」は、反映が遅い
  * 口座（SBI証券など・約35分）をまだ含んでいない。判定は反映後に走る `zaim-sync` に置く
  * （#178。理由は `jobs/zaim-sync.ts` の `isFinalSyncOfDay`）。
+ *
+ * 手動の更新依頼（#918）が実行中なら、二重に押さないよう押下を見送る。
  */
 export async function runZaimRefresh(): Promise<string> {
+  const lock = await tryAcquireZaimScreenFileLock(
+    Date.now,
+    ZAIM_REFRESH_FILE_LOCK_PATH,
+    ZAIM_REFRESH_FILE_LOCK_MAX_AGE_MS,
+  );
+  if (!lock) return "手動の「データを更新する」が実行中のため、押下を見送った";
+  try {
+    return await pressAndSummarize();
+  } finally {
+    await lock.release().catch(() => undefined);
+  }
+}
+
+async function pressAndSummarize(): Promise<string> {
   const result = await refreshZaimOnlineAccounts();
 
   if (result.accounts.length === 0) {

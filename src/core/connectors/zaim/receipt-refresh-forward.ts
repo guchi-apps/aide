@@ -21,6 +21,9 @@ export const ZAIM_RECEIPT_REFRESH_PATH = "/api/zaim/receipt-detail/refresh";
 
 export const ZAIM_MONEY_LIST_REFRESH_PATH = "/api/zaim/money-list/refresh";
 
+/** 連携口座の「データを更新する」（#918）。 */
+export const ZAIM_ACCOUNT_REFRESH_PATH = "/api/zaim/online-accounts/refresh";
+
 /** ジョブ1件の状態を読むパスから、ジョブIDを取り出す。 */
 export function receiptRefreshJobId(path: string): string | null {
   return refreshJobId(path, ZAIM_RECEIPT_REFRESH_PATH);
@@ -29,6 +32,11 @@ export function receiptRefreshJobId(path: string): string | null {
 /** 明細一覧の取り直し（#863）のジョブIDを取り出す。 */
 export function moneyListRefreshJobId(path: string): string | null {
   return refreshJobId(path, ZAIM_MONEY_LIST_REFRESH_PATH);
+}
+
+/** 連携口座の更新（#918）のジョブIDを取り出す。 */
+export function accountRefreshJobId(path: string): string | null {
+  return refreshJobId(path, ZAIM_ACCOUNT_REFRESH_PATH);
 }
 
 function refreshJobId(path: string, base: string): string | null {

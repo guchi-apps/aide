@@ -13,6 +13,7 @@ import { handleWorkerAssignment, handleWorkerClaim } from "./api/worker-assignme
 import { loadAssignment } from "./core/worker-assignment.ts";
 import { handleStatusApi, handleStatusApiChecks, type StatusApiOptions } from "./api/status.ts";
 import {
+  handleZaimAccountRefresh,
   handleZaimMoneyListRefresh,
   handleZaimReceiptRefresh,
   handleZaimRetiredApi,
@@ -21,7 +22,11 @@ import {
   handleZaimWebPayment,
   isRetiredZaimApiPath,
 } from "./api/zaim.ts";
-import { moneyListRefreshJobId, receiptRefreshJobId } from "./core/connectors/zaim/receipt-refresh-forward.ts";
+import {
+  accountRefreshJobId,
+  moneyListRefreshJobId,
+  receiptRefreshJobId,
+} from "./core/connectors/zaim/receipt-refresh-forward.ts";
 import { loadAuthConfig, resolveBaseUrl } from "./auth/config.ts";
 import {
   authorizationServerMetadata,
@@ -333,6 +338,21 @@ async function handle(req: Parameters<typeof handleAuthorize>[0], res: Parameter
       return;
     }
     await handleZaimMoneyListRefresh(req, res, jobId);
+    return;
+  }
+
+  // Zaimの「データを更新する」を依頼する口（#918）。形は上と同じ。
+  if (path === "/api/zaim/online-accounts/refresh") {
+    await handleZaimAccountRefresh(req, res, null);
+    return;
+  }
+  if (path.startsWith("/api/zaim/online-accounts/refresh/")) {
+    const jobId = accountRefreshJobId(path);
+    if (jobId === null) {
+      res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    await handleZaimAccountRefresh(req, res, jobId);
     return;
   }
 
