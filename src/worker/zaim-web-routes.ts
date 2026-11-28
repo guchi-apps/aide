@@ -2,14 +2,17 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   handleZaimWebGenreEdit,
   handleZaimWebMemoEdit,
+  handleZaimAccountRefresh,
   handleZaimMoneyListRefresh,
   handleZaimReceiptRefresh,
   handleZaimWebPayment,
   zaimWriteSecret,
 } from "../api/zaim.ts";
 import {
+  ZAIM_ACCOUNT_REFRESH_PATH,
   ZAIM_MONEY_LIST_REFRESH_PATH,
   ZAIM_RECEIPT_REFRESH_PATH,
+  accountRefreshJobId,
   moneyListRefreshJobId,
   receiptRefreshJobId,
 } from "../core/connectors/zaim/receipt-refresh-forward.ts";
@@ -39,6 +42,8 @@ export type ZaimWebRoute =
   | "receipt-refresh-job"
   | "money-list-refresh"
   | "money-list-refresh-job"
+  | "account-refresh"
+  | "account-refresh-job"
   | "not-found";
 
 /**
@@ -62,6 +67,9 @@ export function routeZaimWeb(path: string): ZaimWebRoute {
   // 明細一覧の取り直し（#863）。同じ画面・ログイン状態を使うので、同じ受け口で受ける。
   if (path === ZAIM_MONEY_LIST_REFRESH_PATH) return "money-list-refresh";
   if (moneyListRefreshJobId(path) !== null) return "money-list-refresh-job";
+  // 連携口座の更新（#918）。
+  if (path === ZAIM_ACCOUNT_REFRESH_PATH) return "account-refresh";
+  if (accountRefreshJobId(path) !== null) return "account-refresh-job";
   return "not-found";
 }
 
@@ -131,6 +139,12 @@ export async function handleZaimWebRequest(
       return;
     case "money-list-refresh-job":
       await handleZaimMoneyListRefresh(req, res, moneyListRefreshJobId(path));
+      return;
+    case "account-refresh":
+      await handleZaimAccountRefresh(req, res, null);
+      return;
+    case "account-refresh-job":
+      await handleZaimAccountRefresh(req, res, accountRefreshJobId(path));
       return;
     default:
       res.writeHead(404, { "Content-Type": "text/plain" }).end("not found\n");

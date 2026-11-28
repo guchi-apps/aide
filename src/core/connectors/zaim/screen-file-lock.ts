@@ -21,6 +21,23 @@ export const ZAIM_SCREEN_FILE_LOCK_MAX_AGE_MS = 15 * 60_000;
 /** 既定の置き場。`data/` は gitignore 済み（ログイン状態のファイルと同じ場所）。 */
 export const ZAIM_SCREEN_FILE_LOCK_PATH = resolve(DATA_DIR, "zaim/screen.lock");
 
+/**
+ * 「データを更新する」の押下から完了待ちまでを1つに絞るロック（#918）。定期の `zaim-refresh` と
+ * 手動の依頼（`worker/account-refresh-jobs.ts`）が取り合い、二重に押さない。
+ *
+ * **画面ロック（`screen.lock`）とは別に持つ。** 更新は最大45分待つため、画面ロックを握り続けると
+ * 巡回や明細一覧の取り直しがその間ずっと始められなくなる。
+ */
+export const ZAIM_REFRESH_FILE_LOCK_PATH = resolve(DATA_DIR, "zaim/refresh.lock");
+/** 更新1回の上限（`refresh.ts` の50分）より長く取る。 */
+export const ZAIM_REFRESH_FILE_LOCK_MAX_AGE_MS = 60 * 60_000;
+
+/**
+ * 残高の巡回（`zaim-sync`）が実行中である印（#918）。手動の更新依頼が巡回との重なりを断るために読む。
+ * 巡回はこのロックが取れなくても止まらない。
+ */
+export const ZAIM_SYNC_FILE_LOCK_PATH = resolve(DATA_DIR, "zaim/sync.lock");
+
 interface LockBody {
   pid: number;
   acquiredAt: number;
@@ -52,11 +69,12 @@ export interface ZaimScreenFileLock {
 
 /**
  * 取れたらロックを返す。他のプロセスが画面を使っていれば null（待たない）。
- * `now` はテスト用。
+ * `now` はテスト用。`maxAgeMs` はこれを超えて持たれたロックを奪ってよい上限。
  */
 export async function tryAcquireZaimScreenFileLock(
   now: () => number = Date.now,
   path: string = ZAIM_SCREEN_FILE_LOCK_PATH,
+  maxAgeMs: number = ZAIM_SCREEN_FILE_LOCK_MAX_AGE_MS,
 ): Promise<ZaimScreenFileLock | null> {
   await mkdir(dirname(path), { recursive: true });
 
@@ -87,7 +105,7 @@ export async function tryAcquireZaimScreenFileLock(
     const stale =
       unreadableForLong ||
       (holder !== null &&
-        (!processAlive(holder.pid) || now() - holder.acquiredAt > ZAIM_SCREEN_FILE_LOCK_MAX_AGE_MS));
+        (!processAlive(holder.pid) || now() - holder.acquiredAt > maxAgeMs));
     if (!stale) return null;
     await rm(path, { force: true });
   }

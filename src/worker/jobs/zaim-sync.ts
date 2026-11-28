@@ -1,5 +1,9 @@
 import { scrapeZaimSnapshot } from "../../core/connectors/zaim/index.ts";
 import { findStaleZaimAccounts } from "../../core/connectors/zaim/parse.ts";
+import {
+  ZAIM_SYNC_FILE_LOCK_PATH,
+  tryAcquireZaimScreenFileLock,
+} from "../../core/connectors/zaim/screen-file-lock.ts";
 import type { ZaimOnlineAccount } from "../../core/connectors/zaim/types.ts";
 import { notifyStaleAccounts } from "../notify.ts";
 import { publish } from "../sink.ts";
@@ -81,6 +85,16 @@ export function decideStaleAccountCheck(
  * サーバーがVPSで別マシンのため、HTTPで送る。
  */
 export async function runZaimSync(): Promise<string> {
+  // 実行中の印（#918）。手動の更新依頼が読むだけなので、取れなくても（作れなくても）巡回は進める。
+  const marker = await tryAcquireZaimScreenFileLock(Date.now, ZAIM_SYNC_FILE_LOCK_PATH).catch(() => null);
+  try {
+    return await scrapeAndPublish();
+  } finally {
+    await marker?.release().catch(() => undefined);
+  }
+}
+
+async function scrapeAndPublish(): Promise<string> {
   const snapshot = await scrapeZaimSnapshot();
   const destination = await publish(ZAIM_CACHE_KEY, "zaim", snapshot);
 
